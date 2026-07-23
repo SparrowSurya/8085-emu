@@ -79,7 +79,8 @@ class Data:
     @classmethod
     def ch(cls, c: str | bytes) -> Self:
         """Byte representing character."""
-        return cls(ord(c), DataSize.BIT)
+        val = c[0] if isinstance(c, bytes) else ord(c)
+        return cls(val, DataSize.BYTE)
 
     @classmethod
     def byte(cls, b1: int = 0) -> Self:
@@ -129,7 +130,7 @@ class Data:
 
     def reverse(self) -> Data:
         """Provides data with reversed byte order."""
-        if self.size == DataSize.BIT:
+        if self.size < 8:
             return Data(self.value, self.size)
         val = int.from_bytes(
             self.value.to_bytes(self.size // 8, "little"),
@@ -1508,6 +1509,9 @@ class CPU:
     intr: bool = field(init=False, default=False)
     """INTR maskable hardware interrupt pin."""
 
+    _is_inta_cycle: bool = field(init=False, default=False)
+    """Tracks if the current fetch is an INTA cycle."""
+
     _reg_src: RegisterRef = field(init=False, default_factory=lambda: RegisterRef())
     """Source (read) register to consider during execute."""
 
@@ -2573,7 +2577,7 @@ class CPU:
         if self.intr:
             self.intr = False
             self.inte = False
-            bus.inta = Data.on()
+            self._is_inta_cycle = True
             return False
 
         return False
@@ -2604,15 +2608,23 @@ class CPU:
 
         if self.t_state == 1:
             bus.reset()
-            bus.address = Mem(self.reg_pc.read().value)
-            self.reg_pc.increment()
+            if getattr(self, "_is_inta_cycle", False):
+                bus.inta = Data.on()
+            else:
+                bus.address = Mem(self.reg_pc.read().value)
+                self.reg_pc.increment()
             self.t_state += 1
         elif self.t_state == 2:
-            bus.mr = Data.on()
+            if not getattr(self, "_is_inta_cycle", False):
+                bus.mr = Data.on()
             self.t_state += 1
         elif self.t_state == 3:
             self.ireg.write(Opcode(bus.data.value))
-            bus.mr = Data.off()
+            if getattr(self, "_is_inta_cycle", False):
+                bus.inta = Data.off()
+                self._is_inta_cycle = False
+            else:
+                bus.mr = Data.off()
             self.t_state += 1
         elif self.t_state == 4:
             self._decode(bus)
@@ -3720,6 +3732,12 @@ class DeviceManager:
         elif bus.iow == 1:
             port = bus.address & 0xFF
             self.write_port(port, bus.data.value)
+        elif bus.inta == 1:
+            for device in self.devices:
+                val = device.on_inta()
+                if val != 0xFF:
+                    bus.data = Data(val, size=DataSize.BYTE)
+                    break
 
         for device in self.devices:
             device.tick(bus)
