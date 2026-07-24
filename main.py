@@ -1409,9 +1409,6 @@ class FlagRegister:
         self.update(self._mask_sign, value)
 
 
-class Interrupt:
-    int: str
-
 @dataclass(repr=False)
 class CPU:
     """Central processing unit."""
