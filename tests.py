@@ -3401,3 +3401,69 @@ class TestHardwareInterrupt(unittest.TestCase):
         machine.run()
 
         self.assertEqual(kbd.on_inta(), 0xD7)
+
+
+class TestLabels(unittest.TestCase):
+    """Tests for the instruction label referencing feature."""
+
+    def test_jmp_with_label(self):
+        machine = main.Machine.create(16, 8)
+        cpu = machine.cpu
+
+        # LOOP: DCR A
+        #       JNZ LOOP
+        #       HLT
+        program = main.Program([
+            main.Instruction(main.Opcode.MVI_A, main.Data.byte(5)),
+            main.Instruction(main.Opcode.DCR_A, label="LOOP"),
+            main.Instruction(main.Opcode.JNZ, "LOOP"),
+            main.Instruction(main.Opcode.HLT),
+        ])
+
+        machine.load(program, main.Mem(0x0000))
+        machine.run()
+
+        self.assertEqual(cpu.reg_a.value, 0)
+
+    def test_call_with_label(self):
+        machine = main.Machine.create(16, 8)
+        cpu = machine.cpu
+        cpu.reg_sp.write(0x1000)
+
+        #       CALL SUBR
+        #       HLT
+        # SUBR: MVI A, 0x77
+        #       RET
+        program = main.Program([
+            main.Instruction(main.Opcode.CALL, "SUBR"),
+            main.Instruction(main.Opcode.HLT),
+            main.Instruction(main.Opcode.MVI_A, main.Data.byte(0x77), label="SUBR"),
+            main.Instruction(main.Opcode.RET),
+        ])
+
+        machine.load(program, main.Mem(0x0000))
+        machine.run()
+
+        self.assertEqual(cpu.reg_a.value, 0x77)
+
+    def test_lxi_with_label(self):
+        machine = main.Machine.create(16, 8)
+        cpu = machine.cpu
+
+        #       LXI H, TARGET
+        #       HLT
+        # TARGET: NOP
+        program = main.Program([
+            main.Instruction(main.Opcode.LXI, "TARGET"),
+            main.Instruction(main.Opcode.HLT),
+            main.Instruction(main.Opcode.NOP, label="TARGET"),
+        ])
+
+        machine.load(program, main.Mem(0x0100))
+        machine.run()
+
+        # TARGET is the 3rd instruction.
+        # size of LXI is 3 bytes (loaded at 0x0100 -> 0x0100, 0x0101, 0x0102).
+        # size of HLT is 1 byte (loaded at 0x0103).
+        # TARGET is loaded at 0x0104.
+        self.assertEqual(cpu.pair_hl.value, 0x0104)

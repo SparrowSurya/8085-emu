@@ -3878,7 +3878,7 @@ class Machine:
 
     def load(self, program: Program, mem: Mem):
         """Loads the program in ram."""
-        self.ram.write_code(program.compile(), mem)
+        self.ram.write_code(program.compile(mem), mem)
         self.cpu.reg_pc.write(mem)
 
     def run(self):
@@ -3901,17 +3901,31 @@ class Instruction:
     opcode: Opcode
     """Instruction opcode."""
 
-    arg1: Mem | Data | None = None
-    """Represents first argument."""
+    arg1: Mem | Data | str | None = None
+    """Represents first argument (can be a direct value or a label name)."""
 
-    arg2: Mem | Data | None = None
+    arg2: Mem | Data | str | None = None
     """Represents second argument."""
+
+    label: str | None = None
+    """Optional label definition pointing to this instruction."""
 
     def __post_init__(self):
         if self.arg1 is None:
             assert(self.arg2 is None)
         if self.arg2 is not None:
             assert(self.arg1 is not None)
+
+    def get_size(self) -> int:
+        """Provides the instruction size in bytes."""
+        size = 1  # Opcode byte
+        for arg in (self.arg1, self.arg2):
+            if arg is not None:
+                if isinstance(arg, str) or isinstance(arg, int) or getattr(arg, 'size', None) == DataSize.WORD:
+                    size += 2
+                else:
+                    size += 1
+        return size
 
     def __repr__(self) -> str:
         values = ", ".join([
@@ -3929,18 +3943,35 @@ class Program:
     instructions: Sequence[Instruction]
     """Program instructions."""
 
-    def compile(self) -> MachineCode:
-        """Compiles the program into sequence of machine code."""
-        machine_code = []
+    def compile(self, start_mem: Mem = Mem(0)) -> MachineCode:
+        """Compiles the program into sequence of machine code resolving labels."""
+        symbol_table: dict[str, int] = {}
+        current_addr = int(start_mem)
 
+        # Pass 1: Build the symbol table mapping label names to absolute memory addresses.
+        for inst in self.instructions:
+            if inst.label is not None:
+                symbol_table[inst.label] = current_addr
+            current_addr += inst.get_size()
+
+        # Pass 2: Generate the machine code.
+        machine_code = []
         for inst in self.instructions:
             machine_code.append(Data(inst.opcode))
-            if inst.arg1 is None:
-                continue
+            for arg in (inst.arg1, inst.arg2):
+                if arg is None:
+                    continue
 
-            machine_code.append(inst.arg1)
-            if inst.arg2 is not None:
-                machine_code.append(inst.arg2)
+                if isinstance(arg, str):
+                    if arg not in symbol_table:
+                        raise ValueError(f"Undefined label reference: '{arg}'")
+                    resolved_addr = symbol_table[arg]
+                    # Convert to little-endian representation (low-byte first, then high-byte)
+                    # serialized as big-endian bytes in the emulator's data representation.
+                    resolved_arg = Data.words(resolved_addr & 0xFF, (resolved_addr >> 8) & 0xFF)
+                    machine_code.append(resolved_arg)
+                else:
+                    machine_code.append(arg)
 
         return machine_code
 

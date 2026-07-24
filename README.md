@@ -22,6 +22,7 @@ A high-fidelity, cycle-accurate 8085 microprocessor emulator built in Python. Th
 - **DMA Support:** Models standard `HOLD`/`HLDA` handshaking for direct bus takeover by high-speed peripherals.
 - **Peripheral Architecture:** Extensible I/O address mapping with support for status and data registers.
 - **Comprehensive Instruction Set:** Fully implements 8085 data transfer, logic, arithmetic, stack, branching, and control instructions.
+- **Label Referencing:** Supports defining labels (e.g. `label="LOOP"`) at any instruction and referencing them indirectly (e.g. `"LOOP"`) in branching/jumps (`JMP`, `CALL`, conditional jumps/calls) and register initialization (`LXI`), resolved via a double-pass compiler.
 
 ---
 
@@ -177,6 +178,45 @@ machine.ram.write(Mem(0x0100 + len(message)), Data.byte(0x00))
 machine.run()
 ```
 
+### Hello World with Instruction Labels
+Below is the same program rewritten to use the **Label Referencing** feature, eliminating the need to calculate absolute instruction offsets manually:
+
+```python
+from main import *
+
+printer = PrinterDevice(output_callback=lambda char: print(char, end=""))
+
+machine = Machine.create(
+    address_lines=16,
+    data_lines=8,
+    devices=[(printer, [0x02])]
+)
+
+# Define the assembly program using label string references
+program = Program([
+    Instruction(Opcode.LXI, "STR_DATA"),          # HL points to STR_DATA label
+    Instruction(Opcode.MOV_A_M, label="LOOP"),    # LOOP label at start of fetch
+    Instruction(Opcode.CPI, Data.byte(0x00)),
+    Instruction(Opcode.JZ, "EXIT"),               # Branch to EXIT label if null
+    Instruction(Opcode.OUT, Data.byte(0x02)),
+    Instruction(Opcode.INX_HL),
+    Instruction(Opcode.JMP, "LOOP"),              # Jump back to LOOP
+    Instruction(Opcode.HLT, label="EXIT"),        # EXIT label halts execution
+    Instruction(Opcode.NOP, label="STR_DATA")     # Data block pointer
+])
+
+machine.load(program, Mem(0x0000))
+
+# Load string Hello, World! at resolved memory location of STR_DATA (0x0010)
+str_addr = Mem(0x0010)
+message = b"Hello, World!\n"
+for i, val in enumerate(message):
+    machine.ram.write(Mem(str_addr + i), Data.byte(val))
+machine.ram.write(Mem(str_addr + len(message)), Data.byte(0x00))
+
+machine.run()
+```
+
 ---
 
 ## Runnable Examples
@@ -194,6 +234,8 @@ The `examples/` directory contains complete, runnable demonstrations of various 
 - **`printer_output.py`:** Writing character streams out to custom printer callback functions.
 - **`system_control_pins.py`:** Simulating hardware reset (`RESET_IN`/`RESET_OUT`) and wait state insertion (`READY`).
 - **`bcd_arithmetic.py`:** BCD addition and decimal adjust accumulator (`DAA`).
+- **`hello_world_labels.py`:** Outputs string to printer device using label references.
+- **`loop_multiplication_labels.py`:** Multiplies register B by C via addition loop controlled by label branch.
 
 To run any example:
 ```bash
@@ -215,6 +257,7 @@ To run a specific test class (e.g., `TestHardwareInterrupt` or `TestUSBDevice`):
 ```bash
 python3 -m unittest tests.TestHardwareInterrupt
 python3 -m unittest tests.TestUSBDevice
+python3 -m unittest tests.TestLabels
 ```
 
 ---
