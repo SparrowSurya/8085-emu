@@ -1,4 +1,4 @@
-from main import *
+from emu_8085 import Data, Instruction, Machine, Mem, Opcode, Program, USBDevice
 
 
 def main_run() -> None:

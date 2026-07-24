@@ -1,4 +1,4 @@
-from main import *
+from emu_8085 import Data, Instruction, Machine, Mem, Opcode, Program
 
 
 def main_run() -> None:
@@ -23,10 +23,10 @@ def main_run() -> None:
     ram.write(Mem(0x00B2), Data.byte(Opcode.HLT))
 
     program = Program([
-        Instruction(Opcode.CALL, Mem(0x00A0)),     # Call subroutine at 0x00A0
-        Instruction(Opcode.CPI, Data.byte(0x00)),   # CPI 0x00 (Sets Zero Flag since A=0)
-        Instruction(Opcode.JZ, Mem(0x00B0)),       # Jump if Zero to 0x00B0 (will jump)
-        Instruction(Opcode.HLT)                          # Should not be executed
+        Instruction(Opcode.CALL, Data.words(0xA0, 0x00)),     # Call subroutine at 0x00A0
+        Instruction(Opcode.CPI, Data.byte(0x00)),              # CPI 0x00 (Sets Zero Flag since A=0)
+        Instruction(Opcode.JZ, Data.words(0xB0, 0x00)),       # Jump if Zero to 0x00B0 (will jump)
+        Instruction(Opcode.HLT)                                # Should not be executed
     ])
 
     machine.load(program, Mem(0x0000))

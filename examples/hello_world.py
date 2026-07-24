@@ -1,4 +1,4 @@
-from main import *
+from emu_8085 import Data, Instruction, Machine, Mem, Opcode, Program, PrinterDevice
 
 
 def main_run() -> None:
@@ -16,16 +16,16 @@ def main_run() -> None:
     # This program reads characters starting at memory address 0x0100 and outputs
     # them to the printer device (port 0x02) until it encounters a null terminator (0x00).
     program = Program([
-        Instruction(Opcode.LXI_H, Mem(0x0100)), # HL points to start of string
+        Instruction(Opcode.MVI_HL, Data.words(0x00, 0x01)), # HL points to start of string (0x0100)
         # loop:
-        Instruction(Opcode.MOV_A_M),                 # Load character from memory to A
+        Instruction(Opcode.MOV_A_M),                 # Load character from memory to A (at address 0x0003)
         Instruction(Opcode.CPI, Data.byte(0x00)),# Compare character with null (0x00)
-        Instruction(Opcode.JZ, Mem(0x0013)),    # If zero, jump to HLT (address 0x0013)
+        Instruction(Opcode.JZ, Data.words(0x0F, 0x00)),    # If zero, jump to HLT (address 0x000F)
         Instruction(Opcode.OUT, Data.byte(0x02)),# Output character to printer port 0x02
-        Instruction(Opcode.INX_H),                   # Point HL to next memory location
-        Instruction(Opcode.JMP, Mem(0x0003)),    # Jump back to loop start (address 0x0003)
+        Instruction(Opcode.INX_HL),                   # Point HL to next memory location
+        Instruction(Opcode.JMP, Data.words(0x03, 0x00)),    # Jump back to loop start (address 0x0003)
         # end:
-        Instruction(Opcode.HLT)                      # Halt the CPU
+        Instruction(Opcode.HLT)                      # Halt the CPU (at address 0x000F)
     ])
 
     # 4. Load program at entry address 0x0000

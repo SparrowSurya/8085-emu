@@ -1,4 +1,4 @@
-from main import *
+from emu_8085 import Data, Instruction, Machine, Mem, Opcode, Program
 
 
 def main_run() -> None:
@@ -22,7 +22,7 @@ def main_run() -> None:
         Instruction(Opcode.JNZ, "LOOP"),           # If C != 0, JMP back to LOOP
 
         # Store result and halt
-        Instruction(Opcode.STA, Mem(0x0020)),
+        Instruction(Opcode.STA, Data.words(0x20, 0x00)),
         Instruction(Opcode.HLT)
     ])
 

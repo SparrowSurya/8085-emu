@@ -1,4 +1,4 @@
-from main import *
+from emu_8085 import Data, Instruction, Machine, Mem, Opcode, Program
 
 
 def main_run() -> None:
@@ -25,10 +25,10 @@ def main_run() -> None:
         Instruction(Opcode.MOV_A_M),            # MOV A, M (A reads from [HL] = 0x99)
         Instruction(Opcode.MVI_C, Data.byte(0x55)), # MVI C, 0x55
         Instruction(Opcode.MOV_M_C),            # MOV M, C (memory at [HL] becomes 0x55)
-        Instruction(Opcode.LDAX_D),             # LDAX D (Load Accumulator from memory at DE [0x3344])
-        Instruction(Opcode.STAX_B),             # STAX B (Store Accumulator to memory at BC [0xAA22])
-        Instruction(Opcode.LHLD, Mem(0x0200)), # LHLD 0x0200 (Load HL from memory 0x0200)
-        Instruction(Opcode.SHLD, Mem(0x0300)), # SHLD 0x0300 (Store HL to memory 0x0300)
+        Instruction(Opcode.LDA_DE),             # LDAX D (Load Accumulator from memory at DE [0x3344])
+        Instruction(Opcode.STA_BC),             # STAX B (Store Accumulator to memory at BC [0xAA22])
+        Instruction(Opcode.LHLD, Data.words(0x00, 0x02)), # LHLD 0x0200 (Load HL from memory 0x0200)
+        Instruction(Opcode.SHLD, Data.words(0x00, 0x03)), # SHLD 0x0300 (Store HL to memory 0x0300)
         Instruction(Opcode.XCHG),               # XCHG (Exchange HL and DE)
         Instruction(Opcode.HLT)
     ])

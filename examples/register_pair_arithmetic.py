@@ -1,4 +1,4 @@
-from main import *
+from emu_8085 import Data, Instruction, Machine, Mem, Opcode, Program
 
 
 def main_run() -> None:
@@ -18,10 +18,10 @@ def main_run() -> None:
     cpu.reg_l.write(Data.byte(0x00))
 
     program = Program([
-        Instruction(Opcode.INX_B),  # BC = 0x1235
-        Instruction(Opcode.DCX_D),  # DE = 0x000E
-        Instruction(Opcode.DAD_B),  # HL = HL + BC = 0x1000 + 0x1235 = 0x2235
-        Instruction(Opcode.DAD_D),  # HL = HL + DE = 0x2235 + 0x000E = 0x2243
+        Instruction(Opcode.INX_BC),  # BC = 0x1235
+        Instruction(Opcode.DCX_DE),  # DE = 0x000E
+        Instruction(Opcode.DAD_BC),  # HL = HL + BC = 0x1000 + 0x1235 = 0x2235
+        Instruction(Opcode.DAD_DE),  # HL = HL + DE = 0x2235 + 0x000E = 0x2243
         Instruction(Opcode.HLT)
     ])
 

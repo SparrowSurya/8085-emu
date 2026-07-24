@@ -1,4 +1,4 @@
-from main import *
+from emu_8085 import Data, Instruction, Machine, Mem, Opcode, Program
 
 
 def main_run() -> None:
@@ -24,9 +24,9 @@ def main_run() -> None:
     cpu.flag_reg.parity = 1
 
     program = Program([
-        Instruction(Opcode.PUSH_B),   # Stack [0x0FFE, 0x0FFF] = [0x22, 0x11], SP = 0x0FFE
+        Instruction(Opcode.PUSH_BC),   # Stack [0x0FFE, 0x0FFF] = [0x22, 0x11], SP = 0x0FFE
         Instruction(Opcode.PUSH_PSW), # Stack [0x0FFC, 0x0FFD] = [Flags, 0x55], SP = 0x0FFC
-        Instruction(Opcode.POP_D),    # Pop DE from PSW. D = 0x55, E = Flags, SP = 0x0FFE
+        Instruction(Opcode.POP_DE),    # Pop DE from PSW. D = 0x55, E = Flags, SP = 0x0FFE
         Instruction(Opcode.XTHL),     # Swap HL with top of stack (0x0FFE -> BC value [0x1122])
                                                 # HL becomes 0x1122, Stack at 0x0FFE becomes 0xAABB
         Instruction(Opcode.SPHL),     # SP = HL = 0x1122
