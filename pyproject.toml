@@ -19,7 +19,7 @@ ignore = []
 
 [tool.ruff.lint.per-file-ignores]
 "examples/*.py" = ["F403", "F405"]
-"tests.py" = ["E501"]
+"src/tests/*.py" = ["E501", "I"]
 "main.py" = ["E501"]
 
 [tool.hatch.build.targets.wheel]
@@ -28,4 +28,5 @@ packages = ["src/emu_8085"]
 [dependency-groups]
 dev = [
     "ruff>=0.15.22",
+    "pytest",
 ]

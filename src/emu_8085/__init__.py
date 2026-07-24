@@ -56,7 +56,7 @@ from .core import (
     Mem,
 )
 from .devices import KeyboardDevice, PrinterDevice, USBDevice
-from .hardware import Device, Machine, Memory
+from .hardware import Device, Machine, Memory, SystemBus
 from .program import Instruction, Opcode, Program
 
 __all__ = (
@@ -83,6 +83,7 @@ __all__ = (
     "Device",
     "Machine",
     "Memory",
+    "SystemBus",
     "Opcode",
     "Instruction",
     "Program",

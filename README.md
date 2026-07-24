@@ -239,25 +239,7 @@ The `examples/` directory contains complete, runnable demonstrations of various 
 
 To run any example:
 ```bash
-python3 examples/data_transfer.py
-```
-
----
-
-## Running the Test Suite
-
-All functions, CPU cycles, interrupts, and instructions are validated using a Python `unittest` test suite.
-
-To execute all tests, run:
-```bash
-python3 -m unittest tests.py
-```
-
-To run a specific test class (e.g., `TestHardwareInterrupt` or `TestUSBDevice`):
-```bash
-python3 -m unittest tests.TestHardwareInterrupt
-python3 -m unittest tests.TestUSBDevice
-python3 -m unittest tests.TestLabels
+uv run examples/data_transfer.py
 ```
 
 ---
