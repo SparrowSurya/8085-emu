@@ -23,7 +23,7 @@ ignore = []
 "main.py" = ["E501"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["."]
+packages = ["src/emu_8085"]
 
 [dependency-groups]
 dev = [
