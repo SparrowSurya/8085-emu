@@ -1159,6 +1159,14 @@ class Opcode(IntEnum):
     SIM = 0x30
     """Set Interrupt Mask from Accumulator A."""
 
+    @classmethod
+    def from_name(cls, name: str) -> Self:
+        """Provides opcode from opcode name."""
+        try:
+            return cls[name]
+        except KeyError:
+            raise ValueError(f"'{name}' is not a valid {cls.__name__} name")
+
     def __repr__(self) -> str:
         return f"Opcode(name={self.name}, value={int(self)})"
 
