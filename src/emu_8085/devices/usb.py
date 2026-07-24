@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from emu_8085.core import Data, Mem
+from emu_8085.hardware import Memory
 from emu_8085.hardware.cpu import MachineCycle
 from emu_8085.hardware.device import Device
 from emu_8085.hardware.machine import Machine
@@ -19,7 +20,7 @@ __all__ = (
 class USBDevice(Device):
     """USB peripheral device that can perform DMA memory reads and writes."""
 
-    buffer: bytearray = field(default_factory=bytearray)
+    memory: Memory = field(default_factory=lambda: Memory.from_lines(16))
 
     @property
     def name(self) -> str:
@@ -36,11 +37,12 @@ class USBDevice(Device):
         if bus.hlda == 1 or cpu.cycle == MachineCycle.HOLD:
             for i in range(length):
                 addr = start_addr + i
-                data_bytes.append(ram.read(Mem(addr)).value)
+                val = ram.read(Mem(addr))
+                data_bytes.append(val.value)
+                self.memory.write(Mem(i), val)
 
         bus.hold = Data.off()
         machine.tick()
-        self.buffer = data_bytes
         return bytes(data_bytes)
 
     def dma_write(self, machine: Any, start_addr: int, data: bytes | bytearray) -> None:
@@ -53,6 +55,7 @@ class USBDevice(Device):
             for i, byte_val in enumerate(data):
                 addr = start_addr + i
                 ram.write(Mem(addr), Data.byte(byte_val))
+                self.memory.write(Mem(i), Data.byte(byte_val))
 
         bus.hold = Data.off()
         machine.tick()

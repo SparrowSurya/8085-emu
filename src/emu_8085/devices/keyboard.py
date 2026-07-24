@@ -5,6 +5,8 @@ This module provides the keyboard device.
 
 from dataclasses import dataclass, field
 
+from emu_8085.core import Mem
+from emu_8085.hardware import Memory
 from emu_8085.hardware.device import Device
 
 __all__ = (
@@ -16,7 +18,9 @@ __all__ = (
 class KeyboardDevice(Device):
     """Keyboard peripheral device that captures ASCII key presses (0-127)."""
 
-    _buffer: list[int] = field(init=False, default_factory=list)
+    _memory: Memory = field(default_factory=lambda: Memory.from_lines(8))
+    _write_ptr: int = field(init=False, default=0)
+    _read_ptr: int = field(init=False, default=0)
     interrupt_vector: int | None = None
 
     @property
@@ -29,17 +33,25 @@ class KeyboardDevice(Device):
         ascii_code = ord(key) if isinstance(key, str) else key
         if not (0 <= ascii_code <= 127):
             raise ValueError(f"ASCII code out of range (0-127): {ascii_code}")
-        self._buffer.append(ascii_code)
+
+        next_write = (self._write_ptr + 1) % len(self._memory)
+        if next_write == self._read_ptr:
+            raise OverflowError("Keyboard buffer overflow")
+
+        self._memory.write(Mem(self._write_ptr), ascii_code)
+        self._write_ptr = next_write
 
     def port_read(self, port: int) -> int:
         """Reads the next ASCII key byte from the buffer if available, else 0x00."""
-        if self._buffer:
-            return self._buffer.pop(0)
+        if self._read_ptr != self._write_ptr:
+            val = self._memory.read(Mem(self._read_ptr)).value
+            self._read_ptr = (self._read_ptr + 1) % len(self._memory)
+            return val
         return 0x00
 
     def has_key(self) -> bool:
         """Returns True if there is a pending key in the buffer."""
-        return len(self._buffer) > 0
+        return self._read_ptr != self._write_ptr
 
     def on_inta(self) -> int:
         """Returns the RST n opcode for the configured interrupt vector (0-7)."""
