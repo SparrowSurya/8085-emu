@@ -148,6 +148,11 @@ class Data:
         """Qword data as combinations of 8 bytes."""
         return cls(b & 0xFFFF_FFFF_FFFF_FFFF, DataSize.QWORD)
 
+    @classmethod
+    def mem(cls, mem: Mem) -> Self:
+        """Creates data as LSB memory value from mem."""
+        return cls.words(mem & 0xFF, (mem >> 8) & 0xFF)
+
     def byte_at(self, b: int = 0) -> int:
         """Provides bytes value from position.."""
         return (self.value >> (b * 8)) & 0xFF
