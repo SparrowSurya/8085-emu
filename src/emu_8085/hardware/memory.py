@@ -4,8 +4,9 @@ This module provides memory hardware component.
 
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Self
+from typing import Iterable, Self
 
 from emu_8085.core import Data, DataSize, MachineCode, Mask, Mem
 
@@ -65,11 +66,26 @@ class Memory:
         elif bus.mw == 1:
             self.write(bus.address, bus.data)
 
-    def write_code(self, machine_code: MachineCode, mem: Mem):
-        """Write the code into memroy from location."""
+    def write_code(self, machine_code: MachineCode, mem: Mem) -> int:
+        """Write the code into memroy from location. Returns the bytes wrote."""
         i = int(mem)
         for code in machine_code:
             values = bytes(code)
             for j in range(len(values)):
                 self.write(Mem(i+j), values[j])
             i += len(values)
+        return i - int(mem)
+
+    def write_seq(self, seq: Data | Sequence[int] | str | bytes, mem: Mem) -> int:
+        """Writes the sequence into memory from location. Returns the bytes wrote."""
+        data: Iterable[int] = (
+            map(int, bytes(seq)) if isinstance(seq, Data)
+            else map(int, seq.encode('utf-8')) if isinstance(seq, str)
+            else map(int, seq)
+        )
+
+        i = int(mem)
+        for val in data:
+            self.write(Mem(i), val)
+            i += 1
+        return i - int(mem)
