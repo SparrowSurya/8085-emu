@@ -73,7 +73,7 @@ pub struct Cpu {
     pub(crate) work: Addr,
     /// 8-bit scratch latched mid-instruction (operand byte for RMW/MVI-M sequences).
     pub(crate) work8: u8,
-    /// IN-progress interrupt PC push: `(sp_after, pc_low, vector)`. The push spans two
+    /// In-progress interrupt PC push: `(sp_after, pc_low, vector)`. The push spans two
     /// T-states (high byte, then low byte + jump); `Some` means the second half is due.
     pub(crate) int_push: Option<(Addr, u8, Addr)>,
 }

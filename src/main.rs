@@ -11,4 +11,6 @@ fn main() {
 
     machine.load(&program, Addr::from_le(0xA0, 0x00)).unwrap();
     machine.run();
+
+    println!("Countdown finished: Register A = {}", machine.cpu.regs.a);
 }

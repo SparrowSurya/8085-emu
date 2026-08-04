@@ -2,6 +2,10 @@
 name = "emu8085"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.89"
+description = "A cycle accurate Intel 8085 microprocessor emulator"
+license = "MIT"
+repository = "https://github.com/sparrowsurya/8085-emu"
 
 [dependencies]
 thiserror = "2.0.19"
