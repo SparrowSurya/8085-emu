@@ -328,7 +328,7 @@ impl Cpu {
         if opcode == Some(Opcode::MVI_M) {
             return self.mvi_m_seq(bus, idx); // MVI M,d8
         }
-        if matches!(opcode, Some(Opcode::MVI_BC) | Some(Opcode::MVI_DE) | Some(Opcode::MVI_HL)) || b == 0x31 {
+        if matches!(opcode, Some(Opcode::MVI_BC) | Some(Opcode::MVI_DE) | Some(Opcode::MVI_HL) | Some(Opcode::LXI_SP)) {
             return self.lxi_seq(bus, idx);
         }
         if opcode == Some(Opcode::LDA) {
