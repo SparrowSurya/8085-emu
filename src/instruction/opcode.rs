@@ -41,8 +41,7 @@ pub enum Opcode {
     MVI_C = 0xe,
     /// Rotates register 'A' value right circular; updates Carry flag.
     RRC = 0xf,
-    /// Decimal adjusts register 'A' value after subtraction; updates status flags.
-    DAS = 0x10,
+
     /// Loads 16-bit immediate word into register pair 'DE'.
     MVI_DE = 0x11,
     /// Writes register 'A' value to memory address pointed by register pair 'DE'.
@@ -57,8 +56,7 @@ pub enum Opcode {
     MVI_D = 0x16,
     /// Rotates register 'A' value left through Carry flag; updates Carry flag.
     RAL = 0x17,
-    /// ASCII adjusts register 'A' value after addition; updates status flags.
-    AAA = 0x18,
+
     /// Adds register pair 'DE' to 'HL'; updates Carry flag only.
     DAD_DE = 0x19,
     /// Loads register 'A' with memory byte pointed by register pair 'DE'.
@@ -89,8 +87,7 @@ pub enum Opcode {
     MVI_H = 0x26,
     /// Decimal adjusts register 'A' value after addition; updates status flags.
     DAA = 0x27,
-    /// ASCII adjusts register 'A' value after subtraction; updates status flags.
-    AAS = 0x28,
+
     /// Adds register pair 'HL' to 'HL'; updates Carry flag only.
     DAD_HL = 0x29,
     /// Loads register pair 'HL' directly with 16-bit data from memory address.
@@ -530,7 +527,7 @@ impl Opcode {
             0xd => Opcode::DCR_C,
             0xe => Opcode::MVI_C,
             0xf => Opcode::RRC,
-            0x10 => Opcode::DAS,
+
             0x11 => Opcode::MVI_DE,
             0x12 => Opcode::STA_DE,
             0x13 => Opcode::INX_DE,
@@ -538,7 +535,7 @@ impl Opcode {
             0x15 => Opcode::DCR_D,
             0x16 => Opcode::MVI_D,
             0x17 => Opcode::RAL,
-            0x18 => Opcode::AAA,
+
             0x19 => Opcode::DAD_DE,
             0x1a => Opcode::LDA_DE,
             0x1b => Opcode::DCX_DE,
@@ -554,7 +551,7 @@ impl Opcode {
             0x25 => Opcode::DCR_H,
             0x26 => Opcode::MVI_H,
             0x27 => Opcode::DAA,
-            0x28 => Opcode::AAS,
+
             0x29 => Opcode::DAD_HL,
             0x2a => Opcode::LHLD,
             0x2b => Opcode::DCX_HL,
