@@ -316,4 +316,20 @@ mod tests {
         }
         assert_eq!(cpu.regs.pc, pc_before);
     }
+
+    #[test]
+    fn lxi_sp_loads_stack_pointer_immediate() {
+        // LXI SP, 0x1234 (10T) ; HLT (4T) -> SP == 0x1234, 14 T-states total
+        let (cpu, _m, ticks) = run(&[0x31, 0x34, 0x12, 0x76]);
+        assert_eq!(cpu.regs.sp.0, 0x1234);
+        assert_eq!(ticks, 14);
+    }
+
+    #[test]
+    fn mov_aa_is_noop_in_four_tstates() {
+        // MVI A, 0x5A (7T) ; MOV A, A (4T) ; HLT (4T) -> A unchanged, 15 T-states
+        let (cpu, _m, ticks) = run(&[0x3E, 0x5A, 0x7F, 0x76]);
+        assert_eq!(cpu.regs.a, 0x5A);
+        assert_eq!(ticks, 15);
+    }
 }

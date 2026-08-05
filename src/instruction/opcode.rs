@@ -107,6 +107,8 @@ pub enum Opcode {
     CMA = 0x2f,
     /// Set Interrupt Mask from Accumulator A.
     SIM = 0x30,
+    /// LXI SP, d16 — load the stack pointer with a 16-bit immediate.
+    LXI_SP = 0x31,
     /// Writes register 'A' value directly to a 16-bit immediate memory address.
     STA = 0x32,
     /// Increments stack pointer 'SP' by 1; status flags are unchanged.
@@ -259,6 +261,8 @@ pub enum Opcode {
     MOV_AL = 0x7d,
     /// Copies memory byte pointed by 'HL' into register 'A'.
     MOV_AM = 0x7e,
+    /// MOV A, A — copy A into A (a one-cycle no-op).
+    MOV_AA = 0x7F,
     /// Adds register 'B' value to register 'A'; updates all status flags.
     ADD_B = 0x80,
     /// Adds register 'C' value to register 'A'; updates all status flags.
@@ -559,6 +563,7 @@ impl Opcode {
             0x2e => Opcode::MVI_L,
             0x2f => Opcode::CMA,
             0x30 => Opcode::SIM,
+            0x31 => Opcode::LXI_SP,
             0x32 => Opcode::STA,
             0x33 => Opcode::INX_SP,
             0x34 => Opcode::INR_M,
@@ -635,6 +640,7 @@ impl Opcode {
             0x7c => Opcode::MOV_AH,
             0x7d => Opcode::MOV_AL,
             0x7e => Opcode::MOV_AM,
+            0x7F => Opcode::MOV_AA,
             0x80 => Opcode::ADD_B,
             0x81 => Opcode::ADD_C,
             0x82 => Opcode::ADD_D,
