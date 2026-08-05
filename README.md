@@ -12,10 +12,10 @@ but its observable behavior is verified against the reference.
 use emu8085::{Addr, Instruction, Machine, Opcode, Operand, Program};
 
 let program = Program::new(vec![
-    Instruction::with(Opcode::MviA, Operand::byte(0x05)),
-    Instruction::with(Opcode::MviB, Operand::byte(0x03)),
-    Instruction::new(Opcode::AddB),
-    Instruction::new(Opcode::Hlt),
+    Instruction::with(Opcode::MVI_A, Operand::Byte(0x05)),
+    Instruction::with(Opcode::MVI_A, Operand::Byte(0x03)),
+    Instruction::new(Opcode::ADD_B),
+    Instruction::new(Opcode::HLT),
 ]);
 
 let mut machine = Machine::create(16, 8);
