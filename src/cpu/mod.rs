@@ -42,8 +42,8 @@ pub struct Cpu {
 
     /// Latched opcode byte currently being executed (the instruction register).
     pub(crate) ireg: u8,
-    pub(crate) cycle: MachineCycle,
-    pub(crate) t_state: u32,
+    pub cycle: MachineCycle,
+    pub t_state: u32,
 
     /// Set by `HLT` (and cleared by a serviceable interrupt or reset).
     pub is_halt: bool,
