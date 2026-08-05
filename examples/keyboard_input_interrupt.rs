@@ -1,4 +1,3 @@
-//! Ported from the reference project's `examples/keyboard_input_interrupt.py`.
 //! Run with `cargo run --example keyboard_input_interrupt`.
 
 use emu8085::{Addr, Instruction, KeyboardDevice, Machine, Opcode, Program};

@@ -1,4 +1,3 @@
-//! Ported from the reference project's `examples/printer_output.py`.
 //! Run with `cargo run --example printer_output`.
 
 use emu8085::{Addr, Instruction, Machine, Opcode, Operand, PrinterDevice, Program};

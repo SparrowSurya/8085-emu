@@ -1,4 +1,3 @@
-//! Ported from the reference project's `examples/branching_control.py`.
 //! Run with `cargo run --example branching_control`.
 
 use emu8085::{Addr, Instruction, Machine, Opcode, Operand, Program};

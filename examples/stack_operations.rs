@@ -1,4 +1,3 @@
-//! Ported from the reference project's `examples/stack_operations.py`.
 //! Run with `cargo run --example stack_operations`.
 
 use emu8085::{Addr, Instruction, Machine, Opcode, Program};

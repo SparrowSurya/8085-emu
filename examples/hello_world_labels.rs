@@ -1,7 +1,5 @@
 //! Prints "Hi Labels!" by walking a label-referenced string in RAM and sending each
 //! byte to a printer on I/O port 0x02. Run with `cargo run --example hello_world_labels`.
-//!
-//! Ported from the reference project's `examples/hello_world_labels.py`.
 
 use emu8085::{Addr, Instruction, Machine, Opcode, Operand, PrinterDevice, Program};
 use std::cell::RefCell;

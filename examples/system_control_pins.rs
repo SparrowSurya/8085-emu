@@ -1,4 +1,3 @@
-//! Ported from the reference project's `examples/system_control_pins.py`.
 //! Run with `cargo run --example system_control_pins`.
 
 use emu8085::{Addr, Instruction, Machine, Opcode, Program};

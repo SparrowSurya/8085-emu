@@ -1,4 +1,3 @@
-//! Ported from the reference project's `examples/loop_multiplication_labels.py`.
 //! Run with `cargo run --example loop_multiplication_labels`.
 
 use emu8085::{Addr, Instruction, Machine, Opcode, Operand, Program};

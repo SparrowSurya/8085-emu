@@ -1,4 +1,3 @@
-//! Ported from the reference project's `examples/logical_operations.py`.
 //! Run with `cargo run --example logical_operations`.
 
 use emu8085::{Addr, Instruction, Machine, Opcode, Operand, Program, Reg16};

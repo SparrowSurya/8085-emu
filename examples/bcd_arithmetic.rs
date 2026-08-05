@@ -1,4 +1,3 @@
-//! Ported from the reference project's `examples/bcd_arithmetic.py`.
 //! Run with `cargo run --example bcd_arithmetic`.
 
 use emu8085::{Addr, Instruction, Machine, Opcode, Operand, Program};

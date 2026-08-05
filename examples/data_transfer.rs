@@ -1,4 +1,3 @@
-//! Ported from the reference project's `examples/data_transfer.py`.
 //! Run with `cargo run --example data_transfer`.
 
 use emu8085::{Addr, Instruction, Machine, Opcode, Operand, Program, Reg16};

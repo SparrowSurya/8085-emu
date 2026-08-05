@@ -1,4 +1,3 @@
-//! Ported from the reference project's `examples/register_pair_arithmetic.py`.
 //! Run with `cargo run --example register_pair_arithmetic`.
 
 use emu8085::{Addr, Instruction, Machine, Opcode, Program, Reg16};

@@ -1,4 +1,3 @@
-//! Ported from the reference project's `examples/arithmetic_immediate.py`.
 //! Run with `cargo run --example arithmetic_immediate`.
 
 use emu8085::{Addr, Instruction, Machine, Opcode, Operand, Program};
