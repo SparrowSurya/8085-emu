@@ -76,11 +76,3 @@ expectations:
 - **Curated program suites** — arithmetic, control/stack/branch, interrupts (with cycle
   counts), devices (including the INTR→INTA round-trip), and the reference's own labeled
   example programs compiling to byte-identical output.
-
-All checks pass with zero compiler warnings.
-
-## Note on the reference spec
-
-A couple of the reference's quirks are reproduced deliberately for fidelity: `LXI SP`
-(opcode `0x31`) is undefined in the spec (while `INX/DCX/DAD SP` exist), and `PUSH`/`POP
-PSW` preserve whatever unused bits were loaded rather than forcing hardware values.
