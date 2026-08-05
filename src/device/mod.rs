@@ -8,10 +8,12 @@
 pub mod keyboard;
 pub mod printer;
 pub mod usb;
+pub mod terminal;
 
 pub use keyboard::KeyboardDevice;
 pub use printer::PrinterDevice;
 pub use usb::USBDevice;
+pub use terminal::TerminalDevice;
 
 use crate::bus::SystemBus;
 use std::collections::HashMap;
@@ -19,7 +21,7 @@ use std::collections::HashMap;
 /// A peripheral attached to the system. All hooks are defaulted so a device implements
 /// only the ones it needs (an output device overrides `port_write`, an interrupting
 /// device overrides `on_inta`, and so on).
-pub trait Device {
+pub trait Device: std::any::Any {
     /// Human-readable device name.
     fn name(&self) -> &str;
 
@@ -38,6 +40,12 @@ pub trait Device {
 
     /// Per-clock hook for devices that need to observe the bus each tick.
     fn tick(&mut self, _bus: &mut SystemBus) {}
+
+    /// Upcast to Any to support downcasting to concrete types.
+    fn as_any(&self) -> &dyn std::any::Any;
+
+    /// Upcast to Any mutable to support downcasting to concrete types.
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 }
 
 /// Owns the attached devices and routes I/O-port and INTA traffic to them, mirroring
@@ -83,6 +91,16 @@ impl DeviceManager {
         self.devices.get(idx).map(|b| b.as_ref())
     }
 
+    /// Borrow an attached device downcast to its concrete type.
+    pub fn device_ref<T: Device + 'static>(&self, idx: usize) -> Option<&T> {
+        self.devices.get(idx).and_then(|b| b.as_any().downcast_ref::<T>())
+    }
+
+    /// Mutably borrow an attached device downcast to its concrete type.
+    pub fn device_mut<T: Device + 'static>(&mut self, idx: usize) -> Option<&mut T> {
+        self.devices.get_mut(idx).and_then(|b| b.as_any_mut().downcast_mut::<T>())
+    }
+
     /// Service one bus cycle: fulfil an I/O read/write, or during INTA let the first
     /// device offering a vector drive it. Then tick every device.
     pub fn step(&mut self, bus: &mut SystemBus) {
@@ -119,6 +137,12 @@ mod tests {
         }
         fn port_read(&mut self, port: u8) -> u8 {
             port ^ 0xAA
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+        fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+            self
         }
     }
 
