@@ -1,10 +1,8 @@
 # emu8085
 
-A cycle-accurate Intel 8085 microprocessor emulator in Rust, rewritten from the Python
-project [`SparrowSurya/8085-emu`](https://github.com/SparrowSurya/8085-emu). The Python
-source was treated as a *behavioral specification*: this is an idiomatic Rust design
-(closed enums, traits, `Result`, newtypes, explicit ownership), not a line-by-line port,
-but its observable behavior is verified against the reference.
+A cycle-accurate Intel 8085 microprocessor emulator in Rust. The design is idiomatic Rust
+(closed enums, traits, `Result`, newtypes, explicit ownership) and its observable behavior is
+verified against a reference implementation.
 
 ## Quick start
 
@@ -67,7 +65,7 @@ examples/           runnable ported example programs
 
 ## How it's verified
 
-Behavior is checked against the original Python emulator, not just against hand-written
+Behavior is checked against the reference implementation, not just against hand-written
 expectations:
 
 - **1,160 ALU vectors** — every arithmetic/logical/rotate/DAA operation over an
