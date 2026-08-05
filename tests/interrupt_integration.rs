@@ -1,5 +1,5 @@
 //! Differential interrupt tests: TRAP / RST 7.5-6.5-5.5 vectoring, masking, priority,
-//! and nested software RSTs, each checked against the Python reference including ticks.
+//! and nested software RSTs, each checked against the reference implementation including ticks.
 use emu8085::{Addr, Cpu, Memory, SystemBus};
 include!("common/interrupt_cases.rs");
 

@@ -1,5 +1,5 @@
 //! Differential integration tests for the arithmetic & logical category: run programs
-//! captured from the Python reference and require identical final state and T-state count.
+//! captured from the reference implementation and require identical final state and T-state count.
 
 use emu8085::{Addr, Cpu, Memory, SystemBus};
 
@@ -34,6 +34,6 @@ fn matches_reference_on_all_cases() {
             cpu.regs.sp.0, cpu.flags.to_psw(), ticks, mem.read(Addr(0x50)),
         );
         let exp = (e.a, e.b, e.c, e.d, e.e, e.h, e.l, e.sp, e.psw, e.ticks, e.m50);
-        assert_eq!(got, exp, "case `{}` diverged from the Python reference", case.name);
+        assert_eq!(got, exp, "case `{}` diverged from the reference", case.name);
     }
 }

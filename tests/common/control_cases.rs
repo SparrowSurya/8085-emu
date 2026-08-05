@@ -1,4 +1,4 @@
-// Control/stack/branch/data-transfer differential cases from the Python reference.
+// Control/stack/branch/data-transfer differential cases from the reference implementation.
 
 pub const PROBES:&[u16]=&[0x50,0x51,0x52,0x53,0xfffb,0xfffc,0xfffd,0xfffe,0xffff];
 pub struct Expect{pub a:u8,pub b:u8,pub c:u8,pub d:u8,pub e:u8,pub h:u8,pub l:u8,pub sp:u16,pub pc:u16,pub psw:u8,pub ticks:u64,pub probes:&'static [u8]}

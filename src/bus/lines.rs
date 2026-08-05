@@ -1,13 +1,13 @@
 //! The single-bit control, status, and handshake lines carried by the system bus.
 //!
-//! The Python bus packed all of these into one integer behind bit-masks; here each
+//! The reference design packed all of these into one integer behind bit-masks; here each
 //! line is a named `bool`, which is what the CPU, memory, and devices actually want
 //! to read and toggle.
 
 /// Every one-bit line on the bus other than the address and data buses.
 ///
 /// Grouped into one struct so the bus can offer a single `lines` field and so the
-/// per-fetch [`ControlLines::reset`] (which mirrors the Python `bus.reset()`) has an
+/// per-fetch [`ControlLines::reset`] (which mirrors the reference `bus.reset()`) has an
 /// obvious home.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ControlLines {
@@ -44,7 +44,7 @@ impl ControlLines {
     }
 
     /// Clear the four bus-transaction strobes and `INTA` at the start of a fetch,
-    /// matching the Python `SystemBus.reset()`. Handshake/reset lines are left alone.
+    /// matching the reference `SystemBus.reset()`. Handshake/reset lines are left alone.
     pub fn reset(&mut self) {
         self.mr = false;
         self.mw = false;

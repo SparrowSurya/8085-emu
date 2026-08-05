@@ -1,6 +1,6 @@
 //! The 8085 register file and the enums used to name registers.
 //!
-//! The Python code addressed registers by string name and juggled 8-/16-bit views
+//! The reference design addressed registers by string name and juggled 8-/16-bit views
 //! through a `RegisterRef` shim. Here the closed sets are enums ([`Reg8`], [`Reg16`])
 //! and the file exposes typed `get`/`set` plus register-pair accessors.
 

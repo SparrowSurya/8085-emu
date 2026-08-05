@@ -1,9 +1,9 @@
 //! The arithmetic-logic unit as pure functions over `u8` and [`Flags`].
 //!
-//! Every operation here is a direct port of the corresponding Python `_ts_exec_*`
-//! method, kept side-effect-free so it can be unit-tested and differentially checked
-//! against the reference (see the `alu_vectors` replay test). The execution unit calls
-//! these; it never recomputes flags itself.
+//! Every operation here matches the reference implementation, kept side-effect-free
+//! so it can be unit-tested and differentially checked against the reference (see
+//! the `alu_vectors` replay test). The execution unit calls these; it never recomputes
+//! flags itself.
 
 use super::flags::{even_parity, Flags};
 
@@ -168,10 +168,10 @@ mod tests {
         f
     }
 
-    /// Replay all 1,160 vectors captured from the Python reference and require an exact
+    /// Replay all 1,160 vectors captured from the reference and require an exact
     /// match on both the result byte and the full packed PSW.
     #[test]
-    fn matches_python_reference_exactly() {
+    fn matches_reference_exactly() {
         for &(op, a, b, cin, exp_res, exp_psw) in ALU_VECTORS {
             let cin_b = cin == 1;
             let (mut f, res) = match op {

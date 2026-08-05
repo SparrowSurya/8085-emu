@@ -1,5 +1,5 @@
 //! The `Machine`: the facade that owns the CPU, system bus, RAM, and device manager and
-//! clocks them together. This is the Rust analogue of the Python `Machine.create(...)`.
+//! clocks them together.
 
 use crate::bus::SystemBus;
 use crate::cpu::Cpu;

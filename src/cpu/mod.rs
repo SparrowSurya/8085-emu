@@ -2,7 +2,7 @@
 //! execution loop.
 //!
 //! [`Cpu::process`] advances exactly one T-state per call, following the same priority
-//! ladder as the Python `process`: hardware reset, then the HOLD/HLDA DMA handshake,
+//! ladder as the reference `process`: hardware reset, then the HOLD/HLDA DMA handshake,
 //! then READY wait-states, then (at fetch T1) interrupt sampling, then the current
 //! machine cycle. The per-opcode work lives in [`execute`]; this file owns only the
 //! *loop* and the shared state it walks.
@@ -86,7 +86,7 @@ impl Default for Cpu {
             ireg: 0,
             cycle: MachineCycle::Fetch,
             t_state: 1,
-            is_halt: true, // powers up halted; a load/run releases it (matches Python)
+            is_halt: true, // powers up halted; a load/run releases it (matches reference)
             inte: false,
             fault: None,
             mask_5_5: false,

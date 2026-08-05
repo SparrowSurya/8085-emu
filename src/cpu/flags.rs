@@ -25,7 +25,7 @@ pub struct Flags {
     unused: u8,
 }
 
-// PSW bit positions, matching the Python `FlagRegister` layout (which is also the
+// PSW bit positions, matching the reference `FlagRegister` layout (which is also the
 // real 8085 layout): CY=0, P=2, AC=4, Z=6, S=7. Bits 1/3/5 are unused.
 const BIT_CARRY: u8 = 0;
 const BIT_PARITY: u8 = 2;

@@ -1,6 +1,6 @@
 //! Peripheral devices and the manager that routes bus I/O to them.
 //!
-//! The Python original duck-typed devices; here [`Device`] is a trait with defaulted
+//! The reference implementation duck-typed devices; here [`Device`] is a trait with defaulted
 //! methods, so a concrete device overrides only what it uses. [`DeviceManager`] owns its
 //! devices as `Box<dyn Device>` (heterogeneous and open-ended) and maps I/O ports to
 //! them by index, avoiding shared-mutability wrappers.
@@ -49,7 +49,7 @@ pub trait Device: std::any::Any {
 }
 
 /// Owns the attached devices and routes I/O-port and INTA traffic to them, mirroring
-/// the Python `DeviceManager`.
+/// the reference `DeviceManager`.
 #[derive(Default)]
 pub struct DeviceManager {
     devices: Vec<Box<dyn Device>>,

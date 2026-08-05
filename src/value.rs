@@ -1,6 +1,6 @@
 //! Small newtype wrappers that keep address-like and port-like values from being
-//! mixed up with plain data bytes. These replace the Python `Mem` newtype and the
-//! role played by the `Data`/`Mem` wrapper classes, without dragging in an
+//! mixed up with plain data bytes. These keep addresses and ports distinct from raw data
+//! without dragging in an
 //! arbitrary-width value type — 8085 data is just `u8`, addresses just `u16`.
 
 use std::fmt;

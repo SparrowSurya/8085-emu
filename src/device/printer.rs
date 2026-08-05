@@ -3,8 +3,7 @@
 use super::Device;
 
 /// Collects characters written by the CPU. Every byte is recorded in [`history`](Self::history);
-/// an optional callback receives each character live (the Rust stand-in for the Python
-/// `output_callback`, which defaulted to `print`).
+/// an optional callback receives each character live.
 #[derive(Default)]
 pub struct PrinterDevice {
     /// Everything printed so far, in order.

@@ -1,8 +1,7 @@
 //! A `Program` is a sequence of [`Instruction`]s that compiles to a flat byte image,
 //! resolving labels in two passes: the first assigns each instruction an address and
 //! records label definitions; the second emits bytes, turning label references into the
-//! concrete little-endian addresses collected in pass one. This is the direct analogue
-//! of the Python `Program.compile`.
+//! concrete little-endian addresses collected in pass one.
 
 use crate::error::EmuError;
 use crate::instruction::{Instruction, Operand};

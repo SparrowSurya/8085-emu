@@ -4,8 +4,8 @@
 //! The 8085 multiplexes address and data onto shared pins, but for emulation it is
 //! clearer to model the 16-bit address value, the 8-bit data value, and the
 //! [`ControlLines`] as separate typed fields. Sub-width configurations (fewer address
-//! or data lines than 16/8) are honored by masking on write, matching the Python
-//! `SystemBus.create(address_lines, data_lines)`.
+//! or data lines than 16/8) are honored by masking on write, matching the reference
+//! behavior.
 
 pub mod lines;
 

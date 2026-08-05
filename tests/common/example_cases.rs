@@ -1,4 +1,4 @@
-// Ported example programs; expected output/state captured from the Python reference.
+// Ported example programs; expected output/state captured from the reference implementation.
 
 pub struct EState{pub a:u8,pub b:u8,pub c:u8,pub d:u8,pub e:u8,pub h:u8,pub l:u8,pub sp:u16,pub pc:u16,pub psw:u8}
 pub struct ECase{pub name:&'static str,pub prog:&'static [u8],pub at:u16,pub mem:&'static [(u16,u8)],

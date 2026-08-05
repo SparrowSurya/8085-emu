@@ -1,4 +1,4 @@
-// Randomized differential fuzz cases (non-control opcodes) from the Python reference.
+// Randomized differential fuzz cases (non-control opcodes) from the reference implementation.
 
 pub struct FExp{pub a:u8,pub b:u8,pub c:u8,pub d:u8,pub e:u8,pub h:u8,pub l:u8,pub sp:u16,pub psw:u8,pub ticks:u64,pub mf0:u8,pub mef:u8}
 pub struct FCase{pub prog:&'static [u8],pub exp:FExp}

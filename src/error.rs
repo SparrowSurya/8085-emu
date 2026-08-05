@@ -1,6 +1,6 @@
 //! The crate's single error type. Everything fallible returns `Result<T, EmuError>`
-//! instead of panicking, mirroring the places the Python code raised exceptions
-//! (invalid opcode, out-of-range access, unresolved label).
+//! instead of panicking on runtime errors (invalid opcode, out-of-range access,
+//! unresolved label).
 
 use thiserror::Error;
 

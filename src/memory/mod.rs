@@ -1,6 +1,6 @@
 //! Flat, byte-addressable RAM. Memory only ever moves data in response to the bus:
 //! [`Memory::step`] honours the memory-read/write strobes the CPU (or a DMA device)
-//! has driven, exactly like the Python `Memory.step`.
+//! has driven, matching the reference behavioral specification.
 
 use crate::bus::SystemBus;
 use crate::error::EmuError;
@@ -55,8 +55,7 @@ impl Memory {
     }
 
     /// Copy a byte slice into memory starting at `start`, returning how many bytes were
-    /// written. Errors if the slice would run past the end of RAM. This is the Rust
-    /// stand-in for the Python `write_code`/`write_seq`: the program compiler already
+    /// written. Errors if the slice would run past the end of RAM. The program compiler
     /// yields a flat little-endian byte stream, so there is nothing width-tagged to unpack.
     pub fn load_bytes(&mut self, bytes: &[u8], start: Addr) -> Result<usize, EmuError> {
         let end = usize::from(start) + bytes.len();

@@ -18,7 +18,7 @@ use crate::value::Addr;
 
 /// Execute-phase T-state count per opcode byte (0 = single-cycle, effect at
 /// fetch T4). Total instruction time is 4 (fetch M1) + this. Extracted verbatim
-/// from the Python dispatch table so timing is bit-for-bit identical.
+/// from the reference dispatch table so timing is bit-for-bit identical.
 pub(crate) const EXEC_TSTATES: [u8; 256] = [
      0,  6,  3,  2,  0,  0,  3,  0,  0,  6,  3,  2,  0,  0,  3,  0, // 0X00
      0,  6,  3,  2,  0,  0,  3,  0,  0,  6,  3,  2,  0,  0,  3,  0, // 0X10

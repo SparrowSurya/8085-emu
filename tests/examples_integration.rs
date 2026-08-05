@@ -1,5 +1,5 @@
 //! Ported README example programs, run through the `Machine` facade and checked against
-//! the Python reference for both printer output and final CPU state.
+//! the reference implementation for both printer output and final CPU state.
 
 use emu8085::{Addr, Cpu, DeviceManager, Machine, Memory, PrinterDevice, SystemBus};
 use std::cell::RefCell;

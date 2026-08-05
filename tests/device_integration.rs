@@ -1,5 +1,5 @@
 //! End-to-end device tests through the full CPU + RAM + DeviceManager loop, matching the
-//! Python reference: keyboard `IN`, printer `OUT`, and an INTR/INTA vector fetch.
+//! reference: keyboard `IN`, printer `OUT`, and an INTR/INTA vector fetch.
 
 use emu8085::{Addr, Cpu, DeviceManager, KeyboardDevice, Memory, PrinterDevice, SystemBus};
 use std::cell::RefCell;

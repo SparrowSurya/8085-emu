@@ -1,4 +1,4 @@
-// End-to-end differential cases captured from the Python reference emulator.
+// End-to-end differential cases captured from the reference emulator.
 
 pub struct Expect{pub a:u8,pub b:u8,pub c:u8,pub d:u8,pub e:u8,pub h:u8,pub l:u8,pub sp:u16,pub psw:u8,pub ticks:u64,pub m50:u8}
 pub struct Case{pub name:&'static str,pub prog:&'static [u8],pub mem:&'static [(u16,u8)],pub exp:Expect}

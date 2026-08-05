@@ -1,4 +1,4 @@
-//! Differential ALU test vectors generated from the Python reference emulator.
+//! Differential ALU test vectors generated from the reference emulator.
 //! Tuple: (op_id, a, b_or_acin, carry_in, result, psw_byte). Do not edit by hand.
 #![allow(clippy::all)]
 #![allow(dead_code)]

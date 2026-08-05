@@ -1,4 +1,4 @@
-// Interrupt differential cases from the Python reference (state + T-states).
+// Interrupt differential cases from the reference implementation (state + T-states).
 
 pub struct IExp{pub a:u8,pub b:u8,pub c:u8,pub sp:u16,pub ticks:u64}
 pub struct ICase{pub name:&'static str,pub isr:&'static [(u16,u8)],pub prog:&'static [u8],pub at:u16,pub sp:u16,pub trap:bool,pub inte:bool,pub r75:bool,pub r65:bool,pub r55:bool,pub m65:bool,pub exp:IExp}

@@ -1,6 +1,6 @@
 //! Differential tests for stack, branch, subroutine, and direct-addressing instructions.
 //! Each program is run to HLT on both emulators; final registers, SP, PC, PSW, probed
-//! memory, and the T-state count must match the Python reference exactly.
+//! memory, and the T-state count must match the reference implementation exactly.
 
 use emu8085::{Addr, Cpu, Memory, SystemBus};
 

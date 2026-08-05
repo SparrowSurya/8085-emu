@@ -1,8 +1,8 @@
 //! Every opcode the 8085 understands, one variant per encoded byte.
 //!
 //! `#[repr(u8)]` pins each variant to its real machine-code value, so
-//! encoding is a cast and decoding is a single generated match. Ported
-//! 1:1 from the Python `Opcode` IntEnum (the behavioral spec).
+//! encoding is a cast and decoding is a single generated match, matching
+//! the reference behavioral spec.
 
 use crate::error::EmuError;
 
