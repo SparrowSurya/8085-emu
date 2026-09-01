@@ -142,6 +142,12 @@ impl Cpu {
         }
         bus.lines.reset_out = false;
 
+        // Latch hardware TRAP request from the bus (e.g. memory bounds fault).
+        if bus.lines.trap {
+            self.trap = true;
+            bus.lines.trap = false;
+        }
+
         // 2. DMA HOLD/HLDA handshake: surrender the bus while HOLD is asserted.
         if bus.lines.hold {
             bus.lines.hlda = true;

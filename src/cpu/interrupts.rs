@@ -65,7 +65,7 @@ impl Cpu {
 
     /// Begin a vectored interrupt: disable further interrupts, push the PC high byte now,
     /// and stage the low-byte push + jump for the next T-state.
-    fn trigger_vector(&mut self, bus: &mut SystemBus, vector: Addr) {
+    pub(crate) fn trigger_vector(&mut self, bus: &mut SystemBus, vector: Addr) {
         self.inte = false;
         let pc = self.regs.pc;
         let sp1 = self.regs.sp.wrapping_sub(1);

@@ -17,6 +17,9 @@ use crate::value::Addr;
 pub struct Memory {
     data: Vec<u8>,
     addr_mask: usize,
+    /// Optional upper valid address limit (exclusive). Accesses at or beyond this
+    /// limit trigger an illegal memory access hardware TRAP.
+    pub valid_limit: Option<usize>,
 }
 
 impl Memory {
@@ -26,7 +29,28 @@ impl Memory {
         Memory {
             data: vec![0; size],
             addr_mask: size - 1,
+            valid_limit: if lines < 16 { Some(size) } else { None },
         }
+    }
+
+    /// Sets an upper valid address bound (exclusive) for memory access.
+    pub fn set_limit(&mut self, limit: usize) {
+        self.valid_limit = Some(limit);
+    }
+
+    /// Whether an address is valid within addressable RAM and any configured limit.
+    #[inline]
+    pub fn is_valid_address(&self, addr: Addr) -> bool {
+        let raw = usize::from(addr);
+        if raw >= self.data.len() {
+            return false;
+        }
+        if let Some(limit) = self.valid_limit {
+            if raw >= limit {
+                return false;
+            }
+        }
+        true
     }
 
     /// Total addressable bytes.
@@ -72,12 +96,22 @@ impl Memory {
 
     /// Service one bus transaction: on a memory-read strobe, drive the addressed byte
     /// onto the data bus; on a memory-write strobe, store the data bus byte.
+    /// Accesses to illegal or out-of-bounds addresses assert `bus.lines.trap = true`.
     pub fn step(&mut self, bus: &mut SystemBus) {
+        let addr = bus.address();
         if bus.lines.mr {
-            let byte = self.read(bus.address());
-            bus.set_data(byte);
+            if !self.is_valid_address(addr) {
+                bus.lines.trap = true;
+            } else {
+                let byte = self.read(addr);
+                bus.set_data(byte);
+            }
         } else if bus.lines.mw {
-            self.write(bus.address(), bus.data());
+            if !self.is_valid_address(addr) {
+                bus.lines.trap = true;
+            } else {
+                self.write(addr, bus.data());
+            }
         }
     }
 }

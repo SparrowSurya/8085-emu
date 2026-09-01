@@ -31,6 +31,8 @@ pub struct ControlLines {
     pub reset_in: bool,
     /// Hardware reset output, asserted while the CPU is being reset.
     pub reset_out: bool,
+    /// Non-maskable hardware TRAP interrupt request line (e.g. for memory/bus faults).
+    pub trap: bool,
 }
 
 impl ControlLines {

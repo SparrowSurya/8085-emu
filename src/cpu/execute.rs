@@ -73,12 +73,13 @@ impl Cpu {
     }
 
     /// Decode at fetch T4: complete single-cycle ops, or set up the execute phase.
-    pub(crate) fn decode(&mut self, _bus: &mut SystemBus) {
+    pub(crate) fn decode(&mut self, bus: &mut SystemBus) {
         let opcode = match Opcode::from_byte(self.ireg) {
             Ok(op) => op,
-            Err(e) => {
-                self.fault = Some(e);
-                self.is_halt = true;
+            Err(_e) => {
+                // Illegal opcode: trigger hardware TRAP exception (0x0024).
+                self.trap = true;
+                self.trigger_vector(bus, crate::cpu::interrupts::VEC_TRAP);
                 return;
             }
         };
