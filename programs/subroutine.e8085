@@ -1,0 +1,11 @@
+; Add 5 + 3 through a subroutine; result 8 in A. Exercises CALL / RET / stack.
+segment .text
+main:
+    lxi SP, 0xF000
+    mvi A, 5
+    mvi B, 3
+    call add_ab
+    hlt
+add_ab:
+    add B          ; A = A + B
+    ret

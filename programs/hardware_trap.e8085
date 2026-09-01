@@ -1,0 +1,38 @@
+; Example: Hardware Exception Handling (TRAP at vector 0x0024) in .e8085
+;
+; In 8085, TRAP is the highest priority, non-maskable hardware interrupt (vector 0x0024).
+; When the CPU or memory bus encounters a hardware exception:
+;   - Illegal / Undefined Opcode during fetch
+;   - Illegal / Out-of-bounds Memory Access
+; The machine asserts TRAP, saving the return PC on stack and jumping to `isr_trap`.
+
+%define PRINTER_PORT 0x02
+
+segment .data
+    msg BYTE "Trap handled!" 0x0A
+
+segment .text
+main:
+    lxi SP, 0xF000      ; Initialize stack pointer
+
+    ; Normal execution
+    mvi B, 0x42
+
+    ; An undefined opcode or memory fault will trigger isr_trap!
+    hlt
+
+; ==========================================
+; Hardware Exception Handler
+; ==========================================
+
+; --- Hardware TRAP ISR (Vector 0x0024) ---
+isr_trap:
+    lxi HL, msg
+    mvi B, %len msg
+print_loop:
+    mov A, M
+    out PRINTER_PORT
+    inx HL
+    dcr B
+    jnz print_loop
+    hlt

@@ -1,0 +1,113 @@
+%define CMD_WRITE 0x00
+%define CMD_DISPLAY 0x01
+%define CMD_READ 0x02
+%define DATA_PORT 0x01
+%define CMD_PORT 0x02
+
+segment .data
+  prompt BYTE "What is your name? " 0x0A
+  hello BYTE "Hi "
+  excl BYTE "!" 0x0A
+
+segment .bss
+  name_buf BYTE 64
+
+segment .text
+main:
+    ; Enter write mode on the terminal command port
+    mvi A, CMD_WRITE
+    out CMD_PORT
+
+    ; Write the length of the prompt to the terminal data port
+    mvi A, %len prompt
+    out DATA_PORT
+
+    ; Point HL to the prompt in RAM and set loop counter in B
+    lxi HL, prompt
+    mvi B, %len prompt
+send_prompt:
+    mov A, M
+    out DATA_PORT
+    inx HL
+    dcr B
+    jnz send_prompt
+
+    ; Display buffer (print prompt)
+    mvi A, CMD_DISPLAY
+    out CMD_PORT
+
+    ; Trigger capture from the terminal to read name
+    mvi A, CMD_READ
+    out CMD_PORT
+
+    ; Read the length byte of the captured input
+    in DATA_PORT
+
+    ; Store length in B (loop counter) and C (preserved length)
+    mov B, A
+    mov C, A
+
+    ; Point HL to name_buf where we want to write the data
+    lxi HL, name_buf
+
+    ; Check if length is 0; if it is, skip read loop
+    mov A, B
+    cpi 0x00
+    jz capture_done
+read_char:
+    in DATA_PORT
+    mov M, A
+    inx HL
+    dcr B
+    jnz read_char
+capture_done:
+    ; Append trailing newline to name_buf
+    mvi A, 0x0A
+    mov M, A
+
+    ; Enter write mode on the terminal command port
+    mvi A, CMD_WRITE
+    out CMD_PORT
+
+    ; Calculate total length (C + 5) and write it to terminal data port
+    mov A, C
+    adi 5
+    out DATA_PORT
+
+    ; Write "Hi " prefix
+    lxi HL, hello
+    mvi B, %len hello
+send_hello:
+    mov A, M
+    out DATA_PORT
+    inx HL
+    dcr B
+    jnz send_hello
+
+    ; Write name payload
+    lxi HL, name_buf
+    mov B, C
+    mov A, B
+    cpi 0x00
+    jz send_name_done
+send_name:
+    mov A, M
+    out DATA_PORT
+    inx HL
+    dcr B
+    jnz send_name
+send_name_done:
+    ; Write suffix "!\n"
+    lxi HL, excl
+    mvi B, %len excl
+send_excl:
+    mov A, M
+    out DATA_PORT
+    inx HL
+    dcr B
+    jnz send_excl
+
+    ; Display buffer
+    mvi A, CMD_DISPLAY
+    out CMD_PORT
+    hlt
