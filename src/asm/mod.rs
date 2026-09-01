@@ -11,13 +11,15 @@ pub mod ast;
 pub mod container;
 pub mod encode;
 pub mod error;
+pub mod include;
 pub mod keyword;
 pub mod lexer;
 pub mod parser;
 pub mod token;
 
 pub use assemble::{
-    assemble, assemble_listing, assemble_with_symbols, load, ListingRow, LoadImage,
+    assemble, assemble_listing, assemble_with_options, assemble_with_symbols, load, ListingRow,
+    LoadImage,
 };
 pub use container::{BinaryContainer, ContainerHeader};
 pub use ast::{BssDecl, DataDef, Define, Instr, POperand, Program, Segment, Size, TextItem, Value};

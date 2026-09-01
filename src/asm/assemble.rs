@@ -20,9 +20,53 @@ pub fn load(
     machine: &mut crate::machine::Machine,
     image: &LoadImage,
 ) -> Result<(), crate::error::EmuError> {
-    machine
-        .ram
-        .load_bytes(&image.bytes, crate::value::Addr(0))?;
+    // 1. Write bootstrap jump at 0x0000
+    if image.bytes.len() >= 3 {
+        machine.ram.write(crate::value::Addr(0), image.bytes[0]);
+        machine.ram.write(crate::value::Addr(1), image.bytes[1]);
+        machine.ram.write(crate::value::Addr(2), image.bytes[2]);
+    }
+
+    // 2. Write ISR vector table hooks (0x0008..0x0040)
+    let vec_len = (image.data_addr as usize).min(image.bytes.len()).min(VECTOR_TABLE_LEN as usize);
+    if vec_len > 3 {
+        for addr in 3..vec_len {
+            let b = image.bytes[addr];
+            if b != 0 {
+                machine.ram.write(crate::value::Addr(addr as u16), b);
+            }
+        }
+    }
+
+    // 3. Write .data
+    let data_start = image.data_addr as usize;
+    let data_end = data_start + image.data_size as usize;
+    if image.bytes.len() >= data_end {
+        for (i, &b) in image.bytes[data_start..data_end].iter().enumerate() {
+            machine
+                .ram
+                .write(crate::value::Addr(image.data_addr.wrapping_add(i as u16)), b);
+        }
+    }
+
+    // 4. Zero .bss
+    for i in 0..image.bss_size {
+        machine
+            .ram
+            .write(crate::value::Addr(image.bss_addr.wrapping_add(i)), 0);
+    }
+
+    // 5. Write .text
+    let text_start = image.text_addr as usize;
+    let text_end = text_start + image.text_size as usize;
+    if image.bytes.len() >= text_end {
+        for (i, &b) in image.bytes[text_start..text_end].iter().enumerate() {
+            machine
+                .ram
+                .write(crate::value::Addr(image.text_addr.wrapping_add(i as u16)), b);
+        }
+    }
+
     machine.cpu.regs.pc = crate::value::Addr(0);
     machine.cpu.regs.sp = crate::value::Addr(image.sp_init);
     Ok(())
@@ -113,12 +157,14 @@ pub struct LoadImage {
     pub bss_addr: u16,
     /// Byte length of .bss section.
     pub bss_size: u16,
+    /// Exported global symbols: `(name, address)`.
+    pub export_symbols: Vec<(String, u16)>,
 }
 
 impl LoadImage {
     /// Converts this LoadImage into a BinaryContainer for .8085.bin files.
     pub fn to_container(&self) -> crate::asm::container::BinaryContainer {
-        let vec_size = if self.data_addr > 0 { self.data_addr as usize } else { 0 };
+        let vec_size = (self.data_addr as usize).min(VECTOR_TABLE_LEN as usize);
         let vec_bytes = if self.bytes.len() >= vec_size {
             self.bytes[0..vec_size].to_vec()
         } else {
@@ -154,7 +200,8 @@ impl LoadImage {
             bss_addr: self.bss_addr,
             bss_size: self.bss_size,
             vec_size: vec_size as u16,
-            reserved: [0u8; 8],
+            sym_size: 0,
+            reserved: [0u8; 6],
         };
 
         crate::asm::container::BinaryContainer {
@@ -162,6 +209,7 @@ impl LoadImage {
             vec_bytes,
             data_bytes,
             text_bytes,
+            export_symbols: self.export_symbols.clone(),
         }
     }
 }
@@ -180,21 +228,48 @@ pub struct ListingRow {
 
 /// Assemble source text into a [`LoadImage`].
 pub fn assemble(src: &str) -> Result<LoadImage, AsmError> {
-    Ok(assemble_with_symbols(src)?.0)
+    assemble_with_options(src, None, &HashMap::new())
+}
+
+/// Assemble source text with an optional base directory for `%include` and external symbols for linking.
+pub fn assemble_with_options(
+    src: &str,
+    base_dir: Option<&std::path::Path>,
+    external_symbols: &HashMap<String, u16>,
+) -> Result<LoadImage, AsmError> {
+    let raw_program = parse(lex(src)?)?;
+    let program = if let Some(dir) = base_dir {
+        super::include::resolve_includes(dir, &raw_program)?
+    } else {
+        let cur_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        super::include::resolve_includes(&cur_dir, &raw_program)?
+    };
+
+    let (image, _symbols, _listing) =
+        Assembler::new(&program, src, external_symbols.clone()).run()?;
+    Ok(image)
 }
 
 /// Assemble, also returning the resolved symbol table (name → absolute address), sorted
 /// by name. Useful for listings, debugging, and `--dump`.
 pub fn assemble_with_symbols(src: &str) -> Result<(LoadImage, BTreeMap<String, u16>), AsmError> {
-    let program = parse(lex(src)?)?;
-    let (image, symbols, _listing) = Assembler::new(&program, src).run()?;
+    let raw_program = parse(lex(src)?)?;
+    let cur_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let program = super::include::resolve_includes(&cur_dir, &raw_program)?;
+
+    let (image, symbols, _listing) =
+        Assembler::new(&program, src, HashMap::new()).run()?;
     Ok((image, symbols.into_iter().collect()))
 }
 
 /// Assemble, returning the image plus a per-line listing (address, bytes, source).
 pub fn assemble_listing(src: &str) -> Result<(LoadImage, Vec<ListingRow>), AsmError> {
-    let program = parse(lex(src)?)?;
-    let (image, _symbols, listing) = Assembler::new(&program, src).run()?;
+    let raw_program = parse(lex(src)?)?;
+    let cur_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let program = super::include::resolve_includes(&cur_dir, &raw_program)?;
+
+    let (image, _symbols, listing) =
+        Assembler::new(&program, src, HashMap::new()).run()?;
     Ok((image, listing))
 }
 
@@ -238,10 +313,11 @@ struct Assembler<'a> {
     sizes: HashMap<String, u16>,
     data_vars: Vec<Var>,
     bss_vars: Vec<Var>,
+    external_symbols: HashMap<String, u16>,
 }
 
 impl<'a> Assembler<'a> {
-    fn new(program: &'a Program, src: &str) -> Self {
+    fn new(program: &'a Program, src: &str, external_symbols: HashMap<String, u16>) -> Self {
         Assembler {
             program,
             src_lines: src.lines().map(|l| l.to_string()).collect(),
@@ -249,6 +325,7 @@ impl<'a> Assembler<'a> {
             sizes: HashMap::new(),
             data_vars: Vec::new(),
             bss_vars: Vec::new(),
+            external_symbols,
         }
     }
 
@@ -267,7 +344,12 @@ impl<'a> Assembler<'a> {
         // Segment bases.
         let data_size: u32 = self.data_vars.iter().map(|v| v.size as u32).sum();
         let bss_size: u32 = self.bss_vars.iter().map(|v| v.size as u32).sum();
-        let data_base = DATA_BASE as u32;
+        let mut data_base = DATA_BASE as u32;
+        for &sym_addr in self.external_symbols.values() {
+            if (sym_addr as u32) >= data_base {
+                data_base = (sym_addr as u32) + 0x40;
+            }
+        }
         let bss_base = data_base + data_size;
         let text_base = bss_base + bss_size;
         if text_base > 0xFFFF {
@@ -287,10 +369,11 @@ impl<'a> Assembler<'a> {
             addr += v.size;
         }
 
-        let entry = self.layout_text(text_base as u16, &mut symtab)?;
+        let mut export_names = Vec::new();
+        let entry = self.layout_text(text_base as u16, &mut symtab, &mut export_names)?;
 
         // Codegen, building a listing alongside the image.
-        let mut bytes = vec![0u8; DATA_BASE as usize];
+        let mut bytes = vec![0u8; data_base as usize];
         let mut listing = Vec::new();
 
         let [lo, hi] = [(entry & 0xFF) as u8, (entry >> 8) as u8];
@@ -360,11 +443,28 @@ impl<'a> Assembler<'a> {
 
         // .text: re-walk items in order so labels and instructions interleave in the listing.
         let mut taddr = text_base as u16;
+        let mut current_parent_label: Option<String> = None;
         for seg in &self.program.segments {
             if let Segment::Text(items) = seg {
                 for item in items {
                     match item {
                         TextItem::Label(name, span) => {
+                            current_parent_label = Some(name.clone());
+                            listing.push(ListingRow {
+                                addr: taddr,
+                                bytes: Vec::new(),
+                                source: self.src_line(span.line),
+                            });
+                        }
+                        TextItem::GlobalLabel(name, span) => {
+                            current_parent_label = Some(name.clone());
+                            listing.push(ListingRow {
+                                addr: taddr,
+                                bytes: Vec::new(),
+                                source: self.src_line(span.line),
+                            });
+                        }
+                        TextItem::LocalLabel(name, span) => {
                             listing.push(ListingRow {
                                 addr: taddr,
                                 bytes: Vec::new(),
@@ -372,8 +472,26 @@ impl<'a> Assembler<'a> {
                             });
                             let _ = name;
                         }
+                        TextItem::GlobalDecl(_name, span) => {
+                            listing.push(ListingRow {
+                                addr: taddr,
+                                bytes: Vec::new(),
+                                source: self.src_line(span.line),
+                            });
+                        }
+                        TextItem::ExternDecl(_name, span) => {
+                            listing.push(ListingRow {
+                                addr: taddr,
+                                bytes: Vec::new(),
+                                source: self.src_line(span.line),
+                            });
+                        }
                         TextItem::Instr(ins) => {
-                            let ops = self.final_operands(ins, &symtab)?;
+                            let ops = self.final_operands(
+                                ins,
+                                &symtab,
+                                current_parent_label.as_deref(),
+                            )?;
                             let b = encode(&ins.mnemonic, ins.span, &ops)?;
                             listing.push(ListingRow {
                                 addr: taddr,
@@ -394,6 +512,18 @@ impl<'a> Assembler<'a> {
 
         let text_size = taddr.saturating_sub(text_base as u16);
 
+        // Build exported symbol table (excluding 'main')
+        let mut export_symbols = Vec::new();
+        for name in export_names {
+            if !name.eq_ignore_ascii_case("main") {
+                if let Some(&sym_addr) = symtab.get(&name) {
+                    if !export_symbols.iter().any(|(n, _): &(String, u16)| n == &name) {
+                        export_symbols.push((name, sym_addr));
+                    }
+                }
+            }
+        }
+
         Ok((
             LoadImage {
                 bytes,
@@ -405,6 +535,7 @@ impl<'a> Assembler<'a> {
                 data_size: data_size as u16,
                 bss_addr: bss_base as u16,
                 bss_size: bss_size as u16,
+                export_symbols,
             },
             symtab,
             listing,
@@ -450,8 +581,8 @@ impl<'a> Assembler<'a> {
                         for val in &d.values {
                             self.emit_value(val, d.size, d.span, &mut plan)?;
                         }
-                        let size: u16 = plan.iter().map(Emit::width).sum();
-                        self.record_size(&d.name, size, d.span)?;
+                        let size: u16 = plan.iter().map(|e| e.width()).sum();
+                        self.sizes.insert(d.name.clone(), size);
                         self.data_vars.push(Var {
                             name: d.name.clone(),
                             span: d.span,
@@ -461,17 +592,19 @@ impl<'a> Assembler<'a> {
                     }
                 }
                 Segment::Bss(decls) => {
-                    for d in decls {
-                        let count = self.eval_number(&d.count, d.span)?;
-                        let unit = match d.size {
-                            Size::Byte => 1u32,
+                    for b in decls {
+                        let count = self.eval_number(&b.count, b.span)?;
+                        let unit = match b.size {
+                            Size::Byte => 1,
                             Size::Word => 2,
                         };
-                        let size = (count * unit) as u16;
-                        self.record_size(&d.name, size, d.span)?;
+                        let size = (count as u16)
+                            .checked_mul(unit)
+                            .ok_or_else(|| AsmError::new(b.span, AsmErrorKind::ImageOverflow))?;
+                        self.sizes.insert(b.name.clone(), size);
                         self.bss_vars.push(Var {
-                            name: d.name.clone(),
-                            span: d.span,
+                            name: b.name.clone(),
+                            span: b.span,
                             size,
                             plan: None,
                         });
@@ -479,16 +612,6 @@ impl<'a> Assembler<'a> {
                 }
                 Segment::Text(_) => {}
             }
-        }
-        Ok(())
-    }
-
-    fn record_size(&mut self, name: &str, size: u16, span: Span) -> Result<(), AsmError> {
-        if self.sizes.insert(name.to_string(), size).is_some() {
-            return Err(AsmError::new(
-                span,
-                AsmErrorKind::DuplicateName(name.to_string()),
-            ));
         }
         Ok(())
     }
@@ -586,17 +709,44 @@ impl<'a> Assembler<'a> {
         &self,
         text_base: u16,
         symtab: &mut HashMap<String, u16>,
+        export_syms: &mut Vec<String>,
     ) -> Result<u16, AsmError> {
         let mut count = 0usize;
         let mut addr = text_base;
+        let mut current_parent_label: Option<String> = None;
+
         for seg in &self.program.segments {
             if let Segment::Text(items) = seg {
                 for item in items {
                     match item {
-                        TextItem::Label(name, span) => insert_symbol(symtab, name, addr, *span)?,
+                        TextItem::Label(name, span) => {
+                            current_parent_label = Some(name.clone());
+                            insert_symbol(symtab, name, addr, *span)?;
+                        }
+                        TextItem::GlobalLabel(name, span) => {
+                            current_parent_label = Some(name.clone());
+                            insert_symbol(symtab, name, addr, *span)?;
+                            if !export_syms.contains(name) {
+                                export_syms.push(name.clone());
+                            }
+                        }
+                        TextItem::LocalLabel(name, span) => {
+                            let parent = current_parent_label.as_ref().ok_or_else(|| {
+                                AsmError::new(*span, AsmErrorKind::LocalLabelWithoutParent(name.clone()))
+                            })?;
+                            let scoped_name = format!("{parent}.{name}");
+                            insert_symbol(symtab, &scoped_name, addr, *span)?;
+                        }
+                        TextItem::GlobalDecl(name, _span) => {
+                            if !export_syms.contains(name) {
+                                export_syms.push(name.clone());
+                            }
+                        }
+                        TextItem::ExternDecl(_name, _span) => {}
                         TextItem::Instr(ins) => {
                             // Length is value-independent, so encode with zero placeholders.
-                            let zero_ops = self.length_operands(ins)?;
+                            let zero_ops =
+                                self.length_operands(ins, current_parent_label.as_deref())?;
                             let len = encode(&ins.mnemonic, ins.span, &zero_ops)?.len() as u16;
                             addr += len;
                             count += 1;
@@ -605,6 +755,13 @@ impl<'a> Assembler<'a> {
                 }
             }
         }
+
+        for g in &self.program.globals {
+            if !export_syms.contains(g) {
+                export_syms.push(g.clone());
+            }
+        }
+
         if count == 0 {
             return Err(AsmError::new(Span::default(), AsmErrorKind::EmptyText));
         }
@@ -613,10 +770,14 @@ impl<'a> Assembler<'a> {
     }
 
     /// Operands for the length pass: registers as-is, everything numeric as `Imm(0)`.
-    fn length_operands(&self, ins: &Instr) -> Result<Vec<Operand>, AsmError> {
+    fn length_operands(
+        &self,
+        ins: &Instr,
+        parent_label: Option<&str>,
+    ) -> Result<Vec<Operand>, AsmError> {
         ins.operands
             .iter()
-            .map(|p| self.operand(p, ins.span, None))
+            .map(|p| self.operand(p, ins.span, None, parent_label))
             .collect()
     }
 
@@ -625,10 +786,11 @@ impl<'a> Assembler<'a> {
         &self,
         ins: &Instr,
         symtab: &HashMap<String, u16>,
+        parent_label: Option<&str>,
     ) -> Result<Vec<Operand>, AsmError> {
         ins.operands
             .iter()
-            .map(|p| self.operand(p, ins.span, Some(symtab)))
+            .map(|p| self.operand(p, ins.span, Some(symtab), parent_label))
             .collect()
     }
 
@@ -639,6 +801,7 @@ impl<'a> Assembler<'a> {
         p: &POperand,
         span: Span,
         symtab: Option<&HashMap<String, u16>>,
+        parent_label: Option<&str>,
     ) -> Result<Operand, AsmError> {
         Ok(match p {
             POperand::Reg8(r) => Operand::Reg8(*r),
@@ -649,8 +812,21 @@ impl<'a> Assembler<'a> {
                 None => Operand::Imm(0),
                 Some(_) => Operand::Imm(self.len_of(name, span)?),
             },
+            POperand::LocalSym(name) => match symtab {
+                None => Operand::Imm(0),
+                Some(t) => {
+                    let parent = parent_label.ok_or_else(|| {
+                        AsmError::new(span, AsmErrorKind::LocalLabelWithoutParent(name.clone()))
+                    })?;
+                    let scoped_name = format!("{parent}.{name}");
+                    let addr = *t.get(&scoped_name).ok_or_else(|| {
+                        AsmError::new(span, AsmErrorKind::UndefinedName(format!(".{name}")))
+                    })?;
+                    Operand::Imm(addr as u32)
+                }
+            },
             POperand::Sym(name) => {
-                // A define reference resolves to its value; a real symbol to its address.
+                // A define reference resolves to its value; a real symbol or external symbol to its address.
                 match self.defines.get(name) {
                     Some(DVal::Num(n)) => Operand::Imm(*n),
                     Some(DVal::Ch(b)) => Operand::Imm(*b as u32),
@@ -659,9 +835,28 @@ impl<'a> Assembler<'a> {
                     }
                     None => match symtab {
                         None => Operand::Imm(0),
-                        Some(t) => Operand::Imm(*t.get(name).ok_or_else(|| {
-                            AsmError::new(span, AsmErrorKind::UndefinedName(name.clone()))
-                        })? as u32),
+                        Some(t) => {
+                            if let Some(&addr) = t.get(name) {
+                                Operand::Imm(addr as u32)
+                            } else if let Some(&addr) = self.external_symbols.get(name) {
+                                Operand::Imm(addr as u32)
+                            } else if let Some(parent) = parent_label {
+                                let scoped = format!("{parent}.{name}");
+                                if let Some(&addr) = t.get(&scoped) {
+                                    Operand::Imm(addr as u32)
+                                } else {
+                                    return Err(AsmError::new(
+                                        span,
+                                        AsmErrorKind::UndefinedName(name.clone()),
+                                    ));
+                                }
+                            } else {
+                                return Err(AsmError::new(
+                                    span,
+                                    AsmErrorKind::UndefinedName(name.clone()),
+                                ));
+                            }
+                        }
                     },
                 }
             }

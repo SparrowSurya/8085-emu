@@ -290,7 +290,8 @@ mod tests {
             bss_addr: 0x0000,
             bss_size: 0,
             vec_size: 0,
-            reserved: [0u8; 8],
+            sym_size: 0,
+            reserved: [0u8; 6],
         };
 
         let container = BinaryContainer {
@@ -298,6 +299,7 @@ mod tests {
             vec_bytes: Vec::new(),
             data_bytes: Vec::new(),
             text_bytes: vec![0x3E, 0x42, 0x06, 0x10, 0x76], // MVI A, 0x42; MVI B, 0x10; HLT
+            export_symbols: Vec::new(),
         };
 
         let container_bytes = container.encode();

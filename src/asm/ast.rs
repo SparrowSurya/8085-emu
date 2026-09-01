@@ -7,13 +7,28 @@
 use super::encode::{AReg16, AReg8};
 use super::error::Span;
 
-/// A whole program: leading `%define`s (which must precede all segments) then segments.
+/// A whole program: leading `%include`s, `%define`s, `extern`/`global` declarations, and segments.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Program {
+    /// Top-level `%include "path"` directives.
+    pub includes: Vec<Include>,
     /// Top-level constant definitions.
     pub defines: Vec<Define>,
+    /// External symbols declared via `extern <name>`.
+    pub externs: Vec<String>,
+    /// Exported global symbols declared via `global <name>`.
+    pub globals: Vec<String>,
     /// Segments in source order.
     pub segments: Vec<Segment>,
+}
+
+/// A `%include "path"` directive.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Include {
+    /// The file path to include.
+    pub path: String,
+    /// Source position.
+    pub span: Span,
 }
 
 /// A `%define NAME VALUE` constant.
@@ -65,7 +80,7 @@ pub enum Segment {
     Data(Vec<DataDef>),
     /// `.bss` — zero-filled reservations.
     Bss(Vec<BssDecl>),
-    /// `.text` — labels and instructions.
+    /// `.text` — labels, declarations, and instructions.
     Text(Vec<TextItem>),
 }
 
@@ -95,11 +110,19 @@ pub struct BssDecl {
     pub span: Span,
 }
 
-/// An item inside `.text`: either a label or an instruction.
+/// An item inside `.text`: labels, symbol visibility declarations, or instructions.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TextItem {
-    /// A label definition on its own line.
+    /// A label definition on its own line: `name:`
     Label(String, Span),
+    /// An inline global/exported label: `global name:` or `export name:`
+    GlobalLabel(String, Span),
+    /// A local label scoped to parent label: `.name:`
+    LocalLabel(String, Span),
+    /// Standalone `global name` or `export name` declaration.
+    GlobalDecl(String, Span),
+    /// Standalone `extern name` declaration.
+    ExternDecl(String, Span),
     /// An instruction.
     Instr(Instr),
 }
@@ -115,7 +138,7 @@ pub struct Instr {
     pub span: Span,
 }
 
-/// A parsed operand. `Sym` and `Len` are unresolved numeric sources.
+/// A parsed operand. `Sym`, `LocalSym`, and `Len` are unresolved numeric sources.
 #[derive(Debug, Clone, PartialEq)]
 pub enum POperand {
     /// An 8-bit register (or `M`).
@@ -126,8 +149,10 @@ pub enum POperand {
     Num(u32),
     /// A character literal used as an 8-bit immediate.
     Char(u8),
-    /// A symbol reference: a label, variable, or `%define` (resolved to a number/address).
+    /// A standard symbol reference: a label, variable, or `%define`.
     Sym(String),
+    /// A local symbol reference: e.g. `.loop` (resolved against the enclosing parent label).
+    LocalSym(String),
     /// `%len IDENT` in operand position.
     Len(String),
 }

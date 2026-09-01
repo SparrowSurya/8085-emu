@@ -1,0 +1,35 @@
+%include "terminal.e8085"
+
+segment .data
+	prompt   "What is your name? "
+	greeting "Hello, "
+
+segment .bss
+	username BYTE 32
+
+segment .text
+main:
+	; Display prompt
+	lxi HL, prompt
+	mvi B, %len prompt
+	call print
+
+	; Read user input into username buffer
+	lxi HL, username
+	mvi B, %len username
+	call input
+	mov C, A            ; save username length
+
+	; Display "Hello, "
+	lxi HL, greeting
+	mvi B, %len greeting
+	call print
+
+	; Display the entered username
+	lxi HL, username
+	mov B, C            ; restore username length
+	call print
+
+	; Print a newline at the end
+	call endl
+	hlt

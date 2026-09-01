@@ -111,9 +111,75 @@ main:
   ; ...
 ```
 
+### `%include` (File Inclusion)
+Imports definitions, global labels, and constants from an external source file:
+
+```assembly
+%include "terminal.e8085"
+; or with single quotes:
+%include 'math/helpers.e8085'
+```
+
 ---
 
-## 4. Data Types & Number Formats
+## 4. Scoping & Modular Keywords
+
+### `global` / `export`
+Exports a label or subroutine globally so it can be referenced across modules and entered into the `.8085.bin` Export Symbol Table:
+
+```assembly
+segment .text
+
+; Inline export declaration
+global print:
+    mvi A, 0x00
+    out 0x02
+    ret
+
+; Or separate export declaration
+global helper
+helper:
+    ret
+```
+
+### `extern`
+Declares a symbol that will be resolved externally at link time (via linked `.8085.bin` container or `%include`):
+
+```assembly
+segment .text
+
+extern print
+extern input
+
+main:
+    call print
+    hlt
+```
+
+### Local Labels (`.name:`, `jz .name`)
+Scoped directly to the preceding parent (non-local) label. Prevents name collisions across separate subroutines:
+
+```assembly
+segment .text
+
+func_a:
+    mvi B, 5
+.loop:
+    dcr B
+    jnz .loop
+    ret
+
+func_b:
+    mvi C, 10
+.loop:               ; Scoped to func_b, does not conflict with func_a.loop
+    dcr C
+    jnz .loop
+    ret
+```
+
+---
+
+## 5. Data Types & Number Formats
 
 ### Data Types
 - `BYTE`: 8-bit unsigned integer (`0x00` .. `0xFF`).
@@ -133,7 +199,7 @@ main:
 
 ---
 
-## 5. Registers & Operands
+## 6. Registers & Operands
 
 ### 8-Bit Registers
 - `A` — Accumulator (primary arithmetic/logical operand).
@@ -149,7 +215,7 @@ main:
 
 ---
 
-## 6. Interrupts & ISR Subroutines
+## 7. Interrupts & ISR Subroutines
 
 The assembler automatically wires 3-byte `JMP <isr>` hooks into the 8085 Interrupt Vector Table (`0x0000`..`0x003F`) when standardized ISR label names are defined:
 
@@ -181,7 +247,7 @@ isr_rst55:
 
 ---
 
-## 7. Instruction Set Reference
+## 8. Instruction Set Reference
 
 ### 1. Data Transfer Instructions
 | Mnemonic | Operands | Description | Example |
@@ -275,7 +341,7 @@ isr_rst55:
 
 ---
 
-## 8. Complete Annotated Program Example
+## 9. Complete Annotated Program Example
 
 ```e8085
 ; ==========================================================

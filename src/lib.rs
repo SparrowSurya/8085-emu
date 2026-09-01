@@ -36,6 +36,10 @@ pub mod value;
 
 pub mod cpu;
 
+pub use asm::{
+    assemble, assemble_listing, assemble_with_options, assemble_with_symbols, load,
+    BinaryContainer, ContainerHeader, LoadImage,
+};
 pub use bus::{ControlLines, SystemBus};
 pub use cpu::flags::Flags;
 pub use cpu::interrupts::{VEC_RST_5_5, VEC_RST_6_5, VEC_RST_7_5, VEC_TRAP};

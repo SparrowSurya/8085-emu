@@ -153,37 +153,31 @@ impl Lexer {
 
     fn lex_char(&mut self, start: Span) -> Result<TokenKind, AsmError> {
         self.bump(); // opening quote
-        match self.peek() {
-            Some('\'') => {
-                self.bump();
-                Err(AsmError::new(start, AsmErrorKind::EmptyCharLiteral))
-            }
-            None | Some('\n') => Err(AsmError::new(start, AsmErrorKind::EmptyCharLiteral)),
-            Some(c) => {
-                self.bump(); // the character
-                match self.peek() {
-                    Some('\'') => {
-                        self.bump(); // closing quote
+        let mut s = String::new();
+        loop {
+            match self.peek() {
+                None | Some('\n') => {
+                    return Err(AsmError::new(start, AsmErrorKind::UnterminatedString));
+                }
+                Some('\'') => {
+                    self.bump(); // closing quote
+                    if s.is_empty() {
+                        return Err(AsmError::new(start, AsmErrorKind::EmptyCharLiteral));
+                    } else if s.len() == 1 {
+                        let c = s.chars().next().unwrap();
                         if (c as u32) <= 0xFF {
-                            Ok(TokenKind::Char(c as u8))
+                            return Ok(TokenKind::Char(c as u8));
                         } else {
-                            Err(AsmError::new(start, AsmErrorKind::MultiCharLiteral))
+                            return Ok(TokenKind::Str(s));
                         }
+                    } else {
+                        // Multi-character single-quoted string (e.g. for %include 'file.e8085')
+                        return Ok(TokenKind::Str(s));
                     }
-                    _ => {
-                        // Consume up to the closing quote or newline for error recovery.
-                        while let Some(x) = self.peek() {
-                            if x == '\'' {
-                                self.bump();
-                                break;
-                            }
-                            if x == '\n' {
-                                break;
-                            }
-                            self.bump();
-                        }
-                        Err(AsmError::new(start, AsmErrorKind::MultiCharLiteral))
-                    }
+                }
+                Some(c) => {
+                    s.push(c);
+                    self.bump();
                 }
             }
         }
@@ -313,13 +307,13 @@ mod tests {
     #[test]
     fn lexer_errors() {
         assert_eq!(
-            lex("\"oops").unwrap_err().kind,
+            lex("'oops").unwrap_err().kind,
             AsmErrorKind::UnterminatedString
         );
         assert_eq!(lex("''").unwrap_err().kind, AsmErrorKind::EmptyCharLiteral);
         assert_eq!(
-            lex("'ab'").unwrap_err().kind,
-            AsmErrorKind::MultiCharLiteral
+            lex("'ab'").unwrap()[0].kind,
+            TokenKind::Str("ab".into())
         );
         assert!(matches!(
             lex("0x").unwrap_err().kind,

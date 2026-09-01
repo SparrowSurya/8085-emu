@@ -1,11 +1,14 @@
 //! Command-line interface for the Intel 8085 emulator and assembler toolchain.
 
+use std::collections::HashMap;
 use std::io::Write;
+use std::path::Path;
 use std::sync::mpsc::channel;
 
 use clap::{Parser, Subcommand};
+use emu8085::asm::assemble_with_options;
 use emu8085::asm::container::{BinaryContainer, CONTAINER_MAGIC};
-use emu8085::asm::{assemble, load};
+use emu8085::asm::load;
 use emu8085::{Addr, Machine, TerminalDevice};
 
 /// Maximum 8085 RAM capacity (64 KB).
@@ -28,12 +31,20 @@ enum Commands {
     Run {
         /// Input file to execute (.e8085 or .8085.bin)
         file: String,
+
+        /// Additional library containers (.8085.bin) or source files to link
+        #[arg(short = 'l', long = "link")]
+        link: Vec<String>,
     },
 
     /// Compile a .e8085 assembly source file into a .8085.bin binary image
     Compile {
         /// Input assembly file (.e8085 or .asm)
         file: String,
+
+        /// Additional library containers (.8085.bin) or source files to link
+        #[arg(short = 'l', long = "link")]
+        link: Vec<String>,
 
         /// Output binary file path (default: <filename>.8085.bin)
         #[arg(short, long)]
@@ -51,8 +62,10 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Run { file } => run_file(&file),
-        Commands::Compile { file, output } => compile_file(&file, output.as_deref()),
+        Commands::Run { file, link } => run_file(&file, &link),
+        Commands::Compile { file, link, output } => {
+            compile_file(&file, &link, output.as_deref())
+        }
         Commands::Disassemble { file } => disassemble_file(&file),
     }
 }
@@ -73,8 +86,85 @@ fn disassemble_file(path: &str) {
     }
 }
 
-fn run_file(path: &str) {
+fn load_external_symbols(link_paths: &[String]) -> (HashMap<String, u16>, Vec<BinaryContainer>) {
+    let mut external_symbols = HashMap::new();
+    let mut containers = Vec::new();
+
+    for path in link_paths {
+        let bytes = std::fs::read(path).unwrap_or_else(|e| {
+            eprintln!("cannot read library file '{path}': {e}");
+            std::process::exit(2);
+        });
+
+        if bytes.len() >= 4 && bytes[0..4] == CONTAINER_MAGIC {
+            let container = BinaryContainer::decode(&bytes).unwrap_or_else(|e| {
+                eprintln!("error reading library container '{path}': {e}");
+                std::process::exit(1);
+            });
+
+            for (sym, addr) in &container.export_symbols {
+                external_symbols.insert(sym.clone(), *addr);
+            }
+            containers.push(container);
+        } else {
+            // Source file linked
+            let src = String::from_utf8(bytes).unwrap_or_else(|e| {
+                eprintln!("library file '{path}' is neither a valid container nor UTF-8 text: {e}");
+                std::process::exit(1);
+            });
+            let base_dir = Path::new(path).parent();
+            let image = assemble_with_options(&src, base_dir, &HashMap::new()).unwrap_or_else(|e| {
+                eprintln!("{path}:{}: error assembling linked module: {}", e.span, e.kind);
+                std::process::exit(1);
+            });
+            for (sym, addr) in &image.export_symbols {
+                external_symbols.insert(sym.clone(), *addr);
+            }
+            containers.push(image.to_container());
+        }
+    }
+
+    (external_symbols, containers)
+}
+
+fn load_container_into_machine(machine: &mut Machine, container: &BinaryContainer) {
+    // Load vector table if present
+    if !container.vec_bytes.is_empty() {
+        for (i, &b) in container.vec_bytes.iter().enumerate() {
+            machine.ram.write(Addr(i as u16), b);
+        }
+    }
+
+    // Load .data
+    for (i, &b) in container.data_bytes.iter().enumerate() {
+        machine
+            .ram
+            .write(Addr(container.header.data_addr.wrapping_add(i as u16)), b);
+    }
+
+    // Zero .bss
+    for i in 0..container.header.bss_size {
+        machine
+            .ram
+            .write(Addr(container.header.bss_addr.wrapping_add(i)), 0);
+    }
+
+    // Load .text
+    for (i, &b) in container.text_bytes.iter().enumerate() {
+        machine
+            .ram
+            .write(Addr(container.header.text_addr.wrapping_add(i as u16)), b);
+    }
+}
+
+fn run_file(path: &str, link: &[String]) {
     let mut machine = Machine::default();
+    let (external_symbols, link_containers) = load_external_symbols(link);
+
+    // Preload all linked libraries into memory
+    for lib in &link_containers {
+        load_container_into_machine(&mut machine, lib);
+    }
 
     if path.ends_with(".bin") || path.ends_with(".8085.bin") {
         let bytes = std::fs::read(path).unwrap_or_else(|e| {
@@ -82,40 +172,13 @@ fn run_file(path: &str) {
             std::process::exit(2);
         });
 
-        if bytes.len() >= 4 && &bytes[0..4] == &CONTAINER_MAGIC {
+        if bytes.len() >= 4 && bytes[0..4] == CONTAINER_MAGIC {
             let container = BinaryContainer::decode(&bytes).unwrap_or_else(|e| {
                 eprintln!("error reading container '{path}': {e}");
                 std::process::exit(1);
             });
 
-            // Load vector table if present
-            if !container.vec_bytes.is_empty() {
-                for (i, &b) in container.vec_bytes.iter().enumerate() {
-                    machine.ram.write(Addr(i as u16), b);
-                }
-            }
-
-            // Load .data
-            for (i, &b) in container.data_bytes.iter().enumerate() {
-                machine
-                    .ram
-                    .write(Addr(container.header.data_addr.wrapping_add(i as u16)), b);
-            }
-
-            // Zero .bss
-            for i in 0..container.header.bss_size {
-                machine
-                    .ram
-                    .write(Addr(container.header.bss_addr.wrapping_add(i)), 0);
-            }
-
-            // Load .text
-            for (i, &b) in container.text_bytes.iter().enumerate() {
-                machine
-                    .ram
-                    .write(Addr(container.header.text_addr.wrapping_add(i as u16)), b);
-            }
-
+            load_container_into_machine(&mut machine, &container);
             machine.cpu.regs.pc = Addr(container.header.entry_pc);
             machine.cpu.regs.sp = Addr(container.header.sp_init);
         } else {
@@ -141,7 +204,8 @@ fn run_file(path: &str) {
             std::process::exit(2);
         });
 
-        let image = match assemble(&src) {
+        let base_dir = Path::new(path).parent();
+        let image = match assemble_with_options(&src, base_dir, &external_symbols) {
             Ok(img) => img,
             Err(e) => {
                 eprintln!("{path}:{}: error: {}", e.span, e.kind);
@@ -190,13 +254,16 @@ fn run_file(path: &str) {
     }
 }
 
-fn compile_file(input_path: &str, output_path: Option<&str>) {
+fn compile_file(input_path: &str, link: &[String], output_path: Option<&str>) {
     let src = std::fs::read_to_string(input_path).unwrap_or_else(|e| {
         eprintln!("cannot read assembly file '{input_path}': {e}");
         std::process::exit(2);
     });
 
-    let image = match assemble(&src) {
+    let (external_symbols, _) = load_external_symbols(link);
+    let base_dir = Path::new(input_path).parent();
+
+    let image = match assemble_with_options(&src, base_dir, &external_symbols) {
         Ok(img) => img,
         Err(e) => {
             eprintln!("{input_path}:{}: error: {}", e.span, e.kind);
@@ -235,9 +302,10 @@ fn compile_file(input_path: &str, output_path: Option<&str>) {
     });
 
     println!(
-        "Compiled '{input_path}' -> '{out_path}' ({} bytes, text: {}B, data: {}B)",
+        "Compiled '{input_path}' -> '{out_path}' ({} bytes, text: {}B, data: {}B, export symbols: {})",
         container_bytes.len(),
         container.header.text_size,
-        container.header.data_size
+        container.header.data_size,
+        container.export_symbols.len()
     );
 }

@@ -124,6 +124,21 @@ pub enum AsmErrorKind {
     EmptyText,
     /// The assembled image would not fit in the 64 KiB address space.
     ImageOverflow,
+    /// A local label (e.g. `.loop:`) appeared before any parent label.
+    LocalLabelWithoutParent(String),
+    /// An `extern` symbol was referenced but not provided by any included file or linked library.
+    UnresolvedSymbol(String),
+    /// Circular `%include` detected.
+    CircularInclude(String),
+    /// Failed to read or process an `%include` file.
+    IncludeError(String),
+    /// Attempted to access a private symbol from another module.
+    PrivateSymbolAccess {
+        /// The referenced symbol.
+        symbol: String,
+        /// The module defining it.
+        module: String,
+    },
 }
 
 impl fmt::Display for AsmErrorKind {
@@ -164,6 +179,13 @@ impl fmt::Display for AsmErrorKind {
             NotANumber(s) => write!(f, "{s} must evaluate to a number"),
             EmptyText => write!(f, ".text has no instructions"),
             ImageOverflow => write!(f, "program does not fit in 64 KiB"),
+            LocalLabelWithoutParent(s) => write!(f, "local label .{s} has no preceding parent label"),
+            UnresolvedSymbol(s) => write!(f, "unresolved external symbol {s:?}"),
+            CircularInclude(s) => write!(f, "circular include detected for {s}"),
+            IncludeError(s) => write!(f, "include error: {s}"),
+            PrivateSymbolAccess { symbol, module } => {
+                write!(f, "symbol {symbol:?} is private to module {module:?}")
+            }
         }
     }
 }

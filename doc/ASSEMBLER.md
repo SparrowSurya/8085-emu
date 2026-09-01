@@ -202,7 +202,8 @@ Offset   Size   Field        Type       Description
 0x14     2 B    bss_size     u16 (LE)   Byte length of .bss reservation (zero-filled)
 
 0x16     2 B    vec_size     u16 (LE)   Byte length of Vector Table payload (64 bytes)
-0x18     8 B    reserved     [u8; 8]    Reserved for future extensions
+0x18     2 B    sym_size     u16 (LE)   Byte length of Export Symbol Table payload
+0x1A     6 B    reserved     [u8; 6]    Reserved for future extensions
 -------------------------------------------------------------------------------
 ```
 
@@ -215,8 +216,104 @@ The header is immediately followed by the section payloads in order:
    - Initialized variables, string constants, and byte/word arrays loaded at `data_addr`.
 3. **Text Payload** (`text_size` bytes):
    - Compiled 8085 CPU machine code instructions loaded at `text_addr`.
+4. **Export Symbol Table Payload** (`sym_size` bytes, if `FLAG_HAS_EXPORT_SYMS` is set):
+   - Exported `(symbol_name, address)` pairs formatted as `[name_len: u8, name_bytes: [u8], addr: u16 (LE)]`.
 
-### 3. Execution & Disassembly Benefits
-- **Zero Misalignment**: The disassembler decodes instructions only within `[text_addr .. text_addr + text_size]`.
-- **String Formatting**: Data bytes in `[data_addr .. data_addr + data_size]` are formatted as printable strings and constants.
-- **Fast Loader**: The emulator loader maps each segment directly to its target address in RAM, sets `PC = entry_pc`, and starts execution immediately.
+---
+
+## 6. Modular Assembly & Scoping
+
+The assembler supports modular development across multiple files and subroutines:
+
+### 1. `global` / `export` Keywords
+Marks a label or variable as accessible from other modules and records it in the `.8085.bin` Export Symbol Table:
+```assembly
+segment .text
+
+; Inline global declaration
+global print:
+    mvi A, 0x00
+    out 0x02
+    ret
+
+; Or separate declaration
+global helper
+helper:
+    ret
+```
+> **Note:** By default, all labels (and `main:`) are **private/local** to the defining module and cannot be accessed externally unless declared `global`.
+
+### 2. `extern` Keyword
+Declares external symbols that will be resolved at link time (via `%include`, linked source files, or precompiled `.8085.bin` libraries):
+```assembly
+segment .text
+
+extern print
+extern input
+
+main:
+    call print
+    hlt
+```
+
+### 3. Local Labels (`.name:`, `jz .name`)
+Subroutine-scoped local labels prefixed with `.` prevent naming collisions between helper routines:
+```assembly
+segment .text
+
+strlen:
+    mvi B, 0
+.loop:
+    mov A, M
+    cpi 0
+    jz .exit
+    inx HL
+    inr B
+    jmp .loop
+.exit:
+    ret
+
+strcpy:
+.loop:
+    ; This .loop is distinct to strcpy and never conflicts with strlen.loop
+    mov A, M
+    stax DE
+    inx HL
+    inx DE
+    jmp .loop
+```
+
+### 4. `%include` Directive
+Imports `%define` constants, `global` routines, and data declarations from external files:
+```assembly
+%include "terminal.e8085"
+
+segment .data
+    greeting "Hello, " 0x0A
+
+segment .text
+main:
+    lxi HL, greeting
+    mvi B, %len greeting
+    call print
+    hlt
+```
+- Includes are resolved relative to the including file's directory.
+- Features circular include protection (idempotent inclusion).
+
+---
+
+## 7. Multi-File Compilation & Library Linking (`-l`)
+
+### Compiling and Linking Libraries
+Compile reusable helper modules into `.8085.bin` libraries:
+```bash
+# 1. Compile terminal helper library
+cargo run --bin e8085 -- compile spec/examples/terminal.e8085 -o target/terminal.8085.bin
+
+# 2. Compile main program linking with precompiled library
+cargo run --bin e8085 -- compile program.e8085 -l target/terminal.8085.bin -o target/program.8085.bin
+
+# 3. Run linked executable with library loaded in memory
+cargo run --bin e8085 -- run target/program.8085.bin -l target/terminal.8085.bin
+```

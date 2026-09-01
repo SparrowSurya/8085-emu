@@ -2,7 +2,7 @@
 //!
 //! Provides a structured, self-describing container for 8085 machine code images,
 //! including magic identifier, entry point, section boundaries (.text, .data, .bss),
-//! and vector table metadata.
+//! vector table metadata, and exported symbol tables for library linking.
 
 pub const CONTAINER_MAGIC: [u8; 4] = *b"8085";
 pub const CONTAINER_VERSION: u8 = 1;
@@ -10,6 +10,8 @@ pub const HEADER_SIZE: usize = 32;
 
 /// Flag bit indicating vector table is present in container payload.
 pub const FLAG_HAS_VEC_TABLE: u8 = 0x01;
+/// Flag bit indicating export symbol table is present in container payload.
+pub const FLAG_HAS_EXPORT_SYMS: u8 = 0x02;
 
 /// 32-byte header for .8085.bin files.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,7 +28,8 @@ pub struct ContainerHeader {
     pub bss_addr: u16,
     pub bss_size: u16,
     pub vec_size: u16,
-    pub reserved: [u8; 8],
+    pub sym_size: u16,
+    pub reserved: [u8; 6],
 }
 
 impl ContainerHeader {
@@ -44,7 +47,8 @@ impl ContainerHeader {
         buf[18..20].copy_from_slice(&self.bss_addr.to_le_bytes());
         buf[20..22].copy_from_slice(&self.bss_size.to_le_bytes());
         buf[22..24].copy_from_slice(&self.vec_size.to_le_bytes());
-        buf[24..32].copy_from_slice(&self.reserved);
+        buf[24..26].copy_from_slice(&self.sym_size.to_le_bytes());
+        buf[26..32].copy_from_slice(&self.reserved);
         buf
     }
 
@@ -69,8 +73,9 @@ impl ContainerHeader {
         let bss_addr = u16::from_le_bytes([bytes[18], bytes[19]]);
         let bss_size = u16::from_le_bytes([bytes[20], bytes[21]]);
         let vec_size = u16::from_le_bytes([bytes[22], bytes[23]]);
-        let mut reserved = [0u8; 8];
-        reserved.copy_from_slice(&bytes[24..32]);
+        let sym_size = u16::from_le_bytes([bytes[24], bytes[25]]);
+        let mut reserved = [0u8; 6];
+        reserved.copy_from_slice(&bytes[26..32]);
 
         Ok(ContainerHeader {
             magic: CONTAINER_MAGIC,
@@ -85,40 +90,95 @@ impl ContainerHeader {
             bss_addr,
             bss_size,
             vec_size,
+            sym_size,
             reserved,
         })
     }
 }
 
-/// A decoded 8085 binary container image.
+/// A decoded 8085 binary container image with optional symbol table.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BinaryContainer {
     pub header: ContainerHeader,
     pub vec_bytes: Vec<u8>,
     pub data_bytes: Vec<u8>,
     pub text_bytes: Vec<u8>,
+    pub export_symbols: Vec<(String, u16)>,
 }
 
 impl BinaryContainer {
+    /// Look up the address of an exported symbol.
+    pub fn lookup_symbol(&self, name: &str) -> Option<u16> {
+        self.export_symbols
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(name))
+            .map(|(_, addr)| *addr)
+    }
+
+    /// Encode export symbols into raw bytes.
+    fn encode_symbols(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        for (name, addr) in &self.export_symbols {
+            let bytes = name.as_bytes();
+            if bytes.len() <= 255 {
+                out.push(bytes.len() as u8);
+                out.extend_from_slice(bytes);
+                out.extend_from_slice(&addr.to_le_bytes());
+            }
+        }
+        out
+    }
+
+    /// Decode export symbols from raw bytes.
+    fn decode_symbols(mut bytes: &[u8]) -> Result<Vec<(String, u16)>, String> {
+        let mut syms = Vec::new();
+        while !bytes.is_empty() {
+            if bytes.len() < 3 {
+                return Err("malformed symbol table payload".into());
+            }
+            let name_len = bytes[0] as usize;
+            bytes = &bytes[1..];
+            if bytes.len() < name_len + 2 {
+                return Err("malformed symbol table payload".into());
+            }
+            let name_bytes = &bytes[..name_len];
+            let name = String::from_utf8(name_bytes.to_vec())
+                .map_err(|_| "symbol name is not valid UTF-8")?;
+            bytes = &bytes[name_len..];
+            let addr = u16::from_le_bytes([bytes[0], bytes[1]]);
+            bytes = &bytes[2..];
+            syms.push((name, addr));
+        }
+        Ok(syms)
+    }
+
     pub fn encode(&self) -> Vec<u8> {
+        let sym_bytes = self.encode_symbols();
         let total_size = HEADER_SIZE
             + self.vec_bytes.len()
             + self.data_bytes.len()
-            + self.text_bytes.len();
+            + self.text_bytes.len()
+            + sym_bytes.len();
         let mut out = Vec::with_capacity(total_size);
 
         let mut header = self.header;
         header.vec_size = self.vec_bytes.len() as u16;
         header.data_size = self.data_bytes.len() as u16;
         header.text_size = self.text_bytes.len() as u16;
+        header.sym_size = sym_bytes.len() as u16;
+
         if !self.vec_bytes.is_empty() {
             header.flags |= FLAG_HAS_VEC_TABLE;
+        }
+        if !self.export_symbols.is_empty() {
+            header.flags |= FLAG_HAS_EXPORT_SYMS;
         }
 
         out.extend_from_slice(&header.encode());
         out.extend_from_slice(&self.vec_bytes);
         out.extend_from_slice(&self.data_bytes);
         out.extend_from_slice(&self.text_bytes);
+        out.extend_from_slice(&sym_bytes);
         out
     }
 
@@ -127,7 +187,8 @@ impl BinaryContainer {
 
         let expected_payload = header.vec_size as usize
             + header.data_size as usize
-            + header.text_size as usize;
+            + header.text_size as usize
+            + header.sym_size as usize;
         let total_expected = HEADER_SIZE + expected_payload;
 
         if bytes.len() < total_expected {
@@ -143,16 +204,24 @@ impl BinaryContainer {
         let data_end = data_start + header.data_size as usize;
         let text_start = data_end;
         let text_end = text_start + header.text_size as usize;
+        let sym_start = text_end;
+        let sym_end = sym_start + header.sym_size as usize;
 
         let vec_bytes = bytes[vec_start..vec_end].to_vec();
         let data_bytes = bytes[data_start..data_end].to_vec();
         let text_bytes = bytes[text_start..text_end].to_vec();
+        let export_symbols = if header.sym_size > 0 {
+            Self::decode_symbols(&bytes[sym_start..sym_end])?
+        } else {
+            Vec::new()
+        };
 
         Ok(BinaryContainer {
             header,
             vec_bytes,
             data_bytes,
             text_bytes,
+            export_symbols,
         })
     }
 }

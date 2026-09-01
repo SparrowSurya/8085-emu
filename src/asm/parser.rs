@@ -114,20 +114,39 @@ impl Parser {
     // ── top level ──────────────────────────────────────────────────────────
 
     fn program(&mut self) -> Result<Program, AsmError> {
+        let mut includes = Vec::new();
         let mut defines = Vec::new();
+        let mut externs = Vec::new();
+        let mut globals = Vec::new();
         let mut segments = Vec::new();
 
-        // All %define directives first.
+        // Top-level directives: %include, %define, extern, global
         loop {
             self.skip_newlines();
-            if self.is_define_ahead() {
+            if self.is_include_ahead() {
+                includes.push(self.include()?);
+            } else if self.is_define_ahead() {
                 defines.push(self.define()?);
+            } else if self.is_extern_ahead() {
+                let span = self.span();
+                self.bump(); // 'extern'
+                let (name, _) = self.ident()?;
+                self.expect_newline()?;
+                externs.push(name);
+                let _ = span;
+            } else if self.is_global_ahead() && !matches!(self.peek_at(2), TokenKind::Colon) {
+                let span = self.span();
+                self.bump(); // 'global' / 'export'
+                let (name, _) = self.ident()?;
+                self.expect_newline()?;
+                globals.push(name);
+                let _ = span;
             } else {
                 break;
             }
         }
 
-        // Then segments; a %define here is an error.
+        // Then segments; a %define or %include here is an error.
         loop {
             self.skip_newlines();
             if self.at_eof() {
@@ -136,10 +155,24 @@ impl Parser {
             if self.is_define_ahead() {
                 return Err(self.err(AsmErrorKind::DefineAfterSegment));
             }
+            if self.is_include_ahead() {
+                return Err(self.err(AsmErrorKind::DefineAfterSegment));
+            }
             segments.push(self.segment()?);
         }
 
-        Ok(Program { defines, segments })
+        Ok(Program {
+            includes,
+            defines,
+            externs,
+            globals,
+            segments,
+        })
+    }
+
+    fn is_include_ahead(&self) -> bool {
+        matches!(self.peek(), TokenKind::Percent)
+            && matches!(self.peek_at(1), TokenKind::Ident(s) if s.eq_ignore_ascii_case("include"))
     }
 
     fn is_define_ahead(&self) -> bool {
@@ -147,8 +180,34 @@ impl Parser {
             && matches!(self.peek_at(1), TokenKind::Ident(s) if s.eq_ignore_ascii_case("define"))
     }
 
+    fn is_extern_ahead(&self) -> bool {
+        matches!(self.peek(), TokenKind::Ident(s) if s.eq_ignore_ascii_case("extern"))
+    }
+
+    fn is_global_ahead(&self) -> bool {
+        matches!(self.peek(), TokenKind::Ident(s) if s.eq_ignore_ascii_case("global") || s.eq_ignore_ascii_case("export"))
+    }
+
     fn is_segment_ahead(&self) -> bool {
         matches!(self.peek(), TokenKind::Ident(s) if s.eq_ignore_ascii_case("segment"))
+    }
+
+    fn include(&mut self) -> Result<Include, AsmError> {
+        let span = self.span();
+        self.bump(); // %
+        self.keyword_ci("include")?;
+        let path = match self.peek() {
+            TokenKind::Str(_) => {
+                if let TokenKind::Str(s) = self.bump() {
+                    s
+                } else {
+                    unreachable!()
+                }
+            }
+            _ => return Err(self.unexpected("a quoted file path")),
+        };
+        self.expect_newline()?;
+        Ok(Include { path, span })
     }
 
     fn define(&mut self) -> Result<Define, AsmError> {
@@ -197,7 +256,7 @@ impl Parser {
     /// ended — i.e. the current segment body is finished. Stopping at `%define` lets the
     /// top-level loop report it as [`AsmErrorKind::DefineAfterSegment`].
     fn at_body_end(&self) -> bool {
-        self.at_eof() || self.is_segment_ahead() || self.is_define_ahead()
+        self.at_eof() || self.is_segment_ahead() || self.is_define_ahead() || self.is_include_ahead()
     }
 
     fn data_body(&mut self) -> Result<Vec<DataDef>, AsmError> {
@@ -208,9 +267,15 @@ impl Parser {
                 break;
             }
             let (name, span) = self.name()?;
-            let size = self.size()?;
+            let size = self.optional_size()?;
             let mut values = vec![self.value()?];
             while !matches!(self.peek(), TokenKind::Newline | TokenKind::Eof) {
+                if matches!(self.peek(), TokenKind::Comma) {
+                    self.bump();
+                }
+                if matches!(self.peek(), TokenKind::Newline | TokenKind::Eof) {
+                    break;
+                }
                 values.push(self.value()?);
             }
             self.expect_newline()?;
@@ -222,6 +287,16 @@ impl Parser {
             });
         }
         Ok(defs)
+    }
+
+    fn optional_size(&mut self) -> Result<Size, AsmError> {
+        if let TokenKind::Ident(s) = self.peek() {
+            if let Some(sz) = keyword::size(s) {
+                self.bump();
+                return Ok(sz);
+            }
+        }
+        Ok(Size::Byte)
     }
 
     fn bss_body(&mut self) -> Result<Vec<BssDecl>, AsmError> {
@@ -252,7 +327,48 @@ impl Parser {
             if self.at_body_end() {
                 break;
             }
-            // Label: IDENT ':' on its own line.
+
+            // 1. `extern NAME` declaration
+            if self.is_extern_ahead() {
+                let span = self.span();
+                self.bump(); // 'extern'
+                let (name, _) = self.ident()?;
+                self.expect_newline()?;
+                items.push(TextItem::ExternDecl(name, span));
+                continue;
+            }
+
+            // 2. `global / export NAME:` (inline) or `global / export NAME` (standalone)
+            if self.is_global_ahead() {
+                let span = self.span();
+                self.bump(); // 'global' / 'export'
+                let (name, _) = self.ident()?;
+                if matches!(self.peek(), TokenKind::Colon) {
+                    self.bump(); // ':'
+                    self.expect_newline()?;
+                    items.push(TextItem::GlobalLabel(name, span));
+                } else {
+                    self.expect_newline()?;
+                    items.push(TextItem::GlobalDecl(name, span));
+                }
+                continue;
+            }
+
+            // 3. Local label: `.NAME:` on its own line
+            if matches!(self.peek(), TokenKind::Period)
+                && matches!(self.peek_at(1), TokenKind::Ident(_))
+                && matches!(self.peek_at(2), TokenKind::Colon)
+            {
+                let span = self.span();
+                self.bump(); // '.'
+                let (name, _) = self.ident()?;
+                self.bump(); // ':'
+                self.expect_newline()?;
+                items.push(TextItem::LocalLabel(name, span));
+                continue;
+            }
+
+            // 4. Standard label: `IDENT ':'` on its own line
             if matches!(self.peek(), TokenKind::Ident(_))
                 && matches!(self.peek_at(1), TokenKind::Colon)
             {
@@ -262,6 +378,7 @@ impl Parser {
                 items.push(TextItem::Label(name, span));
                 continue;
             }
+
             // Otherwise an instruction.
             let (mnemonic, span) = self.ident()?;
             let operands = self.operands()?;
@@ -315,6 +432,12 @@ impl Parser {
             TokenKind::Char(b) => {
                 self.bump();
                 Ok(POperand::Char(b))
+            }
+            TokenKind::Period => {
+                // Local symbol reference: `.loop`
+                self.bump(); // '.'
+                let (name, _) = self.ident()?;
+                Ok(POperand::LocalSym(name))
             }
             TokenKind::Ident(s) => {
                 self.bump();
@@ -464,6 +587,10 @@ mod tests {
     fn items_span(item: &TextItem) -> Span {
         match item {
             TextItem::Label(_, s) => *s,
+            TextItem::GlobalLabel(_, s) => *s,
+            TextItem::LocalLabel(_, s) => *s,
+            TextItem::GlobalDecl(_, s) => *s,
+            TextItem::ExternDecl(_, s) => *s,
             TextItem::Instr(i) => i.span,
         }
     }

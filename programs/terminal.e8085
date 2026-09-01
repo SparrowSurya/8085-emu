@@ -1,0 +1,105 @@
+; THis program provides useful function to interact with the `TerminalDevice`
+
+%define TERM_CMD_WRITE   0x00
+%define TERM_CMD_DISPLAY 0x01
+%define TERM_CMD_READ    0x02
+%define TERM_DATA_PORT   0x01
+%define TERM_CMD_PORT    0x02
+
+segment .text
+
+; Subroutine: Displays the text in terminal
+; Args:
+;   * Memory address of buffer in HL register pair
+;   * Size of buffer to display in register B
+global print:
+    ; Enter write mode on terminal device
+    mvi A, TERM_CMD_WRITE
+    out TERM_CMD_PORT
+
+    ; Send the length of message to write
+    mov A, B
+    out TERM_DATA_PORT
+.send:
+    mov A, M
+    out TERM_DATA_PORT
+    inx HL
+    dcr B
+    jnz .send
+
+    ; Display the message stored in the buffer & exit
+    mvi A, TERM_CMD_DISPLAY
+    out TERM_CMD_PORT
+    ret
+
+
+; Subroutine: read the text from terminal
+; Args:
+;   * Memory address of buffer to store input text in HL register
+;   * Size of input to write in buffer in register B
+; Result:
+;   * Size of text read from input (in registers A and B)
+global input:
+    ; Enter read mode on terminal device
+    mvi A, TERM_CMD_READ
+    out TERM_CMD_PORT
+
+    ; Read the length of captured message from data port
+    in TERM_DATA_PORT
+    cpi 0
+    jz .empty
+
+    ; Store length in C (counter) and D (return value)
+    mov C, A
+    mov D, A
+
+.recv:
+    in TERM_DATA_PORT
+    mov M, A
+    inx HL
+    dcr C
+    jnz .recv
+
+    ; Return total bytes read in registers A and B
+    mov A, D
+    mov B, D
+    ret
+
+.empty:
+    mvi A, 0
+    mvi B, 0
+    ret
+
+
+; Subroutine: Prints a single character to the terminal
+; Args:
+;   * Character byte in register A
+; Clobbers: Registers A, C
+global putch:
+    ; Save character in C
+    mov C, A
+
+    ; Enter write mode on terminal device
+    mvi A, TERM_CMD_WRITE
+    out TERM_CMD_PORT
+
+    ; Send length 1
+    mvi A, 1
+    out TERM_DATA_PORT
+
+    ; Send character byte
+    mov A, C
+    out TERM_DATA_PORT
+
+    ; Display the buffer payload
+    mvi A, TERM_CMD_DISPLAY
+    out TERM_CMD_PORT
+    ret
+
+
+; Subroutine: Prints a newline character to the terminal
+; Args: None
+; Clobbers: Registers A, C
+global endl:
+    mvi A, 0x0A
+    jmp putch
