@@ -101,6 +101,69 @@ pub struct LoadImage {
     pub entry: u16,
     /// The stack pointer's initial value.
     pub sp_init: u16,
+    /// RAM address where .text begins.
+    pub text_addr: u16,
+    /// Byte length of .text section.
+    pub text_size: u16,
+    /// RAM address where .data begins.
+    pub data_addr: u16,
+    /// Byte length of .data section.
+    pub data_size: u16,
+    /// RAM address where .bss begins.
+    pub bss_addr: u16,
+    /// Byte length of .bss section.
+    pub bss_size: u16,
+}
+
+impl LoadImage {
+    /// Converts this LoadImage into a BinaryContainer for .8085.bin files.
+    pub fn to_container(&self) -> crate::asm::container::BinaryContainer {
+        let vec_size = if self.data_addr > 0 { self.data_addr as usize } else { 0 };
+        let vec_bytes = if self.bytes.len() >= vec_size {
+            self.bytes[0..vec_size].to_vec()
+        } else {
+            Vec::new()
+        };
+
+        let data_start = self.data_addr as usize;
+        let data_end = data_start + self.data_size as usize;
+        let data_bytes = if self.bytes.len() >= data_end {
+            self.bytes[data_start..data_end].to_vec()
+        } else {
+            Vec::new()
+        };
+
+        let text_start = self.text_addr as usize;
+        let text_end = text_start + self.text_size as usize;
+        let text_bytes = if self.bytes.len() >= text_end {
+            self.bytes[text_start..text_end].to_vec()
+        } else {
+            Vec::new()
+        };
+
+        let header = crate::asm::container::ContainerHeader {
+            magic: crate::asm::container::CONTAINER_MAGIC,
+            version: crate::asm::container::CONTAINER_VERSION,
+            flags: if vec_size > 0 { crate::asm::container::FLAG_HAS_VEC_TABLE } else { 0 },
+            entry_pc: self.entry,
+            sp_init: self.sp_init,
+            text_addr: self.text_addr,
+            text_size: self.text_size,
+            data_addr: self.data_addr,
+            data_size: self.data_size,
+            bss_addr: self.bss_addr,
+            bss_size: self.bss_size,
+            vec_size: vec_size as u16,
+            reserved: [0u8; 8],
+        };
+
+        crate::asm::container::BinaryContainer {
+            header,
+            vec_bytes,
+            data_bytes,
+            text_bytes,
+        }
+    }
 }
 
 /// One row of an assembly listing: the address, the bytes emitted there, and the source
@@ -329,11 +392,19 @@ impl<'a> Assembler<'a> {
             return Err(AsmError::new(Span::default(), AsmErrorKind::ImageOverflow));
         }
 
+        let text_size = taddr.saturating_sub(text_base as u16);
+
         Ok((
             LoadImage {
                 bytes,
                 entry,
                 sp_init: 0xFFFF,
+                text_addr: text_base as u16,
+                text_size,
+                data_addr: data_base as u16,
+                data_size: data_size as u16,
+                bss_addr: bss_base as u16,
+                bss_size: bss_size as u16,
             },
             symtab,
             listing,

@@ -121,3 +121,73 @@ fn test_program_demo_assembles_and_loads() {
     load(&mut m, &image).expect("demo.e8085 loads cleanly");
     assert!(image.bytes.len() > 0x40);
 }
+
+#[test]
+fn test_binary_image_execution_matches_source() {
+    let src = include_str!("../programs/array_sum.e8085");
+    let image = assemble(src).expect("assembles cleanly");
+    let raw_bytes = image.bytes.clone();
+
+    // Execute raw binary bytes loaded into machine RAM directly
+    let mut m = Machine::create(16, 8);
+    for (i, &b) in raw_bytes.iter().enumerate() {
+        m.ram.write(emu8085::Addr(i as u16), b);
+    }
+    m.cpu.regs.pc = emu8085::Addr(0x0000);
+    m.run();
+
+    assert_eq!(m.cpu.regs.a, 10);
+}
+
+#[test]
+fn test_container_encoding_and_disassembly() {
+    let src = include_str!("../programs/hello_world.e8085");
+    let image = assemble(src).expect("assembles cleanly");
+    let container = image.to_container();
+    let container_bytes = container.encode();
+
+    // Decode container
+    let decoded = emu8085::asm::container::BinaryContainer::decode(&container_bytes)
+        .expect("container decodes cleanly");
+    assert_eq!(decoded.header.entry_pc, image.entry);
+    assert_eq!(decoded.header.text_size, image.text_size);
+    assert_eq!(decoded.header.data_size, image.data_size);
+
+    // Disassemble container (strictly .text segment)
+    let rows = emu8085::disassemble_bytes(&container_bytes)
+        .expect("disassembles container cleanly");
+    assert!(!rows.is_empty());
+
+    let mnemonics: Vec<String> = rows.iter().map(|r| r.mnemonic.clone()).collect();
+    assert!(mnemonics.iter().any(|m| m.contains("MVI A, 0x00")));
+    assert!(mnemonics.iter().any(|m| m.contains("OUT 0x02")));
+    assert!(mnemonics.iter().any(|m| m.contains("HLT")));
+    // Must NOT contain vector table or data
+    assert!(!mnemonics.iter().any(|m| m.contains("JMP 0x004D")));
+    assert!(!mnemonics.iter().any(|m| m.contains("Hello World!")));
+}
+
+#[test]
+fn test_disassembler_decodes_container_subroutine() {
+    let src = include_str!("../programs/subroutine.e8085");
+    let image = assemble(src).expect("assembles cleanly");
+    let container_bytes = image.to_container().encode();
+
+    let rows = emu8085::disassemble_bytes(&container_bytes)
+        .expect("disassembles cleanly");
+    assert!(!rows.is_empty());
+
+    let mnemonics: Vec<String> = rows.iter().map(|r| r.mnemonic.clone()).collect();
+    assert!(mnemonics.iter().any(|m| m.contains("LXI SP, 0xF000")));
+    assert!(mnemonics.iter().any(|m| m.contains("MVI A, 0x05")));
+    assert!(mnemonics.iter().any(|m| m.contains("MVI B, 0x03")));
+    assert!(mnemonics.iter().any(|m| m.contains("ADD B")));
+    assert!(mnemonics.iter().any(|m| m.contains("RET")));
+    assert!(mnemonics.iter().any(|m| m.contains("HLT")));
+}
+
+#[test]
+fn test_disassembler_rejects_non_container_bytes() {
+    let raw_bytes = vec![0xC3, 0x00, 0x00, 0x76];
+    assert!(emu8085::disassemble_bytes(&raw_bytes).is_err());
+}

@@ -44,7 +44,9 @@ pub use cpu::{Cpu, MachineCycle};
 pub use device::{Device, DeviceManager, KeyboardDevice, PrinterDevice, TerminalDevice, USBDevice};
 pub use error::EmuError;
 pub use instruction::opcode::Opcode;
-pub use instruction::{Instruction, Operand};
+pub use instruction::{
+    disassemble_bytes, disassemble_container, DisassemblyRow, Instruction, Operand,
+};
 pub use machine::Machine;
 pub use memory::Memory;
 pub use program::Program;

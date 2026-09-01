@@ -5,8 +5,10 @@
 //! reference, so operands only ever carry immediate data, a direct address, or a label
 //! reference — see [`Operand`].
 
+pub mod disassemble;
 pub mod opcode;
 
+pub use disassemble::{disassemble_bytes, disassemble_container, DisassemblyRow};
 pub use opcode::Opcode;
 
 /// An instruction operand: an 8-bit immediate, a 16-bit immediate/address, or a symbolic

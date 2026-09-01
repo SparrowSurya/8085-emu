@@ -8,4 +8,5 @@ license = "MIT"
 repository = "https://github.com/sparrowsurya/8085-emu"
 
 [dependencies]
+clap = { version = "4.5", features = ["derive"] }
 thiserror = "2.0.19"

@@ -8,6 +8,7 @@
 
 pub mod assemble;
 pub mod ast;
+pub mod container;
 pub mod encode;
 pub mod error;
 pub mod keyword;
@@ -18,6 +19,7 @@ pub mod token;
 pub use assemble::{
     assemble, assemble_listing, assemble_with_symbols, load, ListingRow, LoadImage,
 };
+pub use container::{BinaryContainer, ContainerHeader};
 pub use ast::{BssDecl, DataDef, Define, Instr, POperand, Program, Segment, Size, TextItem, Value};
 pub use encode::{encode, AReg16, AReg8, Operand};
 pub use error::{AsmError, AsmErrorKind, Span};

@@ -1,78 +1,159 @@
 # emu8085
 
-A cycle-accurate Intel 8085 microprocessor emulator in Rust. The design is idiomatic Rust
-(closed enums, traits, `Result`, newtypes, explicit ownership) and its observable behavior is
-verified against a reference implementation.
+A cycle-accurate **Intel 8085 Microprocessor Emulator & Assembler Toolchain** implemented in modern Rust.
 
-## Quick start
+The emulator is **steppable at the T-state clock level**: the [`Machine`](src/machine.rs) drives a cycle-accurate [`Cpu`](src/cpu/mod.rs), a typed [`SystemBus`](src/bus/lines.rs), flat [`Memory`](src/memory/mod.rs) with fault interception, and attached peripheral devices one clock cycle at a time.
 
-```rust
-use emu8085::{Addr, Instruction, Machine, Opcode, Operand, Program};
+---
 
-let program = Program::new(vec![
-    Instruction::with(Opcode::MVI_A, Operand::Byte(0x05)),
-    Instruction::with(Opcode::MVI_A, Operand::Byte(0x03)),
-    Instruction::new(Opcode::ADD_B),
-    Instruction::new(Opcode::HLT),
-]);
+## Quick Start
 
-let mut machine = Machine::create(16, 8);
-machine.load(&program, Addr(0x0000)).unwrap();
-machine.run();
-assert_eq!(machine.cpu.regs.a, 0x08);
+### 1. Running Programs (`run`)
+Run any assembly source file (`.e8085`) or precompiled binary (`.8085.bin`):
+
+```bash
+# Run assembly file directly
+cargo run --bin e8085 -- run programs/demo.e8085
+
+# Run Hello World program
+cargo run --bin e8085 -- run programs/hello_world.e8085
+
+# Run precompiled binary file
+cargo run --bin e8085 -- run programs/hello_world.8085.bin
 ```
 
-Run the ported examples:
+### 2. Compiling Programs to Binary (`compile`)
+Compile `.e8085` source into a `.8085.bin` binary image:
 
+```bash
+cargo run --bin e8085 -- compile programs/hello_world.e8085 -o programs/hello_world.8085.bin
 ```
+
+### 3. Disassembling Binary Images (`disassemble`)
+Disassemble a `.8085.bin` machine code file into standard 8085 assembly instructions:
+
+```bash
+cargo run --bin e8085 -- disassemble programs/hello_world.8085.bin
+```
+
+### 4. Running Rust API Programmatic Examples
+Run any of the Rust API examples demonstrating direct hardware and emulator interaction:
+
+```bash
+# Hello World through the Rust builder API
 cargo run --example hello_world
-cargo run --example hello_world_labels
-cargo test
+
+# USB DMA memory transfer
+cargo run --example usb_dma_transfer
+
+# Keyboard interrupt handling
+cargo run --example keyboard_input_interrupt
 ```
 
-## What it models
-
-- **CPU**: A–L, hidden W/Z, PC, SP, the five flags, and the PSW (unused bits preserved
-  byte-for-byte across `PUSH`/`POP PSW`, matching the reference).
-- **T-state accuracy**: `Machine::step`/`tick` advances one T-state; per-opcode timing is
-  extracted verbatim from the reference so instruction and interrupt cycle counts match.
-- **Full instruction set**: every documented 8085 opcode, across data transfer,
-  arithmetic/logical, stack/subroutine, branching, and machine/I-O control.
-- **Interrupts**: TRAP, RST 7.5/6.5/5.5 (with masking via `SIM`/`RIM`), INTR + INTA, and
-  software `RST 0`–`RST 7`, in hardware priority order.
-- **DMA**: HOLD/HLDA bus-master handshake, plus `READY` wait states and `RESET_IN`.
-- **Devices**: a `Device` trait with a `DeviceManager`, and keyboard, USB (DMA), and
-  printer peripherals.
-- **Assembly with labels**: a `Program` compiler with two-pass label resolution.
-
-## Module layout
-
-```
-src/
-  lib.rs            crate root + public re-exports
-  error.rs          EmuError
-  value.rs          Addr / Port newtypes
-  bus/              SystemBus + typed control lines
-  memory/           flat RAM
-  cpu/              Cpu, registers, flags, alu, execute, interrupts
-  instruction/      Opcode enum, Instruction, Operand
-  program/          Program + two-pass label compiler
-  device/           Device trait, DeviceManager, keyboard/usb/printer
-  machine.rs        Machine facade (create/load/run/step/tick + DMA)
-tests/              differential + integration suites
-examples/           runnable ported example programs
+### 5. Running the Test Suite
+```bash
+# Run all unit tests, integration tests, and doc-tests
+cargo test --all-targets && cargo test --doc
 ```
 
-## How it's verified
+---
 
-Behavior is checked against the reference implementation, not just against hand-written
-expectations:
+## File Structure
 
-- **1,160 ALU vectors** — every arithmetic/logical/rotate/DAA operation over an
-  edge-case input grid, exact on result byte and full PSW.
-- **~1,100 randomized fuzz programs** — pseudo-random non-control instruction streams,
-  exact on all registers, probed memory, and T-state count. (This suite caught the one
-  real divergence during development: PSW unused-bit preservation.)
-- **Curated program suites** — arithmetic, control/stack/branch, interrupts (with cycle
-  counts), devices (including the INTR→INTA round-trip), and the reference's own labeled
-  example programs compiling to byte-identical output.
+```text
+emu8085/
+├── programs/           # 8085 user assembly programs (.e8085)
+│   ├── demo.e8085              # Interactive terminal I/O demo
+│   ├── hello_world.e8085       # Terminal device string display
+│   ├── array_sum.e8085         # Array traversal & summation (ADD M)
+│   ├── directives.e8085        # %define, %repeat, %len, and .bss
+│   ├── hardware_trap.e8085     # Hardware TRAP exception handling
+│   ├── hello.e8085             # Null-terminated string printer output
+│   ├── print_stars.e8085       # Printer port loop counter
+│   ├── software_interrupts.e8085 # Custom RST 1 & RST 2 ISR routines
+│   └── subroutine.e8085        # CALL and RET subroutine execution
+│
+├── examples/           # Rust programmatic API examples (.rs)
+│   ├── arithmetic_immediate.rs # Immediate arithmetic operations
+│   ├── arithmetic_register.rs  # Register-to-register arithmetic
+│   ├── bcd_arithmetic.rs       # DAA and BCD arithmetic
+│   ├── branching_control.rs    # Conditional jumps and flags
+│   ├── data_transfer.rs        # MOV, MVI, LDA, STA, LHLD, SHLD
+│   ├── hello_world.rs          # Basic machine initialization
+│   ├── hello_world_labels.rs   # Label resolution in Program compiler
+│   ├── keyboard_input_interrupt.rs # Keyboard hardware interrupt & INTA
+│   ├── logical_operations.rs   # ANA, ORA, XRA, CMA, CMP
+│   ├── loop_multiplication_labels.rs # Loop arithmetic with labels
+│   ├── printer_output.rs       # Direct port output streaming
+│   ├── register_pair_arithmetic.rs # DAD, INX, DCX operations
+│   ├── stack_operations.rs     # PUSH, POP, XTHL, SPHL
+│   ├── system_control_pins.rs  # READY, HOLD/HLDA, RESET_IN
+│   └── usb_dma_transfer.rs     # Bus mastering & DMA transfer
+│
+├── src/                # Core library and binaries
+│   ├── bin/
+│   │   └── e8085.rs            # Unified CLI binary (run, compile, disassemble)
+│   ├── asm/                    # Two-pass 8085 Assembler toolchain
+│   │   ├── assemble.rs         # Layout, vector table, and image generation
+│   │   ├── lexer.rs            # Lexical tokenizer (4 number bases, strings, directives)
+│   │   ├── parser.rs           # Recursive-descent AST parser
+│   │   ├── encode.rs           # Opcode & operand instruction encoder
+│   │   ├── token.rs            # Token definitions and spans
+│   │   └── ast.rs              # AST types for segments, directives, and instructions
+│   ├── cpu/                    # 8085 CPU core
+│   │   ├── mod.rs              # Steppable CPU state machine
+│   │   ├── execute.rs          # Instruction decoder & execution steps
+│   │   ├── alu.rs              # Full ALU with 8-bit arithmetic & DAA
+│   │   ├── flags.rs            # Typed flags (S, Z, AC, P, CY) & PSW
+│   │   ├── registers.rs        # Reg8 (A..L), Reg16 (BC, DE, HL, SP, PC, WZ)
+│   │   └── interrupts.rs       # Priority interrupts (TRAP, RST 7.5..5.5, INTR)
+│   ├── bus/                    # Shared system bus & control lines
+│   ├── memory/                 # RAM with boundary & fault protection
+│   ├── device/                 # Peripherals (Terminal, Printer, Keyboard, USB)
+│   ├── instruction/            # Instruction types and Opcode enum
+│   ├── machine.rs              # Unified system facade (run, step, tick, DMA)
+│   └── lib.rs                  # Crate root and documentation
+│
+├── tests/              # Integration and verification test suites
+│   ├── programs_integration.rs # Tests all programs/ files end-to-end
+│   ├── interrupt_software_and_hardware.rs # Software RST and Hardware TRAP tests
+│   ├── asm_coverage.rs         # Assembler directives & layout coverage
+│   ├── asm_end_to_end.rs       # Assembler end-to-end integration tests
+│   ├── arith_integration.rs    # Differential ALU tests against 8085 reference
+│   ├── control_integration.rs  # Branching & stack differential tests
+│   ├── device_integration.rs   # Peripheral device tests
+│   ├── examples_integration.rs # Automated example verification
+│   ├── fuzz_integration.rs     # Randomized fuzzing against reference
+│   ├── interrupt_integration.rs# Interrupt priority & timing tests
+│   ├── program_label_tests.rs  # Label resolution integration tests
+│   └── terminal_integration.rs # Terminal device I/O tests
+│
+└── doc/                # Detailed technical documentation
+    ├── ASSEMBLER.md            # In-depth Assembler pipeline & architecture
+    └── GRAMMAR.md              # Complete .e8085 language reference & syntax
+```
+
+---
+
+## Architectural Features
+
+- **Cycle-Accurate T-State Execution**: Step one clock cycle at a time via `machine.tick()` or step per-instruction via `machine.step()`. Per-opcode timing matches hardware reference specifications.
+- **Hardware & Software Interrupts**:
+  - Highest priority non-maskable **TRAP** (`0x0024`) for hardware exceptions (illegal opcode, memory faults).
+  - Maskable hardware interrupts: **RST 7.5** (`0x003C`), **RST 6.5** (`0x0034`), **RST 5.5** (`0x002C`), and **INTR** (`INTA` vectoring).
+  - Software interrupts: **RST 0** (`0x0000`) through **RST 7** (`0x0038`) with automatic Interrupt Vector Table mapping to `isr_rst<n>` subroutines.
+- **Direct Memory Access (DMA)**: Hardware `HOLD` / `HLDA` bus-master handshake allowing peripherals like `USBDevice` to stream directly to/from memory.
+- **Built-in Assembler**: Complete two-pass assembler supporting `%define`, `%repeat`, `%len`, segments (`.data`, `.bss`, `.text`), 4 number bases, strings, and automatic vector table generation.
+- **Rich Peripheral Set**:
+  - `TerminalDevice`: Two-port virtual terminal supporting line-buffered input and output.
+  - `PrinterDevice`: Character stream capture device with callbacks.
+  - `KeyboardDevice`: FIFO-buffered keyboard input device with INTR/INTA interrupt vectoring.
+  - `USBDevice`: DMA-capable high-speed transfer controller.
+
+---
+
+## Detailed Documentation
+
+For comprehensive technical documentation, refer to:
+- [**doc/ASSEMBLER.md**](doc/ASSEMBLER.md) — Detailed guide to the assembler pipeline, layout, symbol resolution, and vector tables.
+- [**doc/GRAMMAR.md**](doc/GRAMMAR.md) — Full language reference for `.e8085` assembly programs, syntax rules, directives, registers, and instructions.
