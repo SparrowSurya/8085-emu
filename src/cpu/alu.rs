@@ -5,7 +5,7 @@
 //! the `alu_vectors` replay test). The execution unit calls these; it never recomputes
 //! flags itself.
 
-use super::flags::{even_parity, Flags};
+use super::flags::{Flags, even_parity};
 
 /// Add `b` (+ optional carry-in) to `a`. Sets all five flags; returns the 8-bit result.
 /// Used by `ADD`/`ADI` (carry_in = false) and `ADC`/`ACI` (carry_in = current carry).

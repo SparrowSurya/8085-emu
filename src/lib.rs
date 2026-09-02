@@ -37,10 +37,10 @@ pub mod value;
 pub mod cpu;
 
 pub use asm::{
+    BinaryContainer, ContainerHeader, ExtractedString, InspectOptions, LoadImage, SegmentRecord,
     assemble, assemble_and_link, assemble_listing, assemble_with_options, assemble_with_symbols,
     extract_strings, format_header, format_segments, format_strings, format_symbols, get_segments,
-    inspect_container, load, BinaryContainer, ContainerHeader, ExtractedString, InspectOptions,
-    LoadImage, SegmentRecord,
+    inspect_container, load,
 };
 pub use bus::{ControlLines, SystemBus};
 pub use cpu::flags::Flags;
@@ -51,8 +51,8 @@ pub use device::{Device, DeviceManager, KeyboardDevice, PrinterDevice, TerminalD
 pub use error::EmuError;
 pub use instruction::opcode::Opcode;
 pub use instruction::{
-    disassemble_bytes, disassemble_container, disassemble_container_with_options, opcode_t_states,
-    DisassembleOptions, DisassemblyRow, Instruction, Operand,
+    DisassembleOptions, DisassemblyRow, Instruction, Operand, disassemble_bytes,
+    disassemble_container, disassemble_container_with_options, opcode_t_states,
 };
 pub use machine::Machine;
 pub use memory::Memory;

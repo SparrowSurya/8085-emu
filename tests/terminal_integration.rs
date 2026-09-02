@@ -1,22 +1,28 @@
 //! Drives the buffered TerminalDevice through the full CPU + RAM + DeviceManager loop
 //! with monitor-style programs, exercising WRITE/DISPLAY and READ over the real bus.
 
-use emu8085::instruction::Opcode::*;
-use emu8085::{Addr, Cpu, DeviceManager, Instruction as I, Memory, Operand, Program, SystemBus, TerminalDevice};
 use emu8085::device::terminal::{CMD_DISPLAY, CMD_READ, CMD_WRITE};
+use emu8085::instruction::Opcode::*;
+use emu8085::{
+    Addr, Cpu, DeviceManager, Instruction as I, Memory, Operand, Program, SystemBus, TerminalDevice,
+};
 
 const PORT_CMD: u8 = 0x08;
 const PORT_DATA: u8 = 0x09;
 
 fn out(port: u8, val: u8) -> Vec<I> {
-    vec![I::with(MVI_A, Operand::byte(val)), I::with(OUT, Operand::byte(port))]
+    vec![
+        I::with(MVI_A, Operand::byte(val)),
+        I::with(OUT, Operand::byte(port)),
+    ]
 }
 
 fn run(prog: Program, dm: &mut DeviceManager) -> Cpu {
     let mut cpu = Cpu::new();
     let mut ram = Memory::from_lines(16);
     let mut bus = SystemBus::default();
-    ram.load_bytes(&prog.compile(Addr(0)).unwrap(), Addr(0)).unwrap();
+    ram.load_bytes(&prog.compile(Addr(0)).unwrap(), Addr(0))
+        .unwrap();
     cpu.start_at(Addr(0));
     let mut t = 0;
     while !cpu.is_halt && cpu.fault.is_none() && t < 100_000 {
@@ -40,7 +46,10 @@ fn program_writes_and_displays_hi() {
     insts.push(I::new(HLT));
 
     let mut dm = DeviceManager::new();
-    dm.attach(Box::new(TerminalDevice::new(PORT_CMD, PORT_DATA)), &[PORT_CMD, PORT_DATA]);
+    dm.attach(
+        Box::new(TerminalDevice::new(PORT_CMD, PORT_DATA)),
+        &[PORT_CMD, PORT_DATA],
+    );
     run(Program::new(insts), &mut dm);
 
     let term = dm.device_ref::<TerminalDevice>(0).unwrap();
@@ -85,5 +94,8 @@ fn read_then_display_echoes_a_line() {
     dm.attach(Box::new(term), &[PORT_CMD, PORT_DATA]);
     run(Program::new(insts), &mut dm);
 
-    assert_eq!(dm.device_ref::<TerminalDevice>(0).unwrap().output_string(), "hello 8085");
+    assert_eq!(
+        dm.device_ref::<TerminalDevice>(0).unwrap().output_string(),
+        "hello 8085"
+    );
 }

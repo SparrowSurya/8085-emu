@@ -57,7 +57,10 @@ fn resolve_program_includes(
 
         // Merge defines
         for d in resolved_inc.defines {
-            if !merged_defines.iter().any(|existing: &super::ast::Define| existing.name == d.name) {
+            if !merged_defines
+                .iter()
+                .any(|existing: &super::ast::Define| existing.name == d.name)
+            {
                 merged_defines.push(d);
             }
         }
@@ -78,7 +81,10 @@ fn resolve_program_includes(
 
     // 2. Add current program's defines
     for d in &program.defines {
-        if !merged_defines.iter().any(|existing| existing.name == d.name) {
+        if !merged_defines
+            .iter()
+            .any(|existing| existing.name == d.name)
+        {
             merged_defines.push(d.clone());
         }
     }

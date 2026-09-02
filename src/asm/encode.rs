@@ -390,8 +390,8 @@ fn fixed_no_operand(m: &str) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use AReg16::*;
     use AReg8::*;
+    use AReg16::*;
 
     fn enc(m: &str, ops: &[Operand]) -> Vec<u8> {
         encode(m, Span::new(1, 1), ops).unwrap()

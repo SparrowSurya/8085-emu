@@ -87,7 +87,12 @@ fn print_a_data_string_through_a_port() {
     let printed = Rc::new(RefCell::new(String::new()));
     let sink = printed.clone();
     let mut m = Machine::create(16, 8);
-    m.attach_device(Box::new(PrinterDevice::with_callback(move |c| sink.borrow_mut().push(c))), &[0x02]);
+    m.attach_device(
+        Box::new(PrinterDevice::with_callback(move |c| {
+            sink.borrow_mut().push(c)
+        })),
+        &[0x02],
+    );
     load(&mut m, &image).expect("loads");
     m.run();
 

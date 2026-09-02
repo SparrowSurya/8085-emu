@@ -9,8 +9,8 @@ pub mod disassemble;
 pub mod opcode;
 
 pub use disassemble::{
-    disassemble_bytes, disassemble_container, disassemble_container_with_options, opcode_t_states,
-    DisassembleOptions, DisassemblyRow,
+    DisassembleOptions, DisassemblyRow, disassemble_bytes, disassemble_container,
+    disassemble_container_with_options, opcode_t_states,
 };
 pub use opcode::Opcode;
 
@@ -68,17 +68,32 @@ pub struct Instruction {
 impl Instruction {
     /// An instruction with no operands (`NOP`, `HLT`, `MOV_A_B`, …).
     pub fn new(opcode: Opcode) -> Self {
-        Instruction { opcode, arg1: None, arg2: None, label: None }
+        Instruction {
+            opcode,
+            arg1: None,
+            arg2: None,
+            label: None,
+        }
     }
 
     /// An instruction with one operand (`MVI_A`, `JMP`, `LXI`, …).
     pub fn with(opcode: Opcode, arg: Operand) -> Self {
-        Instruction { opcode, arg1: Some(arg), arg2: None, label: None }
+        Instruction {
+            opcode,
+            arg1: Some(arg),
+            arg2: None,
+            label: None,
+        }
     }
 
     /// An instruction with two operands.
     pub fn with2(opcode: Opcode, a1: Operand, a2: Operand) -> Self {
-        Instruction { opcode, arg1: Some(a1), arg2: Some(a2), label: None }
+        Instruction {
+            opcode,
+            arg1: Some(a1),
+            arg2: Some(a2),
+            label: None,
+        }
     }
 
     /// Attach a defining label to this instruction (builder style).
@@ -102,7 +117,13 @@ mod tests {
     fn instruction_sizes() {
         assert_eq!(Instruction::new(Opcode::NOP).size(), 1);
         assert_eq!(Instruction::with(Opcode::MVI_A, Operand::byte(5)).size(), 2);
-        assert_eq!(Instruction::with(Opcode::JMP, Operand::word(0x1234)).size(), 3);
-        assert_eq!(Instruction::with(Opcode::JMP, Operand::label("L")).size(), 3);
+        assert_eq!(
+            Instruction::with(Opcode::JMP, Operand::word(0x1234)).size(),
+            3
+        );
+        assert_eq!(
+            Instruction::with(Opcode::JMP, Operand::label("L")).size(),
+            3
+        );
     }
 }

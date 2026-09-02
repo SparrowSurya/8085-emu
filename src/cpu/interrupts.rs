@@ -98,7 +98,13 @@ mod tests {
     use crate::memory::Memory;
 
     /// Run a machine (CPU + RAM) to HLT, returning A and the tick count.
-    fn run(prog: &[u8], at: u16, sp: u16, isr: &[(u16, u8)], setup: impl FnOnce(&mut Cpu)) -> (Cpu, u64) {
+    fn run(
+        prog: &[u8],
+        at: u16,
+        sp: u16,
+        isr: &[(u16, u8)],
+        setup: impl FnOnce(&mut Cpu),
+    ) -> (Cpu, u64) {
         let mut cpu = Cpu::new();
         let mut mem = Memory::from_lines(16);
         let mut bus = SystemBus::default();
@@ -178,7 +184,13 @@ mod tests {
     fn sim_sets_masks_and_rim_reads_them() {
         // MVI A, 0b0000_1101 (MSE=1, mask 5.5 and 7.5) ; SIM ; RIM ; HLT
         // Then A reflects the mask bits back (5.5=1, 6.5=0, 7.5=1) plus INTE state.
-        let (cpu, _t) = run(&[0x3E, 0b0000_1101, 0x30, 0x20, 0x76], 0x0000, 0x1000, &[], |_| {});
+        let (cpu, _t) = run(
+            &[0x3E, 0b0000_1101, 0x30, 0x20, 0x76],
+            0x0000,
+            0x1000,
+            &[],
+            |_| {},
+        );
         assert!(cpu.mask_5_5);
         assert!(!cpu.mask_6_5);
         assert!(cpu.mask_7_5);

@@ -33,7 +33,9 @@ fn examples_match_reference() {
         if c.printer_port >= 0 {
             let sink = seen.clone();
             dm.attach(
-                Box::new(PrinterDevice::with_callback(move |ch| sink.borrow_mut().push(ch))),
+                Box::new(PrinterDevice::with_callback(move |ch| {
+                    sink.borrow_mut().push(ch)
+                })),
                 &[c.printer_port as u8],
             );
         }
@@ -46,10 +48,25 @@ fn examples_match_reference() {
             t += 1;
         }
 
-        assert_eq!(*seen.borrow(), c.out, "example `{}`: printer output", c.name);
+        assert_eq!(
+            *seen.borrow(),
+            c.out,
+            "example `{}`: printer output",
+            c.name
+        );
         let e = &c.exp;
         assert_eq!(
-            (cpu.regs.a, cpu.regs.b, cpu.regs.c, cpu.regs.d, cpu.regs.e, cpu.regs.h, cpu.regs.l, cpu.regs.sp.0, cpu.flags.to_psw()),
+            (
+                cpu.regs.a,
+                cpu.regs.b,
+                cpu.regs.c,
+                cpu.regs.d,
+                cpu.regs.e,
+                cpu.regs.h,
+                cpu.regs.l,
+                cpu.regs.sp.0,
+                cpu.flags.to_psw()
+            ),
             (e.a, e.b, e.c, e.d, e.e, e.h, e.l, e.sp, e.psw),
             "example `{}`: final CPU state",
             c.name

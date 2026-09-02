@@ -32,7 +32,10 @@ impl Program {
         let mut code = Vec::new();
         for inst in &self.instructions {
             code.push(inst.opcode.to_byte());
-            for arg in [inst.arg1.as_ref(), inst.arg2.as_ref()].into_iter().flatten() {
+            for arg in [inst.arg1.as_ref(), inst.arg2.as_ref()]
+                .into_iter()
+                .flatten()
+            {
                 self.emit_operand(arg, &symbols, &mut code)?;
             }
         }
@@ -132,6 +135,9 @@ mod tests {
             Instruction::new(Opcode::NOP).labeled("X"),
             Instruction::new(Opcode::NOP).labeled("X"),
         ]);
-        assert_eq!(prog.compile(Addr(0)), Err(EmuError::DuplicateLabel("X".into())));
+        assert_eq!(
+            prog.compile(Addr(0)),
+            Err(EmuError::DuplicateLabel("X".into()))
+        );
     }
 }

@@ -52,7 +52,10 @@ segment .text
 "#;
 
     let err = assemble(src).expect_err("should reject local label without parent");
-    assert!(err.to_string().contains("local label .orphan has no preceding parent label"));
+    assert!(
+        err.to_string()
+            .contains("local label .orphan has no preceding parent label")
+    );
 }
 
 #[test]
@@ -96,7 +99,8 @@ fn test_include_source_directive() {
     std::fs::write(
         temp_dir.join("sub.e8085"),
         "segment .text\nadd_ten:\n    adi 10\n    ret\n",
-    ).unwrap();
+    )
+    .unwrap();
 
     let src = r#"
 %include "sub.e8085"
@@ -151,12 +155,14 @@ main:
     hlt
 "#;
 
-    let prog_image = assemble_with_options(prog_src, None, &ext_symbols)
-        .expect("assembles program with extern");
+    let prog_image =
+        assemble_with_options(prog_src, None, &ext_symbols).expect("assembles program with extern");
 
     let mut machine = Machine::default();
     for (i, &b) in decoded_lib.text_bytes.iter().enumerate() {
-        machine.ram.write(Addr(decoded_lib.header.text_addr.wrapping_add(i as u16)), b);
+        machine
+            .ram
+            .write(Addr(decoded_lib.header.text_addr.wrapping_add(i as u16)), b);
     }
     load(&mut machine, &prog_image).expect("loads main program");
     machine.run();
@@ -179,7 +185,10 @@ main:
 
     let err = assemble_with_options(prog_src, None, &HashMap::new())
         .expect_err("should fail with undefined name / unresolved extern");
-    assert!(err.to_string().contains("undefined name \"missing_function\""));
+    assert!(
+        err.to_string()
+            .contains("undefined name \"missing_function\"")
+    );
 }
 
 #[test]
@@ -193,7 +202,10 @@ compute_answer:
 "#;
     let lib_image = assemble(lib_src).expect("assembles library");
     let lib_container = lib_image.to_container();
-    assert_eq!(lib_container.header.entry_pc, 0, "library without main has entry_pc == 0");
+    assert_eq!(
+        lib_container.header.entry_pc, 0,
+        "library without main has entry_pc == 0"
+    );
 
     let main_src = r#"
 segment .text
@@ -208,7 +220,10 @@ main:
     let standalone_image = assemble_and_link(main_src, None, &[lib_container])
         .expect("statically links executable with library container");
 
-    assert_ne!(standalone_image.entry, 0, "standalone executable has main entry point");
+    assert_ne!(
+        standalone_image.entry, 0,
+        "standalone executable has main entry point"
+    );
 
     let standalone_container = standalone_image.to_container();
     let encoded = standalone_container.encode();
@@ -217,7 +232,9 @@ main:
 
     let mut machine = Machine::default();
     for (i, &b) in decoded.text_bytes.iter().enumerate() {
-        machine.ram.write(Addr(decoded.header.text_addr.wrapping_add(i as u16)), b);
+        machine
+            .ram
+            .write(Addr(decoded.header.text_addr.wrapping_add(i as u16)), b);
     }
     machine.cpu.regs.pc = Addr(decoded.header.entry_pc);
     machine.cpu.regs.sp = Addr(decoded.header.sp_init);
@@ -245,5 +262,3 @@ func_b:
     assert_eq!(container.header.entry_pc, 0);
     assert_eq!(container.export_symbols.len(), 2);
 }
-
-

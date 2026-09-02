@@ -30,10 +30,21 @@ fn matches_reference_on_all_cases() {
         let (cpu, mem, ticks) = run(case.prog, case.mem);
         let e = &case.exp;
         let got = (
-            cpu.regs.a, cpu.regs.b, cpu.regs.c, cpu.regs.d, cpu.regs.e, cpu.regs.h, cpu.regs.l,
-            cpu.regs.sp.0, cpu.flags.to_psw(), ticks, mem.read(Addr(0x50)),
+            cpu.regs.a,
+            cpu.regs.b,
+            cpu.regs.c,
+            cpu.regs.d,
+            cpu.regs.e,
+            cpu.regs.h,
+            cpu.regs.l,
+            cpu.regs.sp.0,
+            cpu.flags.to_psw(),
+            ticks,
+            mem.read(Addr(0x50)),
         );
-        let exp = (e.a, e.b, e.c, e.d, e.e, e.h, e.l, e.sp, e.psw, e.ticks, e.m50);
+        let exp = (
+            e.a, e.b, e.c, e.d, e.e, e.h, e.l, e.sp, e.psw, e.ticks, e.m50,
+        );
         assert_eq!(got, exp, "case `{}` diverged from the reference", case.name);
     }
 }

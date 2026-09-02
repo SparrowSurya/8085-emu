@@ -10,10 +10,10 @@ use std::collections::{BTreeMap, HashMap};
 
 use super::ast::*;
 use super::container::{
-    BinaryContainer, ContainerHeader, CONTAINER_MAGIC, CONTAINER_VERSION, FLAG_HAS_EXPORT_SYMS,
+    BinaryContainer, CONTAINER_MAGIC, CONTAINER_VERSION, ContainerHeader, FLAG_HAS_EXPORT_SYMS,
     FLAG_HAS_VEC_TABLE,
 };
-use super::encode::{encode, AReg16, AReg8, Operand};
+use super::encode::{AReg8, AReg16, Operand, encode};
 use super::error::{AsmError, AsmErrorKind, Span};
 use super::{lex, parse};
 
@@ -50,9 +50,10 @@ pub fn load(
     let data_end = data_start + image.data_size as usize;
     if image.bytes.len() >= data_end {
         for (i, &b) in image.bytes[data_start..data_end].iter().enumerate() {
-            machine
-                .ram
-                .write(crate::value::Addr(image.data_addr.wrapping_add(i as u16)), b);
+            machine.ram.write(
+                crate::value::Addr(image.data_addr.wrapping_add(i as u16)),
+                b,
+            );
         }
     }
 
@@ -68,9 +69,10 @@ pub fn load(
     let text_end = text_start + image.text_size as usize;
     if image.bytes.len() >= text_end {
         for (i, &b) in image.bytes[text_start..text_end].iter().enumerate() {
-            machine
-                .ram
-                .write(crate::value::Addr(image.text_addr.wrapping_add(i as u16)), b);
+            machine.ram.write(
+                crate::value::Addr(image.text_addr.wrapping_add(i as u16)),
+                b,
+            );
         }
     }
 
@@ -199,8 +201,15 @@ impl LoadImage {
         let header = ContainerHeader {
             magic: CONTAINER_MAGIC,
             version: CONTAINER_VERSION,
-            flags: if !vec_bytes.is_empty() { FLAG_HAS_VEC_TABLE } else { 0 }
-                | if !self.export_symbols.is_empty() { FLAG_HAS_EXPORT_SYMS } else { 0 },
+            flags: if !vec_bytes.is_empty() {
+                FLAG_HAS_VEC_TABLE
+            } else {
+                0
+            } | if !self.export_symbols.is_empty() {
+                FLAG_HAS_EXPORT_SYMS
+            } else {
+                0
+            },
             entry_pc: self.entry,
             sp_init: self.sp_init,
             text_addr: self.text_addr,
@@ -399,13 +408,7 @@ impl<'a> Assembler<'a> {
             }
             let end_text = start_text + text_bytes.len() as u16;
             let data_len = data_bytes.len() as u16;
-            (
-                text_bytes,
-                start_text,
-                end_text,
-                data_bytes,
-                data_len,
-            )
+            (text_bytes, start_text, end_text, data_bytes, data_len)
         } else {
             (Vec::new(), DATA_BASE, DATA_BASE, Vec::new(), 0)
         };
@@ -440,7 +443,8 @@ impl<'a> Assembler<'a> {
                                 current_parent_label = Some(name.clone());
                             }
                             TextItem::Instr(ins) => {
-                                let zero_ops = self.length_operands(ins, current_parent_label.as_deref())?;
+                                let zero_ops =
+                                    self.length_operands(ins, current_parent_label.as_deref())?;
                                 let len = encode(&ins.mnemonic, ins.span, &zero_ops)?.len() as u16;
                                 taddr = taddr.wrapping_add(len);
                             }
@@ -517,7 +521,8 @@ impl<'a> Assembler<'a> {
                                 current_parent_label = Some(name.clone());
                             }
                             TextItem::Instr(ins) => {
-                                let zero_ops = self.length_operands(ins, current_parent_label.as_deref())?;
+                                let zero_ops =
+                                    self.length_operands(ins, current_parent_label.as_deref())?;
                                 let len = encode(&ins.mnemonic, ins.span, &zero_ops)?.len() as u16;
                                 taddr = taddr.wrapping_add(len);
                             }
@@ -667,11 +672,8 @@ impl<'a> Assembler<'a> {
                             });
                         }
                         TextItem::Instr(ins) => {
-                            let ops = self.final_operands(
-                                ins,
-                                &symtab,
-                                current_parent_label.as_deref(),
-                            )?;
+                            let ops =
+                                self.final_operands(ins, &symtab, current_parent_label.as_deref())?;
                             let b = encode(&ins.mnemonic, ins.span, &ops)?;
                             listing.push(ListingRow {
                                 addr: taddr,
@@ -695,7 +697,10 @@ impl<'a> Assembler<'a> {
         for name in export_names {
             if !name.eq_ignore_ascii_case("main") {
                 if let Some(&sym_addr) = symtab.get(&name) {
-                    if !export_symbols.iter().any(|(n, _): &(String, u16)| n == &name) {
+                    if !export_symbols
+                        .iter()
+                        .any(|(n, _): &(String, u16)| n == &name)
+                    {
                         export_symbols.push((name, sym_addr));
                     }
                 }
@@ -917,7 +922,10 @@ impl<'a> Assembler<'a> {
                         }
                         TextItem::LocalLabel(name, span) => {
                             let parent = current_parent_label.as_ref().ok_or_else(|| {
-                                AsmError::new(*span, AsmErrorKind::LocalLabelWithoutParent(name.clone()))
+                                AsmError::new(
+                                    *span,
+                                    AsmErrorKind::LocalLabelWithoutParent(name.clone()),
+                                )
                             })?;
                             let scoped_name = format!("{parent}.{name}");
                             insert_symbol(symtab, &scoped_name, addr, *span)?;
@@ -1016,7 +1024,7 @@ impl<'a> Assembler<'a> {
                     Some(DVal::Num(n)) => Operand::Imm(*n),
                     Some(DVal::Ch(b)) => Operand::Imm(*b as u32),
                     Some(DVal::Str(s)) => {
-                        return Err(AsmError::new(span, AsmErrorKind::StringInText(s.clone())))
+                        return Err(AsmError::new(span, AsmErrorKind::StringInText(s.clone())));
                     }
                     None => match symtab {
                         None => Operand::Imm(0),
@@ -1098,9 +1106,9 @@ fn push_scalar(n: u32, size: Size, span: Span, out: &mut Vec<Emit>) -> Result<()
 
 // Silence unused-import warnings if the register enums are only used via Operand.
 #[allow(unused_imports)]
-use AReg16 as _AReg16;
-#[allow(unused_imports)]
 use AReg8 as _AReg8;
+#[allow(unused_imports)]
+use AReg16 as _AReg16;
 
 #[cfg(test)]
 mod tests {

@@ -4,7 +4,7 @@
 //! nodes here; a later preprocessing/resolution stage turns them into concrete bytes and
 //! addresses.
 
-use super::encode::{AReg16, AReg8};
+use super::encode::{AReg8, AReg16};
 use super::error::Span;
 
 /// A whole program: leading `%include`s, `%define`s, `extern`/`global` declarations, and segments.

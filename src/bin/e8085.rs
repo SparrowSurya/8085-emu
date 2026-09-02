@@ -114,9 +114,7 @@ fn main() {
 
     match cli.command {
         Commands::Run { file, link } => run_file(&file, &link),
-        Commands::Compile { file, link, output } => {
-            compile_file(&file, &link, output.as_deref())
-        }
+        Commands::Compile { file, link, output } => compile_file(&file, &link, output.as_deref()),
         Commands::Disassemble {
             file,
             color,
@@ -228,7 +226,9 @@ fn load_external_symbols(link_paths: &[String]) -> Vec<BinaryContainer> {
 
     for path in link_paths {
         if !path.ends_with(".8085.bin") && !path.ends_with(".bin") {
-            eprintln!("error: linked library '{path}' must be a compiled .8085.bin binary container");
+            eprintln!(
+                "error: linked library '{path}' must be a compiled .8085.bin binary container"
+            );
             std::process::exit(1);
         }
 

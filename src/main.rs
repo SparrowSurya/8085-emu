@@ -72,7 +72,6 @@ fn main() {
         // Display buffer (print prompt)
         Instruction::with(Opcode::MVI_A, Operand::Byte(CMD_DISPLAY)),
         Instruction::with(Opcode::OUT, Operand::Byte(term_cmd_port)),
-
         // Trigger capture from the terminal to read name
         Instruction::with(Opcode::MVI_A, Operand::Byte(CMD_READ)),
         Instruction::with(Opcode::OUT, Operand::Byte(term_cmd_port)),
@@ -96,7 +95,6 @@ fn main() {
         // Append trailing newline to name_addr
         Instruction::with(Opcode::MVI_A, Operand::Byte(0x0A)).labeled("capture_done"),
         Instruction::new(Opcode::MOV_MA),
-
         // Now print "Hi {name}!\n"
         // Enter write mode on the terminal command port
         Instruction::with(Opcode::MVI_A, Operand::Byte(CMD_WRITE)),

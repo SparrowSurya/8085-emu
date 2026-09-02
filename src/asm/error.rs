@@ -179,7 +179,9 @@ impl fmt::Display for AsmErrorKind {
             NotANumber(s) => write!(f, "{s} must evaluate to a number"),
             EmptyText => write!(f, ".text has no instructions"),
             ImageOverflow => write!(f, "program does not fit in 64 KiB"),
-            LocalLabelWithoutParent(s) => write!(f, "local label .{s} has no preceding parent label"),
+            LocalLabelWithoutParent(s) => {
+                write!(f, "local label .{s} has no preceding parent label")
+            }
             UnresolvedSymbol(s) => write!(f, "unresolved external symbol {s:?}"),
             CircularInclude(s) => write!(f, "circular include detected for {s}"),
             IncludeError(s) => write!(f, "include error: {s}"),

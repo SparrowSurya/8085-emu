@@ -203,9 +203,14 @@ fn is_printable(b: u8) -> bool {
 /// Formats the container header into a human-readable table.
 pub fn format_header(header: &ContainerHeader, file_size: usize) -> String {
     let mut out = String::new();
-    out.push_str("============================ [ CONTAINER HEADER ] ============================\n");
+    out.push_str(
+        "============================ [ CONTAINER HEADER ] ============================\n",
+    );
     let magic_str = String::from_utf8_lossy(&header.magic);
-    out.push_str(&format!("  Magic Identifier     : {magic_str} (0x{:02X}{:02X}{:02X}{:02X})\n", header.magic[0], header.magic[1], header.magic[2], header.magic[3]));
+    out.push_str(&format!(
+        "  Magic Identifier     : {magic_str} (0x{:02X}{:02X}{:02X}{:02X})\n",
+        header.magic[0], header.magic[1], header.magic[2], header.magic[3]
+    ));
     out.push_str(&format!("  Format Version       : {}\n", header.version));
 
     let mut flag_names = Vec::new();
@@ -225,18 +230,29 @@ pub fn format_header(header: &ContainerHeader, file_size: usize) -> String {
     if header.entry_pc == 0 {
         out.push_str("  Entry Point (PC)     : 0x0000 (None - Pure Subroutine Library)\n");
     } else {
-        out.push_str(&format!("  Entry Point (PC)     : 0x{:04X} (<main>)\n", header.entry_pc));
+        out.push_str(&format!(
+            "  Entry Point (PC)     : 0x{:04X} (<main>)\n",
+            header.entry_pc
+        ));
     }
 
-    out.push_str(&format!("  Initial Stack (SP)   : 0x{:04X}\n", header.sp_init));
-    out.push_str(&format!("  Total File Size      : {} bytes (0x{:04X})\n", file_size, file_size));
+    out.push_str(&format!(
+        "  Initial Stack (SP)   : 0x{:04X}\n",
+        header.sp_init
+    ));
+    out.push_str(&format!(
+        "  Total File Size      : {} bytes (0x{:04X})\n",
+        file_size, file_size
+    ));
     out
 }
 
 /// Formats the segment table.
 pub fn format_segments(segments: &[SegmentRecord]) -> String {
     let mut out = String::new();
-    out.push_str("============================ [ SEGMENT TABLE ] ===============================\n");
+    out.push_str(
+        "============================ [ SEGMENT TABLE ] ===============================\n",
+    );
     out.push_str("  Segment   File Offset         RAM Load Address   Size (Bytes)   Description\n");
     out.push_str("  --------  ------------------  -----------------  -------------  ------------------------------\n");
     for s in segments {
@@ -247,7 +263,12 @@ pub fn format_segments(segments: &[SegmentRecord]) -> String {
         };
         out.push_str(&format!(
             "  {:<8}  {:<18}  0x{:04X}             {:<5} ({:>3} B)    {}\n",
-            s.name, file_range, s.ram_addr, format!("0x{:04X}", s.size_bytes), s.size_bytes, s.description
+            s.name,
+            file_range,
+            s.ram_addr,
+            format!("0x{:04X}", s.size_bytes),
+            s.size_bytes,
+            s.description
         ));
     }
     out
@@ -256,25 +277,39 @@ pub fn format_segments(segments: &[SegmentRecord]) -> String {
 /// Formats the symbol table and entry point.
 pub fn format_symbols(container: &BinaryContainer) -> String {
     let mut out = String::new();
-    out.push_str("============================ [ SYMBOL TABLE & ENTRY ] ========================\n");
+    out.push_str(
+        "============================ [ SYMBOL TABLE & ENTRY ] ========================\n",
+    );
     if container.header.entry_pc == 0 {
         out.push_str("  Entry Point          : None (Pure Subroutine Library - no main label)\n");
     } else {
-        out.push_str(&format!("  Entry Point          : 0x{:04X} (<main>)\n", container.header.entry_pc));
+        out.push_str(&format!(
+            "  Entry Point          : 0x{:04X} (<main>)\n",
+            container.header.entry_pc
+        ));
     }
 
     if container.export_symbols.is_empty() {
         out.push_str("  Exported Symbols     : (None - all symbols private)\n");
     } else {
-        out.push_str(&format!("  Exported Symbols ({}) :\n", container.export_symbols.len()));
+        out.push_str(&format!(
+            "  Exported Symbols ({}) :\n",
+            container.export_symbols.len()
+        ));
         out.push_str("    Symbol Name                   Address   Segment / Scope\n");
         out.push_str("    ----------------------------  --------  ----------------\n");
         for (sym, addr) in &container.export_symbols {
-            let seg = if *addr >= container.header.text_addr && *addr < container.header.text_addr + container.header.text_size {
+            let seg = if *addr >= container.header.text_addr
+                && *addr < container.header.text_addr + container.header.text_size
+            {
                 ".text (code)"
-            } else if *addr >= container.header.data_addr && *addr < container.header.data_addr + container.header.data_size {
+            } else if *addr >= container.header.data_addr
+                && *addr < container.header.data_addr + container.header.data_size
+            {
                 ".data (variable)"
-            } else if *addr >= container.header.bss_addr && *addr < container.header.bss_addr + container.header.bss_size {
+            } else if *addr >= container.header.bss_addr
+                && *addr < container.header.bss_addr + container.header.bss_size
+            {
                 ".bss (buffer)"
             } else {
                 "external/other"
@@ -288,7 +323,9 @@ pub fn format_symbols(container: &BinaryContainer) -> String {
 /// Formats extracted strings.
 pub fn format_strings(strings: &[ExtractedString]) -> String {
     let mut out = String::new();
-    out.push_str("============================ [ EMBEDDED STRINGS ] ============================\n");
+    out.push_str(
+        "============================ [ EMBEDDED STRINGS ] ============================\n",
+    );
     if strings.is_empty() {
         out.push_str("  (No printable strings found matching minimum length)\n");
     } else {

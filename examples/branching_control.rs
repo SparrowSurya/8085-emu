@@ -21,19 +21,27 @@ fn main() {
     machine.ram.write(Addr(0x00B2), Opcode::HLT as u8);
 
     let program = Program::new(vec![
-        Instruction::with(Opcode::CALL, Operand::word(0x00A0)),     // Call subroutine at 0x00A0
-        Instruction::with(Opcode::CPI, Operand::byte(0x00)),         // CPI 0x00 (Sets Zero Flag since A=0)
-        Instruction::with(Opcode::JZ, Operand::word(0x00B0)),       // Jump if Zero to 0x00B0 (will jump)
-        Instruction::new(Opcode::HLT),                               // Should not be executed
+        Instruction::with(Opcode::CALL, Operand::word(0x00A0)), // Call subroutine at 0x00A0
+        Instruction::with(Opcode::CPI, Operand::byte(0x00)), // CPI 0x00 (Sets Zero Flag since A=0)
+        Instruction::with(Opcode::JZ, Operand::word(0x00B0)), // Jump if Zero to 0x00B0 (will jump)
+        Instruction::new(Opcode::HLT),                       // Should not be executed
     ]);
 
-    machine.load(&program, Addr(0x0000)).expect("program compiles");
+    machine
+        .load(&program, Addr(0x0000))
+        .expect("program compiles");
     machine.run();
 
     let cpu = &machine.cpu;
     println!("Branching & Control Example State:");
-    println!("Register B: 0x{:02X} (Expected: 0xAA from subroutine)", cpu.regs.b);
-    println!("Register C: 0x{:02X} (Expected: 0xBB from conditional jump)", cpu.regs.c);
+    println!(
+        "Register B: 0x{:02X} (Expected: 0xAA from subroutine)",
+        cpu.regs.b
+    );
+    println!(
+        "Register C: 0x{:02X} (Expected: 0xBB from conditional jump)",
+        cpu.regs.c
+    );
     println!("Program Counter (PC): 0x{:04X}", cpu.regs.pc.0);
     println!("Stack Pointer (SP): 0x{:04X}", cpu.regs.sp.0);
 

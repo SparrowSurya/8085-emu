@@ -19,16 +19,18 @@ fn main() {
     let program = Program::new(vec![
         Instruction::with(Opcode::MVI_HL, Operand::label("STR_DATA")), // LXI H, STR_DATA
         Instruction::new(Opcode::MOV_AM).labeled("LOOP"),              // A = *HL
-        Instruction::with(Opcode::CPI, Operand::byte(0x00)),          // NUL?
+        Instruction::with(Opcode::CPI, Operand::byte(0x00)),           // NUL?
         Instruction::with(Opcode::JZ, Operand::label("EXIT")),
-        Instruction::with(Opcode::OUT, Operand::byte(0x02)),          // print A
-        Instruction::new(Opcode::INX_HL),                              // HL++
+        Instruction::with(Opcode::OUT, Operand::byte(0x02)), // print A
+        Instruction::new(Opcode::INX_HL),                    // HL++
         Instruction::with(Opcode::JMP, Operand::label("LOOP")),
         Instruction::new(Opcode::HLT).labeled("EXIT"),
         Instruction::new(Opcode::NOP).labeled("STR_DATA"),
     ]);
 
-    machine.load(&program, Addr(0x0000)).expect("program compiles");
+    machine
+        .load(&program, Addr(0x0000))
+        .expect("program compiles");
 
     // Place the message (NUL-terminated) at STR_DATA (0x0010).
     let message = b"Hi Labels!\n";

@@ -25,10 +25,22 @@ fn fuzz_matches_reference() {
         assert!(cpu.fault.is_none(), "fuzz #{i} faulted: {:?}", cpu.fault);
         let e = &case.exp;
         let got = (
-            cpu.regs.a, cpu.regs.b, cpu.regs.c, cpu.regs.d, cpu.regs.e, cpu.regs.h, cpu.regs.l,
-            cpu.regs.sp.0, cpu.flags.to_psw(), ticks, mem.read(Addr(0xF0)), mem.read(Addr(0xEF)),
+            cpu.regs.a,
+            cpu.regs.b,
+            cpu.regs.c,
+            cpu.regs.d,
+            cpu.regs.e,
+            cpu.regs.h,
+            cpu.regs.l,
+            cpu.regs.sp.0,
+            cpu.flags.to_psw(),
+            ticks,
+            mem.read(Addr(0xF0)),
+            mem.read(Addr(0xEF)),
         );
-        let exp = (e.a, e.b, e.c, e.d, e.e, e.h, e.l, e.sp, e.psw, e.ticks, e.mf0, e.mef);
+        let exp = (
+            e.a, e.b, e.c, e.d, e.e, e.h, e.l, e.sp, e.psw, e.ticks, e.mf0, e.mef,
+        );
         assert_eq!(got, exp, "fuzz #{i} diverged (prog={:02X?})", case.prog);
     }
 }

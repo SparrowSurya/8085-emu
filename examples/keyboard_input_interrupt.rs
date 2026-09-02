@@ -25,12 +25,14 @@ fn main() {
 
     // 4. Main Program: Enable interrupts and NOP in loop
     let program = Program::new(vec![
-        Instruction::new(Opcode::EI),  // Enable Interrupts (inte = true)
+        Instruction::new(Opcode::EI), // Enable Interrupts (inte = true)
         Instruction::new(Opcode::NOP),
         Instruction::new(Opcode::HLT),
     ]);
 
-    machine.load(&program, Addr(0x00A0)).expect("program compiles");
+    machine
+        .load(&program, Addr(0x00A0))
+        .expect("program compiles");
 
     // Emulate the hardware interrupt request asserting INTR pin
     machine.cpu.intr = true;
@@ -40,7 +42,10 @@ fn main() {
 
     let cpu = &machine.cpu;
     println!("Keyboard Input & Interrupt Example State:");
-    println!("Register B: 0x{:02X} (Expected: 0x4B - ASCII 'K')", cpu.regs.b);
+    println!(
+        "Register B: 0x{:02X} (Expected: 0x4B - ASCII 'K')",
+        cpu.regs.b
+    );
     println!("Interrupts Enabled (inte): {}", cpu.inte);
 
     assert_eq!(cpu.regs.b, b'K');

@@ -311,10 +311,7 @@ mod tests {
             AsmErrorKind::UnterminatedString
         );
         assert_eq!(lex("''").unwrap_err().kind, AsmErrorKind::EmptyCharLiteral);
-        assert_eq!(
-            lex("'ab'").unwrap()[0].kind,
-            TokenKind::Str("ab".into())
-        );
+        assert_eq!(lex("'ab'").unwrap()[0].kind, TokenKind::Str("ab".into()));
         assert!(matches!(
             lex("0x").unwrap_err().kind,
             AsmErrorKind::MalformedNumber(_)

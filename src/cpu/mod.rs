@@ -10,15 +10,15 @@
 pub mod alu;
 pub(crate) mod alu_vectors;
 pub mod execute;
-pub mod interrupts;
 pub mod flags;
+pub mod interrupts;
 pub mod registers;
 
 use crate::bus::SystemBus;
 use crate::error::EmuError;
 use crate::value::Addr;
 use flags::Flags;
-use registers::{Reg16, Reg8, RegisterFile};
+use registers::{Reg8, Reg16, RegisterFile};
 
 /// Which machine cycle the CPU is in. Fetch always spans 4 T-states (the M1 opcode
 /// fetch); Execute spans a per-opcode number of T-states; Hold means the bus has been

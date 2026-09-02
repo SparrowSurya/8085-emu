@@ -73,8 +73,8 @@ fn test_programs_manifest_suite() {
     let manifest_path = base_dir.join("programs.json");
     let manifest_str = fs::read_to_string(&manifest_path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", manifest_path.display()));
-    let manifest: ProgramsManifest = serde_json::from_str(&manifest_str)
-        .expect("valid programs.json schema");
+    let manifest: ProgramsManifest =
+        serde_json::from_str(&manifest_str).expect("valid programs.json schema");
 
     for prog in manifest.programs {
         let prog_path = base_dir.join(&prog.file);
@@ -189,8 +189,8 @@ fn test_libraries_manifest_suite() {
     let manifest_path = base_dir.join("libraries.json");
     let manifest_str = fs::read_to_string(&manifest_path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", manifest_path.display()));
-    let manifest: LibrariesManifest = serde_json::from_str(&manifest_str)
-        .expect("valid libraries.json schema");
+    let manifest: LibrariesManifest =
+        serde_json::from_str(&manifest_str).expect("valid libraries.json schema");
 
     for lib in manifest.libraries {
         let lib_path = base_dir.join(&lib.file);
@@ -229,4 +229,3 @@ fn test_libraries_manifest_suite() {
         }
     }
 }
-

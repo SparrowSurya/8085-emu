@@ -15,13 +15,21 @@ fn main() {
         Instruction::new(Opcode::HLT),
     ]);
 
-    machine.load(&program, Addr(0x0000)).expect("program compiles");
+    machine
+        .load(&program, Addr(0x0000))
+        .expect("program compiles");
     machine.run();
 
     let cpu = &machine.cpu;
     println!("BCD Arithmetic & DAA Example State:");
-    println!("Accumulator (A): 0x{:02X} (Expected BCD result: 0x83)", cpu.regs.a);
-    println!("Flags: CY={}, Z={}, S={}", cpu.flags.carry, cpu.flags.zero, cpu.flags.sign);
+    println!(
+        "Accumulator (A): 0x{:02X} (Expected BCD result: 0x83)",
+        cpu.regs.a
+    );
+    println!(
+        "Flags: CY={}, Z={}, S={}",
+        cpu.flags.carry, cpu.flags.zero, cpu.flags.sign
+    );
 
     assert_eq!(cpu.regs.a, 0x83);
 }

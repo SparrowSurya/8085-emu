@@ -12,19 +12,19 @@ fn main() {
     let program = Program::new(vec![
         Instruction::with(Opcode::MVI_B, Operand::byte(7)),
         Instruction::with(Opcode::MVI_C, Operand::byte(6)),
-        Instruction::with(Opcode::MVI_A, Operand::byte(0)),   // Initialize accumulator A = 0
-
+        Instruction::with(Opcode::MVI_A, Operand::byte(0)), // Initialize accumulator A = 0
         // LOOP:
-        Instruction::new(Opcode::ADD_B).labeled("LOOP"),   // A = A + B
+        Instruction::new(Opcode::ADD_B).labeled("LOOP"), // A = A + B
         Instruction::new(Opcode::DCR_C),                 // Decrement C
-        Instruction::with(Opcode::JNZ, Operand::label("LOOP")),           // If C != 0, JMP back to LOOP
-
+        Instruction::with(Opcode::JNZ, Operand::label("LOOP")), // If C != 0, JMP back to LOOP
         // Store result and halt
         Instruction::with(Opcode::STA, Operand::word(0x0020)),
         Instruction::new(Opcode::HLT),
     ]);
 
-    machine.load(&program, Addr(0x0000)).expect("program compiles");
+    machine
+        .load(&program, Addr(0x0000))
+        .expect("program compiles");
     machine.run();
 
     let cpu = &machine.cpu;

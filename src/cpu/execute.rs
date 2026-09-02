@@ -10,9 +10,9 @@
 //! stack/subroutine, branching, and machine/I-O control. (IN/OUT exchange bytes with
 //! the device manager, wired up in the Machine step.)
 
-use super::{alu, Cpu, MachineCycle};
+use super::{Cpu, MachineCycle, alu};
 use crate::bus::SystemBus;
-use crate::cpu::registers::{Reg16, Reg8};
+use crate::cpu::registers::{Reg8, Reg16};
 use crate::instruction::opcode::Opcode;
 use crate::value::Addr;
 
@@ -20,24 +20,23 @@ use crate::value::Addr;
 /// fetch T4). Total instruction time is 4 (fetch M1) + this. Extracted verbatim
 /// from the reference dispatch table so timing is bit-for-bit identical.
 pub(crate) const EXEC_TSTATES: [u8; 256] = [
-     0,  6,  3,  2,  0,  0,  3,  0,  0,  6,  3,  2,  0,  0,  3,  0, // 0X00
-     0,  6,  3,  2,  0,  0,  3,  0,  0,  6,  3,  2,  0,  0,  3,  0, // 0X10
-     0,  6, 12,  2,  0,  0,  3,  0,  0,  6, 12,  2,  0,  0,  3,  0, // 0X20
-     0,  6,  9,  2,  6,  6,  6,  0,  0,  6,  9,  2,  0,  0,  3,  0, // 0X30
-     0,  0,  0,  0,  0,  0,  3,  0,  0,  0,  0,  0,  0,  0,  3,  0, // 0X40
-     0,  0,  0,  0,  0,  0,  3,  0,  0,  0,  0,  0,  0,  0,  3,  0, // 0X50
-     0,  0,  0,  0,  0,  0,  3,  0,  0,  0,  0,  0,  0,  0,  3,  0, // 0X60
-     3,  3,  3,  3,  3,  3,  0,  3,  0,  0,  0,  0,  0,  0,  3,  0, // 0X70
-     0,  0,  0,  0,  0,  0,  3,  0,  0,  0,  0,  0,  0,  0,  3,  0, // 0X80
-     0,  0,  0,  0,  0,  0,  3,  0,  0,  0,  0,  0,  0,  0,  3,  0, // 0X90
-     0,  0,  0,  0,  0,  0,  3,  0,  0,  0,  0,  0,  0,  0,  3,  0, // 0XA0
-     0,  0,  0,  0,  0,  0,  3,  0,  0,  0,  0,  0,  0,  0,  3,  0, // 0XB0
-     8,  6,  6,  6, 14,  8,  3,  9,  8,  6,  6,  0, 14, 14,  3,  9, // 0XC0
-     8,  6,  6,  6, 14,  8,  3,  9,  8,  0,  6,  6, 14,  0,  3,  9, // 0XD0
-     8,  6,  6, 12, 14,  8,  3,  9,  8,  2,  6,  0, 14,  0,  3,  9, // 0XE0
-     8,  6,  6,  0, 14,  8,  3,  9,  8,  2,  6,  0, 14,  0,  3,  9, // 0XF0
+    0, 6, 3, 2, 0, 0, 3, 0, 0, 6, 3, 2, 0, 0, 3, 0, // 0X00
+    0, 6, 3, 2, 0, 0, 3, 0, 0, 6, 3, 2, 0, 0, 3, 0, // 0X10
+    0, 6, 12, 2, 0, 0, 3, 0, 0, 6, 12, 2, 0, 0, 3, 0, // 0X20
+    0, 6, 9, 2, 6, 6, 6, 0, 0, 6, 9, 2, 0, 0, 3, 0, // 0X30
+    0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 3, 0, // 0X40
+    0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 3, 0, // 0X50
+    0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 3, 0, // 0X60
+    3, 3, 3, 3, 3, 3, 0, 3, 0, 0, 0, 0, 0, 0, 3, 0, // 0X70
+    0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 3, 0, // 0X80
+    0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 3, 0, // 0X90
+    0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 3, 0, // 0XA0
+    0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 3, 0, // 0XB0
+    8, 6, 6, 6, 14, 8, 3, 9, 8, 6, 6, 0, 14, 14, 3, 9, // 0XC0
+    8, 6, 6, 6, 14, 8, 3, 9, 8, 0, 6, 6, 14, 0, 3, 9, // 0XD0
+    8, 6, 6, 12, 14, 8, 3, 9, 8, 2, 6, 0, 14, 0, 3, 9, // 0XE0
+    8, 6, 6, 0, 14, 8, 3, 9, 8, 2, 6, 0, 14, 0, 3, 9, // 0XF0
 ];
-
 
 /// Result of running one execute-phase micro-op.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -191,8 +190,10 @@ impl Cpu {
             self.dst8 = Some(reg_from_code((b >> 3) & 7));
         } else if matches!(b, 0x01 | 0x11 | 0x21 | 0x31) {
             self.ptr16 = Some(pair_from_code((b >> 4) & 3)); // LXI
-        } else if matches!(b, 0x03 | 0x13 | 0x23 | 0x33 | 0x0B | 0x1B | 0x2B | 0x3B | 0x09 | 0x19 | 0x29 | 0x39)
-        {
+        } else if matches!(
+            b,
+            0x03 | 0x13 | 0x23 | 0x33 | 0x0B | 0x1B | 0x2B | 0x3B | 0x09 | 0x19 | 0x29 | 0x39
+        ) {
             self.ptr16 = Some(pair_from_code((b >> 4) & 3)); // INX/DCX/DAD
         } else if matches!(b, 0x0A | 0x1A) {
             self.ptr16 = Some(pair_from_code((b >> 4) & 3)); // LDAX
@@ -329,7 +330,13 @@ impl Cpu {
         if opcode == Some(Opcode::MVI_M) {
             return self.mvi_m_seq(bus, idx); // MVI M,d8
         }
-        if matches!(opcode, Some(Opcode::MVI_BC) | Some(Opcode::MVI_DE) | Some(Opcode::MVI_HL) | Some(Opcode::LXI_SP)) {
+        if matches!(
+            opcode,
+            Some(Opcode::MVI_BC)
+                | Some(Opcode::MVI_DE)
+                | Some(Opcode::MVI_HL)
+                | Some(Opcode::LXI_SP)
+        ) {
             return self.lxi_seq(bus, idx);
         }
         if opcode == Some(Opcode::LDA) {
@@ -369,7 +376,9 @@ impl Cpu {
         if (0x80..=0xBF).contains(&b) && (b & 7) == 6 {
             let kind = aop_group(b & 0xF8);
             let hl = self.regs.get16(Reg16::HL);
-            return self.read_byte_seq(bus, idx, Src::Addr(hl), move |c, byte| c.apply_aop(kind, byte));
+            return self.read_byte_seq(bus, idx, Src::Addr(hl), move |c, byte| {
+                c.apply_aop(kind, byte)
+            });
         }
         if opcode == Some(Opcode::INR_M) || opcode == Some(Opcode::DCR_M) {
             return self.rmw_hl_seq(bus, idx, |c, v| {
@@ -439,7 +448,13 @@ impl Cpu {
 
     // ---------- shared byte-transfer sequences ----------
 
-    fn read_byte_seq(&mut self, bus: &mut SystemBus, idx: u32, src: Src, act: impl FnOnce(&mut Cpu, u8)) -> Micro {
+    fn read_byte_seq(
+        &mut self,
+        bus: &mut SystemBus,
+        idx: u32,
+        src: Src,
+        act: impl FnOnce(&mut Cpu, u8),
+    ) -> Micro {
         match idx {
             0 => {
                 let a = match src {
@@ -475,7 +490,12 @@ impl Cpu {
         Micro::Continue
     }
 
-    fn rmw_hl_seq(&mut self, bus: &mut SystemBus, idx: u32, f: impl FnOnce(&mut Cpu, u8) -> u8) -> Micro {
+    fn rmw_hl_seq(
+        &mut self,
+        bus: &mut SystemBus,
+        idx: u32,
+        f: impl FnOnce(&mut Cpu, u8) -> u8,
+    ) -> Micro {
         let hl = self.regs.get16(Reg16::HL);
         match idx {
             0 => bus.set_address(hl),

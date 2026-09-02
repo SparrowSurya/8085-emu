@@ -256,7 +256,10 @@ impl Parser {
     /// ended — i.e. the current segment body is finished. Stopping at `%define` lets the
     /// top-level loop report it as [`AsmErrorKind::DefineAfterSegment`].
     fn at_body_end(&self) -> bool {
-        self.at_eof() || self.is_segment_ahead() || self.is_define_ahead() || self.is_include_ahead()
+        self.at_eof()
+            || self.is_segment_ahead()
+            || self.is_define_ahead()
+            || self.is_include_ahead()
     }
 
     fn data_body(&mut self) -> Result<Vec<DataDef>, AsmError> {
@@ -523,7 +526,7 @@ fn describe(k: &TokenKind) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::asm::encode::{AReg16, AReg8};
+    use crate::asm::encode::{AReg8, AReg16};
     use crate::asm::lex;
 
     fn prog(src: &str) -> Program {

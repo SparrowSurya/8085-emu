@@ -28,7 +28,9 @@ fn main() {
         Instruction::new(Opcode::HLT),
     ]);
 
-    machine.load(&program, Addr(0x0000)).expect("program compiles");
+    machine
+        .load(&program, Addr(0x0000))
+        .expect("program compiles");
     machine.run();
 
     let term = machine.devices.device_ref::<PrinterDevice>(0).unwrap();

@@ -27,7 +27,8 @@ fn keyboard_in_reads_buffered_key_then_zero() {
     let mut cpu = Cpu::new();
     let mut ram = Memory::from_lines(16);
     // IN 1 ; MOV B,A ; IN 1 ; MOV C,A ; HLT
-    ram.load_bytes(&[0xDB, 0x01, 0x47, 0xDB, 0x01, 0x4F, 0x76], Addr(0x00A0)).unwrap();
+    ram.load_bytes(&[0xDB, 0x01, 0x47, 0xDB, 0x01, 0x4F, 0x76], Addr(0x00A0))
+        .unwrap();
     cpu.start_at(Addr(0x00A0));
     run(&mut cpu, &mut ram, &mut dm);
 
@@ -46,8 +47,11 @@ fn printer_out_streams_characters() {
     let mut cpu = Cpu::new();
     let mut ram = Memory::from_lines(16);
     // MVI A,'H' ; OUT 2 ; MVI A,'i' ; OUT 2 ; HLT
-    ram.load_bytes(&[0x3E, b'H', 0xD3, 0x02, 0x3E, b'i', 0xD3, 0x02, 0x76], Addr(0x00A0))
-        .unwrap();
+    ram.load_bytes(
+        &[0x3E, b'H', 0xD3, 0x02, 0x3E, b'i', 0xD3, 0x02, 0x76],
+        Addr(0x00A0),
+    )
+    .unwrap();
     cpu.start_at(Addr(0x00A0));
     run(&mut cpu, &mut ram, &mut dm);
 

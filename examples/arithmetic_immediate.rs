@@ -7,17 +7,19 @@ fn main() {
 
     let program = Program::new(vec![
         Instruction::with(Opcode::MVI_A, Operand::byte(0x10)),
-        Instruction::with(Opcode::ADI, Operand::byte(0x20)),   // A = 0x30
-        Instruction::with(Opcode::ACI, Operand::byte(0x05)),   // A = 0x35
-        Instruction::new(Opcode::STC),                         // Set CY = 1
-        Instruction::with(Opcode::ACI, Operand::byte(0x05)),   // A = 0x3B
-        Instruction::with(Opcode::SUI, Operand::byte(0x10)),   // A = 0x2B
-        Instruction::new(Opcode::STC),                         // Set CY = 1
-        Instruction::with(Opcode::SBI, Operand::byte(0x0A)),   // A = 0x20
+        Instruction::with(Opcode::ADI, Operand::byte(0x20)), // A = 0x30
+        Instruction::with(Opcode::ACI, Operand::byte(0x05)), // A = 0x35
+        Instruction::new(Opcode::STC),                       // Set CY = 1
+        Instruction::with(Opcode::ACI, Operand::byte(0x05)), // A = 0x3B
+        Instruction::with(Opcode::SUI, Operand::byte(0x10)), // A = 0x2B
+        Instruction::new(Opcode::STC),                       // Set CY = 1
+        Instruction::with(Opcode::SBI, Operand::byte(0x0A)), // A = 0x20
         Instruction::new(Opcode::HLT),
     ]);
 
-    machine.load(&program, Addr(0x0000)).expect("program compiles");
+    machine
+        .load(&program, Addr(0x0000))
+        .expect("program compiles");
     machine.run();
 
     let cpu = &machine.cpu;

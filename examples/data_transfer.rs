@@ -20,15 +20,15 @@ fn main() {
 
     // Assembly Program covering various data transfers
     let program = Program::new(vec![
-        Instruction::new(Opcode::MOV_BA),            // MOV B, A (B becomes 0xAA)
-        Instruction::new(Opcode::MOV_AM),            // MOV A, M (A reads from [HL] = 0x99)
+        Instruction::new(Opcode::MOV_BA), // MOV B, A (B becomes 0xAA)
+        Instruction::new(Opcode::MOV_AM), // MOV A, M (A reads from [HL] = 0x99)
         Instruction::with(Opcode::MVI_C, Operand::byte(0x55)), // MVI C, 0x55
-        Instruction::new(Opcode::MOV_MC),            // MOV M, C (memory at [HL] becomes 0x55)
-        Instruction::new(Opcode::LDA_DE),             // LDAX D (Load Accumulator from memory at DE [0x3344])
-        Instruction::new(Opcode::STA_BC),             // STAX B (Store Accumulator to memory at BC [0xAA22])
+        Instruction::new(Opcode::MOV_MC), // MOV M, C (memory at [HL] becomes 0x55)
+        Instruction::new(Opcode::LDA_DE), // LDAX D (Load Accumulator from memory at DE [0x3344])
+        Instruction::new(Opcode::STA_BC), // STAX B (Store Accumulator to memory at BC [0xAA22])
         Instruction::with(Opcode::LHLD, Operand::word(0x0200)), // LHLD 0x0200 (Load HL from memory 0x0200)
         Instruction::with(Opcode::SHLD, Operand::word(0x0300)), // SHLD 0x0300 (Store HL to memory 0x0300)
-        Instruction::new(Opcode::XCHG),               // XCHG (Exchange HL and DE)
+        Instruction::new(Opcode::XCHG),                         // XCHG (Exchange HL and DE)
         Instruction::new(Opcode::HLT),
     ]);
 
@@ -38,7 +38,9 @@ fn main() {
     ram.write(Addr(0x0201), 0xBE); // H value (HL = 0xBEEF)
 
     // Load and run program
-    machine.load(&program, Addr(0x0000)).expect("program compiles");
+    machine
+        .load(&program, Addr(0x0000))
+        .expect("program compiles");
     machine.run();
 
     let cpu = &machine.cpu;

@@ -109,7 +109,10 @@ mod tests {
 
     #[test]
     fn load_reports_unresolved_labels() {
-        let prog = Program::new(vec![Instruction::with(Opcode::JMP, Operand::label("MISSING"))]);
+        let prog = Program::new(vec![Instruction::with(
+            Opcode::JMP,
+            Operand::label("MISSING"),
+        )]);
         let mut m = Machine::default();
         assert!(m.load(&prog, Addr(0)).is_err());
     }
@@ -117,7 +120,10 @@ mod tests {
     #[test]
     fn usb_dma_round_trips_through_the_machine() {
         let mut m = Machine::default();
-        let prog = Program::new(vec![Instruction::new(Opcode::NOP), Instruction::new(Opcode::HLT)]);
+        let prog = Program::new(vec![
+            Instruction::new(Opcode::NOP),
+            Instruction::new(Opcode::HLT),
+        ]);
         m.load(&prog, Addr(0x00A0)).unwrap();
         let mut usb = USBDevice::new();
         let payload = b"DMA!";

@@ -19,17 +19,17 @@ pub mod parser;
 pub mod token;
 
 pub use assemble::{
-    assemble, assemble_and_link, assemble_listing, assemble_with_options, assemble_with_symbols,
-    load, ListingRow, LoadImage,
-};
-pub use container::{BinaryContainer, ContainerHeader};
-pub use inspect::{
-    extract_strings, format_header, format_segments, format_strings, format_symbols, get_segments,
-    inspect_container, ExtractedString, InspectOptions, SegmentRecord,
+    ListingRow, LoadImage, assemble, assemble_and_link, assemble_listing, assemble_with_options,
+    assemble_with_symbols, load,
 };
 pub use ast::{BssDecl, DataDef, Define, Instr, POperand, Program, Segment, Size, TextItem, Value};
-pub use encode::{encode, AReg16, AReg8, Operand};
+pub use container::{BinaryContainer, ContainerHeader};
+pub use encode::{AReg8, AReg16, Operand, encode};
 pub use error::{AsmError, AsmErrorKind, Span};
+pub use inspect::{
+    ExtractedString, InspectOptions, SegmentRecord, extract_strings, format_header,
+    format_segments, format_strings, format_symbols, get_segments, inspect_container,
+};
 pub use lexer::lex;
 pub use parser::parse;
 pub use token::{Token, TokenKind};

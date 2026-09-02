@@ -15,17 +15,25 @@ fn main() {
         Instruction::new(Opcode::NOP),
         Instruction::new(Opcode::HLT),
     ]);
-    machine.load(&program, Addr(0x00A0)).expect("program compiles");
+    machine
+        .load(&program, Addr(0x00A0))
+        .expect("program compiles");
 
     // 3. Simulate high-speed USB writing data directly to RAM via DMA protocol
     // The DMA protocol asserts HOLD -> CPU grants HLDA -> USB writes directly -> Release HOLD
     let write_data = b"USB_DMA_PACKET";
-    println!("USB writing to memory at 0x0200 via DMA: {:?}", std::str::from_utf8(write_data).unwrap());
+    println!(
+        "USB writing to memory at 0x0200 via DMA: {:?}",
+        std::str::from_utf8(write_data).unwrap()
+    );
     machine.dma_write(&mut usb, 0x0200, write_data);
 
     // 4. Simulate high-speed USB reading data back from RAM via DMA protocol
     let read_data = machine.dma_read(&mut usb, 0x0200, write_data.len());
-    println!("USB read back from memory at 0x0200 via DMA: {:?}", std::str::from_utf8(&read_data).unwrap());
+    println!(
+        "USB read back from memory at 0x0200 via DMA: {:?}",
+        std::str::from_utf8(&read_data).unwrap()
+    );
 
     // Verify that CPU yields control and memory is updated
     println!("\nUSB DMA Example State:");
@@ -35,7 +43,10 @@ fn main() {
     for i in 0..write_data.len() {
         mem_read_back.push(machine.ram.read(Addr(0x0200 + i as u16)));
     }
-    println!("Memory at 0x0200: {:?}", std::str::from_utf8(&mem_read_back).unwrap());
+    println!(
+        "Memory at 0x0200: {:?}",
+        std::str::from_utf8(&mem_read_back).unwrap()
+    );
 
     assert_eq!(read_data, write_data);
     assert_eq!(mem_read_back, write_data);

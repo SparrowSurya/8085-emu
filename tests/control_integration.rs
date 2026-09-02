@@ -28,7 +28,12 @@ fn run(prog: &[u8], mem_pre: &[(u16, u8)]) -> (Cpu, Memory, u64) {
 fn matches_reference_on_all_control_cases() {
     for case in CASES {
         let (cpu, mem, ticks) = run(case.prog, case.mem);
-        assert!(cpu.fault.is_none(), "case `{}` faulted: {:?}", case.name, cpu.fault);
+        assert!(
+            cpu.fault.is_none(),
+            "case `{}` faulted: {:?}",
+            case.name,
+            cpu.fault
+        );
         let e = &case.exp;
 
         let regs = (
@@ -42,8 +47,17 @@ fn matches_reference_on_all_control_cases() {
         );
         assert_eq!(cpu.regs.sp.0, e.sp, "case `{}`: SP mismatch", case.name);
         assert_eq!(cpu.regs.pc.0, e.pc, "case `{}`: PC mismatch", case.name);
-        assert_eq!(cpu.flags.to_psw(), e.psw, "case `{}`: PSW mismatch", case.name);
-        assert_eq!(ticks, e.ticks, "case `{}`: T-state count mismatch", case.name);
+        assert_eq!(
+            cpu.flags.to_psw(),
+            e.psw,
+            "case `{}`: PSW mismatch",
+            case.name
+        );
+        assert_eq!(
+            ticks, e.ticks,
+            "case `{}`: T-state count mismatch",
+            case.name
+        );
 
         for (probe, &expected) in PROBES.iter().zip(e.probes.iter()) {
             assert_eq!(

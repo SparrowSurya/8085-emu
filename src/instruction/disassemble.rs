@@ -81,7 +81,9 @@ impl DisassemblyRow {
         if let Some(cyc) = self.cycles {
             let pad = 42usize.saturating_sub(self.mnemonic.len());
             let pad_str = " ".repeat(pad);
-            format!("{colored_addr}: {colored_bytes} {colored_mnemonic}{pad_str} {ANSI_WHITE}[{cyc}]{ANSI_RESET}")
+            format!(
+                "{colored_addr}: {colored_bytes} {colored_mnemonic}{pad_str} {ANSI_WHITE}[{cyc}]{ANSI_RESET}"
+            )
         } else {
             format!("{colored_addr}: {colored_bytes} {colored_mnemonic}")
         }
@@ -100,7 +102,11 @@ impl std::fmt::Display for DisassemblyRow {
             .collect::<Vec<_>>()
             .join(" ");
         if let Some(cyc) = self.cycles {
-            write!(f, "{:04X}: {:<16} {:<42} [{}]", self.addr, hex_bytes, self.mnemonic, cyc)
+            write!(
+                f,
+                "{:04X}: {:<16} {:<42} [{}]",
+                self.addr, hex_bytes, self.mnemonic, cyc
+            )
         } else {
             write!(f, "{:04X}: {:<16} {}", self.addr, hex_bytes, self.mnemonic)
         }
@@ -125,14 +131,86 @@ fn is_number_token(w: &str) -> bool {
 fn is_mnemonic_token(w: &str) -> bool {
     matches!(
         w.to_ascii_uppercase().as_str(),
-        "MOV" | "MVI" | "LXI" | "LDA" | "STA" | "LHLD" | "SHLD" | "LDAX" | "STAX" | "XCHG"
-            | "ADD" | "ADI" | "ADC" | "ACI" | "SUB" | "SUI" | "SBB" | "SBI" | "INR" | "DCR"
-            | "INX" | "DCX" | "DAD" | "DAA" | "ANA" | "ANI" | "ORA" | "ORI" | "XRA" | "XRI"
-            | "CMP" | "CPI" | "RLC" | "RRC" | "RAL" | "RAR" | "CMA" | "CMC" | "STC" | "JMP"
-            | "JNZ" | "JZ" | "JNC" | "JC" | "JPO" | "JPE" | "JP" | "JM" | "PCHL" | "CALL"
-            | "CNZ" | "CZ" | "CNC" | "CC" | "CPO" | "CPE" | "CP" | "CM" | "RET" | "RNZ"
-            | "RZ" | "RNC" | "RC" | "RPO" | "RPE" | "RP" | "RM" | "RST" | "PUSH" | "POP"
-            | "XTHL" | "SPHL" | "IN" | "OUT" | "EI" | "DI" | "SIM" | "RIM" | "NOP" | "HLT"
+        "MOV"
+            | "MVI"
+            | "LXI"
+            | "LDA"
+            | "STA"
+            | "LHLD"
+            | "SHLD"
+            | "LDAX"
+            | "STAX"
+            | "XCHG"
+            | "ADD"
+            | "ADI"
+            | "ADC"
+            | "ACI"
+            | "SUB"
+            | "SUI"
+            | "SBB"
+            | "SBI"
+            | "INR"
+            | "DCR"
+            | "INX"
+            | "DCX"
+            | "DAD"
+            | "DAA"
+            | "ANA"
+            | "ANI"
+            | "ORA"
+            | "ORI"
+            | "XRA"
+            | "XRI"
+            | "CMP"
+            | "CPI"
+            | "RLC"
+            | "RRC"
+            | "RAL"
+            | "RAR"
+            | "CMA"
+            | "CMC"
+            | "STC"
+            | "JMP"
+            | "JNZ"
+            | "JZ"
+            | "JNC"
+            | "JC"
+            | "JPO"
+            | "JPE"
+            | "JP"
+            | "JM"
+            | "PCHL"
+            | "CALL"
+            | "CNZ"
+            | "CZ"
+            | "CNC"
+            | "CC"
+            | "CPO"
+            | "CPE"
+            | "CP"
+            | "CM"
+            | "RET"
+            | "RNZ"
+            | "RZ"
+            | "RNC"
+            | "RC"
+            | "RPO"
+            | "RPE"
+            | "RP"
+            | "RM"
+            | "RST"
+            | "PUSH"
+            | "POP"
+            | "XTHL"
+            | "SPHL"
+            | "IN"
+            | "OUT"
+            | "EI"
+            | "DI"
+            | "SIM"
+            | "RIM"
+            | "NOP"
+            | "HLT"
             | "DB"
     )
 }
@@ -224,7 +302,10 @@ const ALU_OPS: [&str; 8] = ["ADD", "ADC", "SUB", "SBB", "ANA", "XRA", "ORA", "CM
 /// Disassembles the `.text` segment of a `.8085.bin` container image with default options.
 pub fn disassemble_bytes(bytes: &[u8]) -> Result<Vec<DisassemblyRow>, String> {
     let container = BinaryContainer::decode(bytes)?;
-    Ok(disassemble_container_with_options(&container, &DisassembleOptions::default()))
+    Ok(disassemble_container_with_options(
+        &container,
+        &DisassembleOptions::default(),
+    ))
 }
 
 /// Disassembles a structured `.8085.bin` container with default options.
@@ -281,9 +362,15 @@ pub fn disassemble_container_with_options(
 
     // Optional Vector Table Disassembly
     if options.show_vectors && !container.vec_bytes.is_empty() {
-        rows.push(DisassemblyRow::banner("; =============================================================================="));
-        rows.push(DisassemblyRow::banner("; Section: .vec (Interrupt Vector Table, 64 Bytes)"));
-        rows.push(DisassemblyRow::banner("; =============================================================================="));
+        rows.push(DisassemblyRow::banner(
+            "; ==============================================================================",
+        ));
+        rows.push(DisassemblyRow::banner(
+            "; Section: .vec (Interrupt Vector Table, 64 Bytes)",
+        ));
+        rows.push(DisassemblyRow::banner(
+            "; ==============================================================================",
+        ));
 
         let vec_rows = disassemble_linear(
             &container.vec_bytes,

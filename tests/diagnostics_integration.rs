@@ -2,7 +2,9 @@
 //! and multi-symbol disassembly annotations.
 
 use emu8085::asm::container::BinaryContainer;
-use emu8085::asm::{assemble, assemble_and_link, extract_strings, get_segments, inspect_container, InspectOptions};
+use emu8085::asm::{
+    InspectOptions, assemble, assemble_and_link, extract_strings, get_segments, inspect_container,
+};
 use emu8085::disassemble_container;
 
 const TEST_LIB_SRC: &str = r#"
@@ -80,7 +82,9 @@ fn test_inspect_strings_extraction() {
     let extracted = extract_strings(&container, 4);
 
     assert!(
-        extracted.iter().any(|s| s.content.contains("Hello Diagnostics")),
+        extracted
+            .iter()
+            .any(|s| s.content.contains("Hello Diagnostics")),
         "should find greeting string"
     );
 }
@@ -103,18 +107,36 @@ fn test_disassemble_multi_symbol_annotations() {
         .join("\n");
 
     // Subroutine banners
-    assert!(printed.contains("Subroutine: foo"), "has foo subroutine banner");
-    assert!(printed.contains("Function: main"), "has main function banner");
+    assert!(
+        printed.contains("Subroutine: foo"),
+        "has foo subroutine banner"
+    );
+    assert!(
+        printed.contains("Function: main"),
+        "has main function banner"
+    );
 
     // Symbolic call targets
-    assert!(printed.contains("CALL foo"), "replaces address with CALL foo");
-    assert!(printed.contains("CALL bar"), "replaces address with CALL bar");
+    assert!(
+        printed.contains("CALL foo"),
+        "replaces address with CALL foo"
+    );
+    assert!(
+        printed.contains("CALL bar"),
+        "replaces address with CALL bar"
+    );
 
     // String preview comment
-    assert!(printed.contains("Hello Diagnostics"), "displays string literal preview");
+    assert!(
+        printed.contains("Hello Diagnostics"),
+        "displays string literal preview"
+    );
 
     // Internal loop label
-    assert!(printed.contains("loc_0042"), "generates internal loop label for JNZ target");
+    assert!(
+        printed.contains("loc_0042"),
+        "generates internal loop label for JNZ target"
+    );
 }
 
 #[test]
@@ -168,15 +190,30 @@ fn test_disassemble_colored_output() {
         .join("\n");
 
     // Cyan (\x1b[36m) for instructions
-    assert!(colored_output.contains("\x1b[36m"), "should contain cyan for instructions");
+    assert!(
+        colored_output.contains("\x1b[36m"),
+        "should contain cyan for instructions"
+    );
     // Magenta (\x1b[35m) for registers
-    assert!(colored_output.contains("\x1b[35m"), "should contain magenta for registers");
+    assert!(
+        colored_output.contains("\x1b[35m"),
+        "should contain magenta for registers"
+    );
     // Yellow (\x1b[33m) for numbers
-    assert!(colored_output.contains("\x1b[33m"), "should contain yellow for numbers");
+    assert!(
+        colored_output.contains("\x1b[33m"),
+        "should contain yellow for numbers"
+    );
     // Blue (\x1b[34m) for labels and symbols
-    assert!(colored_output.contains("\x1b[34mfoo\x1b[0m"), "should contain blue for foo symbol");
+    assert!(
+        colored_output.contains("\x1b[34mfoo\x1b[0m"),
+        "should contain blue for foo symbol"
+    );
     // White (\x1b[37m) for address and opcodes
-    assert!(colored_output.contains("\x1b[37m"), "should contain white for address/opcodes");
+    assert!(
+        colored_output.contains("\x1b[37m"),
+        "should contain white for address/opcodes"
+    );
 }
 
 #[test]
@@ -204,14 +241,17 @@ fn test_disassemble_cycles_and_vectors_options() {
         .join("\n");
 
     // Vector Table
-    assert!(text.contains("Section: .vec"), "contains vector table banner");
-    assert!(text.contains("RST 0 / Reset Vector"), "annotates reset vector");
+    assert!(
+        text.contains("Section: .vec"),
+        "contains vector table banner"
+    );
+    assert!(
+        text.contains("RST 0 / Reset Vector"),
+        "annotates reset vector"
+    );
 
     // T-State cycle counts
     assert!(text.contains("[18 T]"), "shows 18 T for CALL");
     assert!(text.contains("[10 T]"), "shows 10 T for OUT / LXI");
     assert!(text.contains("[4 T]"), "shows 4 T for DCR / NOP");
 }
-
-
-

@@ -21,15 +21,17 @@ fn main() {
     let program = Program::new(vec![
         Instruction::with(Opcode::MVI_HL, Operand::word(0x0100)), // HL -> string start
         Instruction::new(Opcode::MOV_AM).labeled("LOOP"),         // A = *HL
-        Instruction::with(Opcode::CPI, Operand::byte(0x00)),     // NUL?
+        Instruction::with(Opcode::CPI, Operand::byte(0x00)),      // NUL?
         Instruction::with(Opcode::JZ, Operand::label("END")),
-        Instruction::with(Opcode::OUT, Operand::byte(0x02)),     // print A
-        Instruction::new(Opcode::INX_HL),                         // HL++
+        Instruction::with(Opcode::OUT, Operand::byte(0x02)), // print A
+        Instruction::new(Opcode::INX_HL),                    // HL++
         Instruction::with(Opcode::JMP, Operand::label("LOOP")),
         Instruction::new(Opcode::HLT).labeled("END"),
     ]);
 
-    machine.load(&program, Addr(0x0000)).expect("program compiles");
+    machine
+        .load(&program, Addr(0x0000))
+        .expect("program compiles");
 
     // Place the message (NUL-terminated) at 0x0100.
     let message = b"Hello, World!\n";

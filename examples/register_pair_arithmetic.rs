@@ -15,14 +15,16 @@ fn main() {
     cpu.regs.set16(Reg16::HL, Addr(0x1000));
 
     let program = Program::new(vec![
-        Instruction::new(Opcode::INX_BC),  // BC = 0x1235
-        Instruction::new(Opcode::DCX_DE),  // DE = 0x000E
-        Instruction::new(Opcode::DAD_BC),  // HL = HL + BC = 0x1000 + 0x1235 = 0x2235
-        Instruction::new(Opcode::DAD_DE),  // HL = HL + DE = 0x2235 + 0x000E = 0x2243
+        Instruction::new(Opcode::INX_BC), // BC = 0x1235
+        Instruction::new(Opcode::DCX_DE), // DE = 0x000E
+        Instruction::new(Opcode::DAD_BC), // HL = HL + BC = 0x1000 + 0x1235 = 0x2235
+        Instruction::new(Opcode::DAD_DE), // HL = HL + DE = 0x2235 + 0x000E = 0x2243
         Instruction::new(Opcode::HLT),
     ]);
 
-    machine.load(&program, Addr(0x0000)).expect("program compiles");
+    machine
+        .load(&program, Addr(0x0000))
+        .expect("program compiles");
     machine.run();
 
     let cpu = &machine.cpu;

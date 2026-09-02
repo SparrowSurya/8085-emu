@@ -2,8 +2,8 @@
 //! WORD data arrays, %repeat of a string, %define chaining, char-literal operands,
 //! and multiple segments of the same kind.
 
-use emu8085::asm::{assemble, load};
 use emu8085::Machine;
+use emu8085::asm::{assemble, load};
 
 fn image(src: &str) -> Vec<u8> {
     assemble(src).expect("assembles").bytes
@@ -33,7 +33,8 @@ fn repeat_of_a_string() {
 #[test]
 fn define_chaining() {
     // one define references an earlier define
-    let m = run("%define FIRST 5\n%define SECOND FIRST\nsegment .text\nmain:\nmvi A, SECOND\nhlt\n");
+    let m =
+        run("%define FIRST 5\n%define SECOND FIRST\nsegment .text\nmain:\nmvi A, SECOND\nhlt\n");
     assert_eq!(m.cpu.regs.a, 5);
 }
 
@@ -67,7 +68,9 @@ fn len_of_a_bss_variable() {
 fn forward_len_reference_is_rejected() {
     // %len must refer backward in source order; a forward reference is undefined.
     use emu8085::asm::AsmErrorKind;
-    let err = assemble("segment .data\nfirst BYTE %len second\nsecond BYTE 1 2 3\nsegment .text\nmain:\nhlt\n")
-        .unwrap_err();
+    let err = assemble(
+        "segment .data\nfirst BYTE %len second\nsecond BYTE 1 2 3\nsegment .text\nmain:\nhlt\n",
+    )
+    .unwrap_err();
     assert!(matches!(err.kind, AsmErrorKind::UndefinedName(_)));
 }

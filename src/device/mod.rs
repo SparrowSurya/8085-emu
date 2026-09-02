@@ -7,13 +7,13 @@
 
 pub mod keyboard;
 pub mod printer;
-pub mod usb;
 pub mod terminal;
+pub mod usb;
 
 pub use keyboard::KeyboardDevice;
 pub use printer::PrinterDevice;
-pub use usb::USBDevice;
 pub use terminal::TerminalDevice;
+pub use usb::USBDevice;
 
 use crate::bus::SystemBus;
 use std::collections::HashMap;
@@ -93,12 +93,16 @@ impl DeviceManager {
 
     /// Borrow an attached device downcast to its concrete type.
     pub fn device_ref<T: Device + 'static>(&self, idx: usize) -> Option<&T> {
-        self.devices.get(idx).and_then(|b| b.as_any().downcast_ref::<T>())
+        self.devices
+            .get(idx)
+            .and_then(|b| b.as_any().downcast_ref::<T>())
     }
 
     /// Mutably borrow an attached device downcast to its concrete type.
     pub fn device_mut<T: Device + 'static>(&mut self, idx: usize) -> Option<&mut T> {
-        self.devices.get_mut(idx).and_then(|b| b.as_any_mut().downcast_mut::<T>())
+        self.devices
+            .get_mut(idx)
+            .and_then(|b| b.as_any_mut().downcast_mut::<T>())
     }
 
     /// Service one bus cycle: fulfil an I/O read/write, or during INTA let the first
