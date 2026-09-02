@@ -162,9 +162,17 @@ fn test_container_encoding_and_disassembly() {
     assert!(mnemonics.iter().any(|m| m.contains("MVI A, 0x00")));
     assert!(mnemonics.iter().any(|m| m.contains("OUT 0x02")));
     assert!(mnemonics.iter().any(|m| m.contains("HLT")));
-    // Must NOT contain vector table or data
-    assert!(!mnemonics.iter().any(|m| m.contains("JMP 0x004D")));
-    assert!(!mnemonics.iter().any(|m| m.contains("Hello World!")));
+    // Must strictly disassemble instructions from .text segment
+    for r in &rows {
+        if !r.bytes.is_empty() {
+            assert!(
+                r.addr >= decoded.header.text_addr
+                    && r.addr < decoded.header.text_addr + decoded.header.text_size,
+                "disassembly row address {:04X} must be within .text range",
+                r.addr
+            );
+        }
+    }
 }
 
 #[test]

@@ -79,11 +79,20 @@ fn test_disassemble_multi_symbol_annotations() {
         .collect::<Vec<_>>()
         .join("\n");
 
-    assert!(printed.contains("<print>"), "disassembly contains <print> symbol");
-    assert!(printed.contains("<input>"), "disassembly contains <input> symbol");
-    assert!(printed.contains("<putch>"), "disassembly contains <putch> symbol");
-    assert!(printed.contains("<endl>"), "disassembly contains <endl> symbol");
-    assert!(printed.contains("<main>"), "disassembly contains <main> entry point");
+    // Subroutine banners
+    assert!(printed.contains("Subroutine: print"), "has print subroutine banner");
+    assert!(printed.contains("Function: main"), "has main function banner");
+
+    // Symbolic call targets
+    assert!(printed.contains("CALL print"), "replaces 0x0040 with CALL print");
+    assert!(printed.contains("CALL input"), "replaces 0x0054 with CALL input");
+    assert!(printed.contains("CALL endl"), "replaces 0x0082 with CALL endl");
+
+    // String preview comment
+    assert!(printed.contains("What is your name?"), "displays string literal preview");
+
+    // Internal loop label
+    assert!(printed.contains("loc_0047"), "generates internal loop label for JNZ target");
 }
 
 #[test]
@@ -146,10 +155,46 @@ fn test_disassemble_colored_output() {
     assert!(colored_output.contains("\x1b[35m"), "should contain magenta for registers");
     // Yellow (\x1b[33m) for numbers
     assert!(colored_output.contains("\x1b[33m"), "should contain yellow for numbers");
-    // Blue (\x1b[34m) for labels
-    assert!(colored_output.contains("\x1b[34m<print>"), "should contain blue for <print> label");
-    assert!(colored_output.contains("\x1b[34m<main>"), "should contain blue for <main> label");
+    // Blue (\x1b[34m) for labels and symbols
+    assert!(colored_output.contains("\x1b[34mprint\x1b[0m"), "should contain blue for print symbol");
     // White (\x1b[37m) for address and opcodes
     assert!(colored_output.contains("\x1b[37m"), "should contain white for address/opcodes");
 }
+
+#[test]
+fn test_disassemble_cycles_and_vectors_options() {
+    use emu8085::DisassembleOptions;
+    let term_src = include_str!("../programs/terminal.e8085");
+    let term_image = assemble(term_src).expect("assembles terminal helper");
+    let term_container = term_image.to_container();
+
+    let greet_src = include_str!("../programs/greet.e8085");
+    let standalone_image = assemble_and_link(greet_src, None, &[term_container])
+        .expect("statically links greet executable");
+
+    let container = standalone_image.to_container();
+    let opts = DisassembleOptions {
+        color: false,
+        show_cycles: true,
+        show_vectors: true,
+        show_banners: true,
+    };
+    let rows = emu8085::disassemble_container_with_options(&container, &opts);
+
+    let text = rows
+        .iter()
+        .map(|r| r.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // Vector Table
+    assert!(text.contains("Section: .vec"), "contains vector table banner");
+    assert!(text.contains("RST 0 / Reset Vector"), "annotates reset vector");
+
+    // T-State cycle counts
+    assert!(text.contains("[18 T]"), "shows 18 T for CALL");
+    assert!(text.contains("[10 T]"), "shows 10 T for OUT / LXI");
+    assert!(text.contains("[4 T]"), "shows 4 T for MOV / INR / DCR");
+}
+
 

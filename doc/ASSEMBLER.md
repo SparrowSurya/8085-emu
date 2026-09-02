@@ -155,26 +155,60 @@ cargo run --bin e8085 -- run target/hello_world.8085.bin
 ### 3. Disassemble Binary Image (`disassemble`)
 Decodes a `.8085.bin` container into clean assembly instructions from strictly the `.text` segment, annotating instructions with exported global symbols and entry point:
 ```bash
-# Standard output
+# Standard output with symbolic resolution and subroutine banners
 cargo run --bin e8085 -- disassemble greet.8085.bin
 
 # ANSI colored output
 cargo run --bin e8085 -- disassemble greet.8085.bin --color
+
+# Display hardware T-state execution cycles
+cargo run --bin e8085 -- disassemble greet.8085.bin --cycles
+
+# Include interrupt vector table (.vec) disassembly
+cargo run --bin e8085 -- disassemble greet.8085.bin --vectors
 ```
 **Output**:
 ```text
-0040: 3E 00            MVI A, 0x00          ; <print>
-0042: D3 02            OUT 0x02
-...
-0054: 3E 02            MVI A, 0x02          ; <input>
-...
-0071: 4F               MOV C, A             ; <putch>
-...
-0082: 3E 0A            MVI A, 0x0A          ; <endl>
-0084: C3 71 00         JMP 0x0071
-0087: 21 AB 00         LXI HL, 0x00AB       ; <main>
-...
-00AA: 76               HLT
+; ==============================================================================
+; Subroutine: print (Address: 0x0040)
+; ==============================================================================
+0040: 3E 00            MVI A, 0x00                                [7 T]
+0042: D3 02            OUT 0x02                                   [10 T]
+0044: 78               MOV A, B                                   [4 T]
+0045: D3 01            OUT 0x01                                   [10 T]
+0047: 7E               MOV A, M             ; loc_0047:           [7 T]
+0048: D3 01            OUT 0x01                                   [10 T]
+004A: 23               INX HL                                     [6 T]
+004B: 05               DCR B                                      [4 T]
+004C: C2 47 00         JNZ loc_0047                               [10/7 T]
+004F: 3E 01            MVI A, 0x01                                [7 T]
+0051: D3 02            OUT 0x02                                   [10 T]
+0053: C9               RET                                        [10 T]
+
+; ==============================================================================
+; Subroutine: endl (Address: 0x0082)
+; ==============================================================================
+0082: 3E 0A            MVI A, 0x0A                                [7 T]
+0084: C3 71 00         JMP putch                                  [10 T]
+
+; ==============================================================================
+; Function: main (Entry Point: 0x0087)
+; ==============================================================================
+0087: 21 AB 00         LXI HL, 0x00AB       ; -> "What is your name? He..." [10 T]
+008A: 06 13            MVI B, 0x13                                [7 T]
+008C: CD 40 00         CALL print                                 [18 T]
+008F: 21 C5 00         LXI HL, 0x00C5                             [10 T]
+0092: 06 20            MVI B, 0x20                                [7 T]
+0094: CD 54 00         CALL input                                 [18 T]
+0097: 4F               MOV C, A                                   [4 T]
+0098: 21 BE 00         LXI HL, 0x00BE                             [10 T]
+009B: 06 07            MVI B, 0x07                                [7 T]
+009D: CD 40 00         CALL print                                 [18 T]
+00A0: 21 C5 00         LXI HL, 0x00C5                             [10 T]
+00A3: 41               MOV B, C                                   [4 T]
+00A4: CD 40 00         CALL print                                 [18 T]
+00A7: CD 82 00         CALL endl                                  [18 T]
+00AA: 76               HLT                                        [5 T]
 ```
 
 ### 4. Inspect Binary Container (`inspect` & `strings`)

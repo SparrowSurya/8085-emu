@@ -207,7 +207,7 @@ pub fn format_header(header: &ContainerHeader, file_size: usize) -> String {
     let magic_str = String::from_utf8_lossy(&header.magic);
     out.push_str(&format!("  Magic Identifier     : {magic_str} (0x{:02X}{:02X}{:02X}{:02X})\n", header.magic[0], header.magic[1], header.magic[2], header.magic[3]));
     out.push_str(&format!("  Format Version       : {}\n", header.version));
-    
+
     let mut flag_names = Vec::new();
     if (header.flags & FLAG_HAS_VEC_TABLE) != 0 {
         flag_names.push("HAS_VEC_TABLE");

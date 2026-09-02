@@ -8,7 +8,10 @@
 pub mod disassemble;
 pub mod opcode;
 
-pub use disassemble::{disassemble_bytes, disassemble_container, DisassemblyRow};
+pub use disassemble::{
+    disassemble_bytes, disassemble_container, disassemble_container_with_options, opcode_t_states,
+    DisassembleOptions, DisassemblyRow,
+};
 pub use opcode::Opcode;
 
 /// An instruction operand: an 8-bit immediate, a 16-bit immediate/address, or a symbolic

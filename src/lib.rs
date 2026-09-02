@@ -51,7 +51,8 @@ pub use device::{Device, DeviceManager, KeyboardDevice, PrinterDevice, TerminalD
 pub use error::EmuError;
 pub use instruction::opcode::Opcode;
 pub use instruction::{
-    disassemble_bytes, disassemble_container, DisassemblyRow, Instruction, Operand,
+    disassemble_bytes, disassemble_container, disassemble_container_with_options, opcode_t_states,
+    DisassembleOptions, DisassemblyRow, Instruction, Operand,
 };
 pub use machine::Machine;
 pub use memory::Memory;

@@ -8,7 +8,7 @@ use clap::{Parser, Subcommand};
 use emu8085::asm::assemble_and_link;
 use emu8085::asm::container::{BinaryContainer, CONTAINER_MAGIC};
 use emu8085::asm::load;
-use emu8085::{Addr, InspectOptions, Machine, TerminalDevice};
+use emu8085::{Addr, DisassembleOptions, InspectOptions, Machine, TerminalDevice};
 
 /// Maximum 8085 RAM capacity (64 KB).
 const MAX_RAM_SIZE: usize = 65536;
@@ -58,6 +58,14 @@ enum Commands {
         /// Enable ANSI colored disassembly output
         #[arg(long = "color")]
         color: bool,
+
+        /// Display hardware T-state cycle counts
+        #[arg(short = 'c', long = "cycles")]
+        cycles: bool,
+
+        /// Include interrupt vector table disassembly
+        #[arg(short = 'V', long = "vectors")]
+        vectors: bool,
     },
 
     /// Inspect a .8085.bin binary container (header, segments, symbols, strings)
@@ -109,7 +117,12 @@ fn main() {
         Commands::Compile { file, link, output } => {
             compile_file(&file, &link, output.as_deref())
         }
-        Commands::Disassemble { file, color } => disassemble_file(&file, color),
+        Commands::Disassemble {
+            file,
+            color,
+            cycles,
+            vectors,
+        } => disassemble_file(&file, color, cycles, vectors),
         Commands::Inspect {
             file,
             all,
@@ -176,16 +189,30 @@ fn strings_file(path: &str, min_len: usize) {
     inspect_file(path, false, false, false, false, true, min_len);
 }
 
-fn disassemble_file(path: &str, color: bool) {
+fn disassemble_file(path: &str, color: bool, cycles: bool, vectors: bool) {
     let bytes = std::fs::read(path).unwrap_or_else(|e| {
         eprintln!("cannot read binary file '{path}': {e}");
         std::process::exit(2);
     });
 
-    let rows = emu8085::disassemble_bytes(&bytes).unwrap_or_else(|e| {
-        eprintln!("error disassembling '{path}': {e}");
+    if bytes.len() < 4 || &bytes[0..4] != CONTAINER_MAGIC {
+        eprintln!("error: file '{path}' is not a valid .8085.bin binary container");
+        std::process::exit(1);
+    }
+
+    let container = BinaryContainer::decode(&bytes).unwrap_or_else(|e| {
+        eprintln!("error reading container '{path}': {e}");
         std::process::exit(1);
     });
+
+    let options = DisassembleOptions {
+        color,
+        show_cycles: cycles,
+        show_vectors: vectors,
+        show_banners: true,
+    };
+
+    let rows = emu8085::disassemble_container_with_options(&container, &options);
 
     for r in rows {
         if color {
