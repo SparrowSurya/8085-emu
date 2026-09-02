@@ -289,7 +289,7 @@ fn test_static_standalone_binary_compilation_and_execution() {
     let term_container = term_image.to_container();
     assert_eq!(term_container.header.entry_pc, 0, "library without main has entry_pc == 0");
 
-    let greet_src = include_str!("../greet.e8085");
+    let greet_src = include_str!("../programs/greet.e8085");
     // greet.e8085 uses extern print, input, endl
     let standalone_image = assemble_and_link(greet_src, None, &[term_container])
         .expect("statically links greet with terminal binary container");

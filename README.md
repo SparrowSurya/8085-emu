@@ -18,22 +18,32 @@ cargo run --bin e8085 -- run programs/demo.e8085
 # Run Hello World program
 cargo run --bin e8085 -- run programs/hello_world.e8085
 
-# Run precompiled binary file
-cargo run --bin e8085 -- run programs/hello_world.8085.bin
+# Run precompiled standalone binary (no extra linker flags needed)
+cargo run --bin e8085 -- run greet.8085.bin
+
+# Run assembly file with external library linking on-the-fly
+cargo run --bin e8085 -- run programs/greet.e8085 -l terminal.8085.bin
 ```
 
-### 2. Compiling Programs to Binary (`compile`)
-Compile `.e8085` source into a `.8085.bin` binary image:
+### 2. Compiling Programs & Linking Libraries (`compile`)
+Compile `.e8085` source into a self-contained `.8085.bin` binary image:
 
 ```bash
-cargo run --bin e8085 -- compile programs/hello_world.e8085 -o programs/hello_world.8085.bin
+# 1. Compile reusable subroutine library (terminal helper)
+cargo run --bin e8085 -- compile programs/terminal.e8085 -o terminal.8085.bin
+
+# 2. Statically link library into a standalone executable binary
+cargo run --bin e8085 -- compile programs/greet.e8085 -l terminal.8085.bin -o greet.8085.bin
+
+# 3. Run the standalone binary directly
+cargo run --bin e8085 -- run greet.8085.bin
 ```
 
 ### 3. Disassembling Binary Images (`disassemble`)
 Disassemble a `.8085.bin` machine code file into standard 8085 assembly instructions:
 
 ```bash
-cargo run --bin e8085 -- disassemble programs/hello_world.8085.bin
+cargo run --bin e8085 -- disassemble greet.8085.bin
 ```
 
 ### 4. Running Rust API Programmatic Examples
@@ -64,11 +74,12 @@ cargo test --all-targets && cargo test --doc
 emu8085/
 ├── programs/           # 8085 user assembly programs (.e8085)
 │   ├── demo.e8085              # Interactive terminal I/O demo
+│   ├── terminal.e8085          # Terminal I/O subroutine library (print, input, putch, endl)
+│   ├── greet.e8085             # Interactive greeting using extern subroutine linking
 │   ├── hello_world.e8085       # Terminal device string display
 │   ├── array_sum.e8085         # Array traversal & summation (ADD M)
 │   ├── directives.e8085        # %define, %repeat, %len, and .bss
 │   ├── hardware_trap.e8085     # Hardware TRAP exception handling
-│   ├── hello.e8085             # Null-terminated string printer output
 │   ├── print_stars.e8085       # Printer port loop counter
 │   ├── software_interrupts.e8085 # Custom RST 1 & RST 2 ISR routines
 │   └── subroutine.e8085        # CALL and RET subroutine execution
@@ -93,8 +104,10 @@ emu8085/
 ├── src/                # Core library and binaries
 │   ├── bin/
 │   │   └── e8085.rs            # Unified CLI binary (run, compile, disassemble)
-│   ├── asm/                    # Two-pass 8085 Assembler toolchain
-│   │   ├── assemble.rs         # Layout, vector table, and image generation
+│   ├── asm/                    # Two-pass 8085 Assembler & Static Linker toolchain
+│   │   ├── assemble.rs         # Layout, vector table, static linking, and image generation
+│   │   ├── include.rs          # Source preprocessor for %include resolution
+│   │   ├── container.rs        # .8085.bin binary container encoding/decoding
 │   │   ├── lexer.rs            # Lexical tokenizer (4 number bases, strings, directives)
 │   │   ├── parser.rs           # Recursive-descent AST parser
 │   │   ├── encode.rs           # Opcode & operand instruction encoder
@@ -115,6 +128,7 @@ emu8085/
 │   └── lib.rs                  # Crate root and documentation
 │
 ├── tests/              # Integration and verification test suites
+│   ├── linking_integration.rs  # Static linking, local labels, %include & extern tests
 │   ├── programs_integration.rs # Tests all programs/ files end-to-end
 │   ├── interrupt_software_and_hardware.rs # Software RST and Hardware TRAP tests
 │   ├── asm_coverage.rs         # Assembler directives & layout coverage
@@ -129,7 +143,7 @@ emu8085/
 │   └── terminal_integration.rs # Terminal device I/O tests
 │
 └── doc/                # Detailed technical documentation
-    ├── ASSEMBLER.md            # In-depth Assembler pipeline & architecture
+    ├── ASSEMBLER.md            # In-depth Assembler pipeline, container format & static linker
     └── GRAMMAR.md              # Complete .e8085 language reference & syntax
 ```
 
@@ -143,7 +157,13 @@ emu8085/
   - Maskable hardware interrupts: **RST 7.5** (`0x003C`), **RST 6.5** (`0x0034`), **RST 5.5** (`0x002C`), and **INTR** (`INTA` vectoring).
   - Software interrupts: **RST 0** (`0x0000`) through **RST 7** (`0x0038`) with automatic Interrupt Vector Table mapping to `isr_rst<n>` subroutines.
 - **Direct Memory Access (DMA)**: Hardware `HOLD` / `HLDA` bus-master handshake allowing peripherals like `USBDevice` to stream directly to/from memory.
-- **Built-in Assembler**: Complete two-pass assembler supporting `%define`, `%repeat`, `%len`, segments (`.data`, `.bss`, `.text`), 4 number bases, strings, and automatic vector table generation.
+- **Modular Assembler & Static Linker**:
+  - Two-pass assembler supporting `%define`, `%repeat`, `%len`, segments (`.data`, `.bss`, `.text`), 4 number bases, and string literals.
+  - Source inclusion with `%include "file.e8085"`.
+  - Subroutine-scoped local labels (`.name:` and `jz .name`).
+  - Modular library export (`global` / `export`) with export symbol tables.
+  - External referencing (`extern <symbol>`) with static binary linking (`-l <library.8085.bin>`) to produce standalone executables.
+  - Entry-point verification: non-executable library binaries (without `main`) are rejected from execution.
 - **Rich Peripheral Set**:
   - `TerminalDevice`: Two-port virtual terminal supporting line-buffered input and output.
   - `PrinterDevice`: Character stream capture device with callbacks.
@@ -155,5 +175,5 @@ emu8085/
 ## Detailed Documentation
 
 For comprehensive technical documentation, refer to:
-- [**doc/ASSEMBLER.md**](doc/ASSEMBLER.md) — Detailed guide to the assembler pipeline, layout, symbol resolution, and vector tables.
+- [**doc/ASSEMBLER.md**](doc/ASSEMBLER.md) — Detailed guide to the assembler pipeline, container layout, static linking, and symbol resolution.
 - [**doc/GRAMMAR.md**](doc/GRAMMAR.md) — Full language reference for `.e8085` assembly programs, syntax rules, directives, registers, and instructions.
