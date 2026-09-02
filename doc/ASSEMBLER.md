@@ -155,7 +155,11 @@ cargo run --bin e8085 -- run target/hello_world.8085.bin
 ### 3. Disassemble Binary Image (`disassemble`)
 Decodes a `.8085.bin` container into clean assembly instructions from strictly the `.text` segment, annotating instructions with exported global symbols and entry point:
 ```bash
+# Standard output
 cargo run --bin e8085 -- disassemble greet.8085.bin
+
+# ANSI colored output
+cargo run --bin e8085 -- disassemble greet.8085.bin --color
 ```
 **Output**:
 ```text

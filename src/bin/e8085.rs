@@ -54,6 +54,10 @@ enum Commands {
     Disassemble {
         /// Binary file to disassemble (.8085.bin or .bin)
         file: String,
+
+        /// Enable ANSI colored disassembly output
+        #[arg(long = "color")]
+        color: bool,
     },
 
     /// Inspect a .8085.bin binary container (header, segments, symbols, strings)
@@ -105,7 +109,7 @@ fn main() {
         Commands::Compile { file, link, output } => {
             compile_file(&file, &link, output.as_deref())
         }
-        Commands::Disassemble { file } => disassemble_file(&file),
+        Commands::Disassemble { file, color } => disassemble_file(&file, color),
         Commands::Inspect {
             file,
             all,
@@ -172,7 +176,7 @@ fn strings_file(path: &str, min_len: usize) {
     inspect_file(path, false, false, false, false, true, min_len);
 }
 
-fn disassemble_file(path: &str) {
+fn disassemble_file(path: &str, color: bool) {
     let bytes = std::fs::read(path).unwrap_or_else(|e| {
         eprintln!("cannot read binary file '{path}': {e}");
         std::process::exit(2);
@@ -184,7 +188,11 @@ fn disassemble_file(path: &str) {
     });
 
     for r in rows {
-        println!("{r}");
+        if color {
+            println!("{}", r.to_colored_string());
+        } else {
+            println!("{r}");
+        }
     }
 }
 

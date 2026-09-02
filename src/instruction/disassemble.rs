@@ -7,6 +7,13 @@ use std::collections::HashMap;
 
 use crate::asm::container::BinaryContainer;
 
+pub const ANSI_RESET: &str = "\x1b[0m";
+pub const ANSI_WHITE: &str = "\x1b[37m";
+pub const ANSI_CYAN: &str = "\x1b[36m";
+pub const ANSI_YELLOW: &str = "\x1b[33m";
+pub const ANSI_MAGENTA: &str = "\x1b[35m";
+pub const ANSI_BLUE: &str = "\x1b[34m";
+
 /// A single disassembled instruction row.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DisassemblyRow {
@@ -18,6 +25,24 @@ pub struct DisassemblyRow {
     pub mnemonic: String,
 }
 
+impl DisassemblyRow {
+    /// Formats the disassembly row with ANSI color codes.
+    pub fn to_colored_string(&self) -> String {
+        let hex_bytes = self
+            .bytes
+            .iter()
+            .map(|b| format!("{b:02X}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        let colored_addr = format!("{ANSI_WHITE}{:04X}{ANSI_RESET}", self.addr);
+        let colored_bytes = format!("{ANSI_WHITE}{:<16}{ANSI_RESET}", hex_bytes);
+        let colored_mnemonic = colorize_mnemonic(&self.mnemonic);
+
+        format!("{colored_addr}: {colored_bytes} {colored_mnemonic}")
+    }
+}
+
 impl std::fmt::Display for DisassemblyRow {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let hex_bytes = self
@@ -27,6 +52,91 @@ impl std::fmt::Display for DisassemblyRow {
             .collect::<Vec<_>>()
             .join(" ");
         write!(f, "{:04X}: {:<16} {}", self.addr, hex_bytes, self.mnemonic)
+    }
+}
+
+fn is_register_token(w: &str) -> bool {
+    matches!(
+        w.to_ascii_uppercase().as_str(),
+        "A" | "B" | "C" | "D" | "E" | "H" | "L" | "M" | "BC" | "DE" | "HL" | "SP" | "PSW"
+    )
+}
+
+fn is_number_token(w: &str) -> bool {
+    if w.starts_with("0x") || w.starts_with("0X") {
+        w.len() > 2 && w[2..].chars().all(|c| c.is_ascii_hexdigit())
+    } else {
+        !w.is_empty() && w.chars().all(|c| c.is_ascii_digit())
+    }
+}
+
+fn colorize_code_part(code: &str) -> String {
+    let mut out = String::new();
+    let mut chars = code.chars().peekable();
+    let mut is_first_token = true;
+
+    while let Some(&ch) = chars.peek() {
+        if ch.is_whitespace() {
+            out.push(chars.next().unwrap());
+        } else if ch == ',' || ch == ':' {
+            out.push_str(ANSI_WHITE);
+            out.push(chars.next().unwrap());
+            out.push_str(ANSI_RESET);
+        } else {
+            // Read identifier or literal
+            let mut word = String::new();
+            while let Some(&c) = chars.peek() {
+                if c.is_whitespace() || c == ',' || c == ':' || c == ';' {
+                    break;
+                }
+                word.push(chars.next().unwrap());
+            }
+
+            if is_first_token {
+                out.push_str(&format!("{ANSI_CYAN}{word}{ANSI_RESET}"));
+                is_first_token = false;
+            } else if is_register_token(&word) {
+                out.push_str(&format!("{ANSI_MAGENTA}{word}{ANSI_RESET}"));
+            } else if is_number_token(&word) {
+                out.push_str(&format!("{ANSI_YELLOW}{word}{ANSI_RESET}"));
+            } else {
+                out.push_str(&format!("{ANSI_WHITE}{word}{ANSI_RESET}"));
+            }
+        }
+    }
+
+    out
+}
+
+fn colorize_comment_part(comment: &str) -> String {
+    let mut out = String::new();
+    let mut chars = comment.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == '<' {
+            let mut label = String::from("<");
+            while let Some(&c) = chars.peek() {
+                chars.next();
+                label.push(c);
+                if c == '>' {
+                    break;
+                }
+            }
+            out.push_str(&format!("{ANSI_BLUE}{label}{ANSI_RESET}"));
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+fn colorize_mnemonic(text: &str) -> String {
+    if let Some((code_part, comment_part)) = text.split_once(" ; ") {
+        let colored_code = colorize_code_part(code_part);
+        let colored_comment = colorize_comment_part(comment_part);
+        format!("{colored_code} {ANSI_WHITE};{ANSI_RESET} {colored_comment}")
+    } else {
+        colorize_code_part(text)
     }
 }
 

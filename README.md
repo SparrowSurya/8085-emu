@@ -43,7 +43,11 @@ cargo run --bin e8085 -- run greet.8085.bin
 Disassemble a `.8085.bin` machine code file into standard 8085 assembly instructions with exported symbol and entry-point annotations:
 
 ```bash
+# Standard plain text disassembly
 cargo run --bin e8085 -- disassemble greet.8085.bin
+
+# ANSI syntax-colored disassembly (cyan mnemonics, magenta registers, yellow numbers, blue labels)
+cargo run --bin e8085 -- disassemble greet.8085.bin --color
 ```
 
 ### 4. Inspecting Binary Containers (`inspect` & `strings`)
