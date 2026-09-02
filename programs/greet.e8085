@@ -1,4 +1,8 @@
-%include "terminal.e8085"
+; This program uses external subroutines (print, input, endl) defined in terminal.e8085.
+; Compile the library first, then link it using the -l flag:
+;   cargo run --bin e8085 -- compile programs/terminal.e8085 -o terminal.8085.bin
+;   cargo run --bin e8085 -- compile programs/greet.e8085 -l terminal.8085.bin -o greet.8085.bin
+;   cargo run --bin e8085 -- run greet.8085.bin
 
 segment .data
 	prompt   "What is your name? "
@@ -8,6 +12,12 @@ segment .bss
 	username BYTE 32
 
 segment .text
+
+; External symbols provided by terminal.8085.bin library via linker (-l)
+extern print
+extern input
+extern endl
+
 main:
 	; Display prompt
 	lxi HL, prompt

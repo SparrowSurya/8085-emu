@@ -37,8 +37,8 @@ pub mod value;
 pub mod cpu;
 
 pub use asm::{
-    assemble, assemble_listing, assemble_with_options, assemble_with_symbols, load,
-    BinaryContainer, ContainerHeader, LoadImage,
+    assemble, assemble_and_link, assemble_listing, assemble_with_options, assemble_with_symbols,
+    load, BinaryContainer, ContainerHeader, LoadImage,
 };
 pub use bus::{ControlLines, SystemBus};
 pub use cpu::flags::Flags;

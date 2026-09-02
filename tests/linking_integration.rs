@@ -6,7 +6,7 @@ use std::path::Path;
 use std::sync::mpsc::channel;
 
 use emu8085::asm::container::BinaryContainer;
-use emu8085::asm::{assemble, assemble_with_options, load};
+use emu8085::asm::{assemble, assemble_and_link, assemble_with_options, load};
 use emu8085::{Addr, Machine, TerminalDevice};
 
 #[test]
@@ -93,11 +93,23 @@ main:
 
 #[test]
 fn test_include_source_directive() {
-    let greet_src = include_str!("../programs/greet.e8085");
+    let src = r#"
+%include "terminal.e8085"
+
+segment .data
+prompt "Hello from %include!", 0x0A
+
+segment .text
+main:
+    lxi HL, prompt
+    mvi B, %len prompt
+    call print
+    hlt
+"#;
     let base_dir = Path::new("programs");
 
-    let image = assemble_with_options(greet_src, Some(base_dir), &HashMap::new())
-        .expect("assembles greet.e8085 with %include cleanly");
+    let image = assemble_with_options(src, Some(base_dir), &HashMap::new())
+        .expect("assembles cleanly with %include terminal.e8085");
 
     let mut machine = Machine::default();
     load(&mut machine, &image).expect("loads image cleanly");
@@ -105,15 +117,14 @@ fn test_include_source_directive() {
     let output = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let output_clone = output.clone();
     let (_tx, rx) = channel();
-    let mut terminal = TerminalDevice::with_io(0x01, 0x02, rx, move |b| {
+    let terminal = TerminalDevice::with_io(0x01, 0x02, rx, move |b| {
         output_clone.lock().unwrap().push(b);
     });
 
-    terminal.feed_line("World!");
     machine.attach_device(Box::new(terminal), &[0x01, 0x02]);
     machine.run();
 
-    assert_eq!(*output.lock().unwrap(), b"What is your name? Hello, World!\n");
+    assert_eq!(*output.lock().unwrap(), b"Hello from %include!\n");
     assert!(machine.cpu.is_halt);
 }
 
@@ -270,3 +281,74 @@ main:
         .expect_err("should fail with undefined name / unresolved extern");
     assert!(err.to_string().contains("undefined name \"missing_function\""));
 }
+
+#[test]
+fn test_static_standalone_binary_compilation_and_execution() {
+    let term_src = include_str!("../programs/terminal.e8085");
+    let term_image = assemble(term_src).expect("assembles terminal helper");
+    let term_container = term_image.to_container();
+    assert_eq!(term_container.header.entry_pc, 0, "library without main has entry_pc == 0");
+
+    let greet_src = include_str!("../greet.e8085");
+    // greet.e8085 uses extern print, input, endl
+    let standalone_image = assemble_and_link(greet_src, None, &[term_container])
+        .expect("statically links greet with terminal binary container");
+
+    assert_ne!(standalone_image.entry, 0, "standalone executable has main entry point");
+
+    let standalone_container = standalone_image.to_container();
+    let encoded = standalone_container.encode();
+    let decoded = BinaryContainer::decode(&encoded).expect("decodes standalone container");
+    assert_ne!(decoded.header.entry_pc, 0);
+
+    // Load ONLY the standalone binary into machine (no extra library loading required!)
+    let mut machine = Machine::default();
+    
+    // Load vector table
+    if !decoded.vec_bytes.is_empty() {
+        for (i, &b) in decoded.vec_bytes.iter().enumerate() {
+            machine.ram.write(Addr(i as u16), b);
+        }
+    }
+    // Load .data
+    for (i, &b) in decoded.data_bytes.iter().enumerate() {
+        machine.ram.write(Addr(decoded.header.data_addr.wrapping_add(i as u16)), b);
+    }
+    // Zero .bss
+    for i in 0..decoded.header.bss_size {
+        machine.ram.write(Addr(decoded.header.bss_addr.wrapping_add(i)), 0);
+    }
+    // Load .text
+    for (i, &b) in decoded.text_bytes.iter().enumerate() {
+        machine.ram.write(Addr(decoded.header.text_addr.wrapping_add(i as u16)), b);
+    }
+    machine.cpu.regs.pc = Addr(decoded.header.entry_pc);
+    machine.cpu.regs.sp = Addr(decoded.header.sp_init);
+
+    let output = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let output_clone = output.clone();
+    let (_tx, rx) = channel();
+    let mut terminal = TerminalDevice::with_io(0x01, 0x02, rx, move |b| {
+        output_clone.lock().unwrap().push(b);
+    });
+
+    terminal.feed_line("Surya");
+    machine.attach_device(Box::new(terminal), &[0x01, 0x02]);
+    machine.run();
+
+    assert_eq!(*output.lock().unwrap(), b"What is your name? Hello, Surya\n");
+    assert!(machine.cpu.is_halt);
+}
+
+#[test]
+fn test_library_without_main_has_entry_pc_zero() {
+    let term_src = include_str!("../programs/terminal.e8085");
+    let term_image = assemble(term_src).expect("assembles terminal helper");
+    assert_eq!(term_image.entry, 0);
+
+    let container = term_image.to_container();
+    assert_eq!(container.header.entry_pc, 0);
+    assert_eq!(container.export_symbols.len(), 4);
+}
+
+

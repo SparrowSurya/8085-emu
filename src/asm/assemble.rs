@@ -9,26 +9,33 @@
 use std::collections::{BTreeMap, HashMap};
 
 use super::ast::*;
+use super::container::{
+    BinaryContainer, ContainerHeader, CONTAINER_MAGIC, CONTAINER_VERSION, FLAG_HAS_EXPORT_SYMS,
+    FLAG_HAS_VEC_TABLE,
+};
 use super::encode::{encode, AReg16, AReg8, Operand};
 use super::error::{AsmError, AsmErrorKind, Span};
 use super::{lex, parse};
 
 /// Load an assembled image into a machine: write the bytes at `0x0000`, point the PC at
-/// the bootstrap, and set the stack pointer. Execution then begins with the bootstrap
-/// `JMP` to the program entry.
+/// the bootstrap or entry point, and set the stack pointer. Execution begins with the bootstrap
+/// `JMP` to the program entry or directly at `entry`.
 pub fn load(
     machine: &mut crate::machine::Machine,
     image: &LoadImage,
 ) -> Result<(), crate::error::EmuError> {
-    // 1. Write bootstrap jump at 0x0000
-    if image.bytes.len() >= 3 {
+    // 1. Write bootstrap jump at 0x0000 if entry != 0
+    if image.entry != 0 && image.bytes.len() >= 3 {
         machine.ram.write(crate::value::Addr(0), image.bytes[0]);
         machine.ram.write(crate::value::Addr(1), image.bytes[1]);
         machine.ram.write(crate::value::Addr(2), image.bytes[2]);
     }
 
     // 2. Write ISR vector table hooks (0x0008..0x0040)
-    let vec_len = (image.data_addr as usize).min(image.bytes.len()).min(VECTOR_TABLE_LEN as usize);
+    let vec_len = (image.text_addr as usize)
+        .min(image.data_addr as usize)
+        .min(image.bytes.len())
+        .min(VECTOR_TABLE_LEN as usize);
     if vec_len > 3 {
         for addr in 3..vec_len {
             let b = image.bytes[addr];
@@ -67,14 +74,14 @@ pub fn load(
         }
     }
 
-    machine.cpu.regs.pc = crate::value::Addr(0);
+    machine.cpu.regs.pc = crate::value::Addr(image.entry);
     machine.cpu.regs.sp = crate::value::Addr(image.sp_init);
     Ok(())
 }
 
 /// The 64-byte vector table occupies the bottom of memory (0x0000 - 0x003F).
 const VECTOR_TABLE_LEN: u16 = 0x0040;
-/// Data therefore begins immediately after the vector table.
+/// Data/Code begins immediately after the vector table.
 const DATA_BASE: u16 = VECTOR_TABLE_LEN;
 
 /// Standard interrupt vector table targets mapped to well-known ISR label names.
@@ -141,7 +148,7 @@ const VECTOR_HOOKS: &[(&[&str], u16, &str)] = &[
 pub struct LoadImage {
     /// The contiguous bytes, starting at address `0x0000`.
     pub bytes: Vec<u8>,
-    /// The program entry point (target of the bootstrap jump).
+    /// The program entry point (target of the bootstrap jump), or 0 if no entry point.
     pub entry: u16,
     /// The stack pointer's initial value.
     pub sp_init: u16,
@@ -163,8 +170,10 @@ pub struct LoadImage {
 
 impl LoadImage {
     /// Converts this LoadImage into a BinaryContainer for .8085.bin files.
-    pub fn to_container(&self) -> crate::asm::container::BinaryContainer {
-        let vec_size = (self.data_addr as usize).min(VECTOR_TABLE_LEN as usize);
+    pub fn to_container(&self) -> BinaryContainer {
+        let vec_size = (self.text_addr as usize)
+            .min(self.data_addr as usize)
+            .min(VECTOR_TABLE_LEN as usize);
         let vec_bytes = if self.bytes.len() >= vec_size {
             self.bytes[0..vec_size].to_vec()
         } else {
@@ -187,10 +196,11 @@ impl LoadImage {
             Vec::new()
         };
 
-        let header = crate::asm::container::ContainerHeader {
-            magic: crate::asm::container::CONTAINER_MAGIC,
-            version: crate::asm::container::CONTAINER_VERSION,
-            flags: if vec_size > 0 { crate::asm::container::FLAG_HAS_VEC_TABLE } else { 0 },
+        let header = ContainerHeader {
+            magic: CONTAINER_MAGIC,
+            version: CONTAINER_VERSION,
+            flags: if !vec_bytes.is_empty() { FLAG_HAS_VEC_TABLE } else { 0 }
+                | if !self.export_symbols.is_empty() { FLAG_HAS_EXPORT_SYMS } else { 0 },
             entry_pc: self.entry,
             sp_init: self.sp_init,
             text_addr: self.text_addr,
@@ -199,12 +209,12 @@ impl LoadImage {
             data_size: self.data_size,
             bss_addr: self.bss_addr,
             bss_size: self.bss_size,
-            vec_size: vec_size as u16,
+            vec_size: vec_bytes.len() as u16,
             sym_size: 0,
             reserved: [0u8; 6],
         };
 
-        crate::asm::container::BinaryContainer {
+        BinaryContainer {
             header,
             vec_bytes,
             data_bytes,
@@ -228,7 +238,7 @@ pub struct ListingRow {
 
 /// Assemble source text into a [`LoadImage`].
 pub fn assemble(src: &str) -> Result<LoadImage, AsmError> {
-    assemble_with_options(src, None, &HashMap::new())
+    assemble_and_link(src, None, &[])
 }
 
 /// Assemble source text with an optional base directory for `%include` and external symbols for linking.
@@ -246,7 +256,26 @@ pub fn assemble_with_options(
     };
 
     let (image, _symbols, _listing) =
-        Assembler::new(&program, src, external_symbols.clone()).run()?;
+        Assembler::new(&program, src, external_symbols.clone(), Vec::new()).run()?;
+    Ok(image)
+}
+
+/// Assemble source text and statically link precompiled `.8085.bin` libraries into a unified standalone [`LoadImage`].
+pub fn assemble_and_link(
+    src: &str,
+    base_dir: Option<&std::path::Path>,
+    linked_containers: &[BinaryContainer],
+) -> Result<LoadImage, AsmError> {
+    let raw_program = parse(lex(src)?)?;
+    let program = if let Some(dir) = base_dir {
+        super::include::resolve_includes(dir, &raw_program)?
+    } else {
+        let cur_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        super::include::resolve_includes(&cur_dir, &raw_program)?
+    };
+
+    let (image, _symbols, _listing) =
+        Assembler::new(&program, src, HashMap::new(), linked_containers.to_vec()).run()?;
     Ok(image)
 }
 
@@ -258,7 +287,7 @@ pub fn assemble_with_symbols(src: &str) -> Result<(LoadImage, BTreeMap<String, u
     let program = super::include::resolve_includes(&cur_dir, &raw_program)?;
 
     let (image, symbols, _listing) =
-        Assembler::new(&program, src, HashMap::new()).run()?;
+        Assembler::new(&program, src, HashMap::new(), Vec::new()).run()?;
     Ok((image, symbols.into_iter().collect()))
 }
 
@@ -269,7 +298,7 @@ pub fn assemble_listing(src: &str) -> Result<(LoadImage, Vec<ListingRow>), AsmEr
     let program = super::include::resolve_includes(&cur_dir, &raw_program)?;
 
     let (image, _symbols, listing) =
-        Assembler::new(&program, src, HashMap::new()).run()?;
+        Assembler::new(&program, src, HashMap::new(), Vec::new()).run()?;
     Ok((image, listing))
 }
 
@@ -314,10 +343,21 @@ struct Assembler<'a> {
     data_vars: Vec<Var>,
     bss_vars: Vec<Var>,
     external_symbols: HashMap<String, u16>,
+    linked_containers: Vec<BinaryContainer>,
 }
 
 impl<'a> Assembler<'a> {
-    fn new(program: &'a Program, src: &str, external_symbols: HashMap<String, u16>) -> Self {
+    fn new(
+        program: &'a Program,
+        src: &str,
+        mut external_symbols: HashMap<String, u16>,
+        linked_containers: Vec<BinaryContainer>,
+    ) -> Self {
+        for lib in &linked_containers {
+            for (sym, addr) in &lib.export_symbols {
+                external_symbols.insert(sym.clone(), *addr);
+            }
+        }
         Assembler {
             program,
             src_lines: src.lines().map(|l| l.to_string()).collect(),
@@ -326,6 +366,7 @@ impl<'a> Assembler<'a> {
             data_vars: Vec::new(),
             bss_vars: Vec::new(),
             external_symbols,
+            linked_containers,
         }
     }
 
@@ -341,50 +382,191 @@ impl<'a> Assembler<'a> {
         self.resolve_defines()?;
         self.size_variables()?;
 
-        // Segment bases.
-        let data_size: u32 = self.data_vars.iter().map(|v| v.size as u32).sum();
-        let bss_size: u32 = self.bss_vars.iter().map(|v| v.size as u32).sum();
-        let mut data_base = DATA_BASE as u32;
-        for &sym_addr in self.external_symbols.values() {
-            if (sym_addr as u32) >= data_base {
-                data_base = (sym_addr as u32) + 0x40;
+        let (
+            linked_text_bytes,
+            linked_text_start,
+            linked_text_end,
+            linked_data_bytes,
+            linked_data_size,
+        ) = if !self.linked_containers.is_empty() {
+            let mut text_bytes = Vec::new();
+            let mut data_bytes = Vec::new();
+            let mut start_text = DATA_BASE;
+            for lib in &self.linked_containers {
+                start_text = start_text.min(lib.header.text_addr);
+                text_bytes.extend_from_slice(&lib.text_bytes);
+                data_bytes.extend_from_slice(&lib.data_bytes);
             }
-        }
-        let bss_base = data_base + data_size;
-        let text_base = bss_base + bss_size;
-        if text_base > 0xFFFF {
+            let end_text = start_text + text_bytes.len() as u16;
+            let data_len = data_bytes.len() as u16;
+            (
+                text_bytes,
+                start_text,
+                end_text,
+                data_bytes,
+                data_len,
+            )
+        } else {
+            (Vec::new(), DATA_BASE, DATA_BASE, Vec::new(), 0)
+        };
+
+        let main_data_size: u32 = self.data_vars.iter().map(|v| v.size as u32).sum();
+        let main_bss_size: u32 = self.bss_vars.iter().map(|v| v.size as u32).sum();
+
+        let mut symtab: HashMap<String, u16> = self.external_symbols.clone();
+        let mut export_names = Vec::new();
+
+        let (
+            main_text_base,
+            main_text_size,
+            total_text_start,
+            total_text_size,
+            total_data_start,
+            total_data_size,
+            total_bss_start,
+            total_bss_size,
+            entry,
+        ) = if !self.linked_containers.is_empty() {
+            let main_text_base = linked_text_end;
+            let raw_entry = self.layout_text(main_text_base, &mut symtab, &mut export_names)?;
+
+            let mut taddr = main_text_base;
+            let mut current_parent_label: Option<String> = None;
+            for seg in &self.program.segments {
+                if let Segment::Text(items) = seg {
+                    for item in items {
+                        match item {
+                            TextItem::Label(name, _) | TextItem::GlobalLabel(name, _) => {
+                                current_parent_label = Some(name.clone());
+                            }
+                            TextItem::Instr(ins) => {
+                                let zero_ops = self.length_operands(ins, current_parent_label.as_deref())?;
+                                let len = encode(&ins.mnemonic, ins.span, &zero_ops)?.len() as u16;
+                                taddr = taddr.wrapping_add(len);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            let main_text_size = taddr.saturating_sub(main_text_base);
+            let total_text_size = linked_text_bytes.len() as u16 + main_text_size;
+
+            let data_base = main_text_base.wrapping_add(main_text_size);
+            let mut addr = data_base.wrapping_add(linked_data_size);
+            for v in &self.data_vars {
+                insert_symbol(&mut symtab, &v.name, addr, v.span)?;
+                addr += v.size;
+            }
+            let total_data_size = linked_data_size + main_data_size as u16;
+
+            let bss_base = addr;
+            for v in &self.bss_vars {
+                insert_symbol(&mut symtab, &v.name, addr, v.span)?;
+                addr += v.size;
+            }
+            let total_bss_size = main_bss_size as u16;
+
+            let has_main = symtab.keys().any(|k| k.eq_ignore_ascii_case("main"));
+            let entry = if has_main { raw_entry } else { 0 };
+
+            (
+                main_text_base,
+                main_text_size,
+                linked_text_start,
+                total_text_size,
+                data_base,
+                total_data_size,
+                bss_base,
+                total_bss_size,
+                entry,
+            )
+        } else {
+            let mut data_base = DATA_BASE as u32;
+            for &sym_addr in self.external_symbols.values() {
+                if (sym_addr as u32) >= data_base {
+                    data_base = (sym_addr as u32) + 0x40;
+                }
+            }
+            let bss_base = data_base + main_data_size;
+            let text_base = bss_base + main_bss_size;
+            if text_base > 0xFFFF {
+                return Err(AsmError::new(Span::default(), AsmErrorKind::ImageOverflow));
+            }
+
+            let mut addr = data_base as u16;
+            for v in &self.data_vars {
+                insert_symbol(&mut symtab, &v.name, addr, v.span)?;
+                addr += v.size;
+            }
+            let mut addr = bss_base as u16;
+            for v in &self.bss_vars {
+                insert_symbol(&mut symtab, &v.name, addr, v.span)?;
+                addr += v.size;
+            }
+
+            let raw_entry = self.layout_text(text_base as u16, &mut symtab, &mut export_names)?;
+
+            let mut taddr = text_base as u16;
+            let mut current_parent_label: Option<String> = None;
+            for seg in &self.program.segments {
+                if let Segment::Text(items) = seg {
+                    for item in items {
+                        match item {
+                            TextItem::Label(name, _) | TextItem::GlobalLabel(name, _) => {
+                                current_parent_label = Some(name.clone());
+                            }
+                            TextItem::Instr(ins) => {
+                                let zero_ops = self.length_operands(ins, current_parent_label.as_deref())?;
+                                let len = encode(&ins.mnemonic, ins.span, &zero_ops)?.len() as u16;
+                                taddr = taddr.wrapping_add(len);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            let text_size = taddr.saturating_sub(text_base as u16);
+
+            let has_main = symtab.keys().any(|k| k.eq_ignore_ascii_case("main"));
+            let entry = if has_main { raw_entry } else { 0 };
+
+            (
+                text_base as u16,
+                text_size,
+                text_base as u16,
+                text_size,
+                data_base as u16,
+                main_data_size as u16,
+                bss_base as u16,
+                main_bss_size as u16,
+                entry,
+            )
+        };
+
+        let max_extent = (total_text_start as usize + total_text_size as usize)
+            .max(total_data_start as usize + total_data_size as usize)
+            .max(total_bss_start as usize + total_bss_size as usize)
+            .max(DATA_BASE as usize);
+
+        if max_extent > 0x10000 {
             return Err(AsmError::new(Span::default(), AsmErrorKind::ImageOverflow));
         }
 
-        // Symbol table: variables, then labels (with their computed text addresses).
-        let mut symtab: HashMap<String, u16> = HashMap::new();
-        let mut addr = data_base as u16;
-        for v in &self.data_vars {
-            insert_symbol(&mut symtab, &v.name, addr, v.span)?;
-            addr += v.size;
-        }
-        let mut addr = bss_base as u16;
-        for v in &self.bss_vars {
-            insert_symbol(&mut symtab, &v.name, addr, v.span)?;
-            addr += v.size;
-        }
-
-        let mut export_names = Vec::new();
-        let entry = self.layout_text(text_base as u16, &mut symtab, &mut export_names)?;
-
-        // Codegen, building a listing alongside the image.
-        let mut bytes = vec![0u8; data_base as usize];
+        let mut bytes = vec![0u8; max_extent];
         let mut listing = Vec::new();
 
-        let [lo, hi] = [(entry & 0xFF) as u8, (entry >> 8) as u8];
-        bytes[0] = 0xC3;
-        bytes[1] = lo;
-        bytes[2] = hi;
-        listing.push(ListingRow {
-            addr: 0,
-            bytes: vec![0xC3, lo, hi],
-            source: "; JMP entry (bootstrap)".into(),
-        });
+        if entry != 0 {
+            let [lo, hi] = [(entry & 0xFF) as u8, (entry >> 8) as u8];
+            bytes[0] = 0xC3;
+            bytes[1] = lo;
+            bytes[2] = hi;
+            listing.push(ListingRow {
+                addr: 0,
+                bytes: vec![0xC3, lo, hi],
+                source: "; JMP entry (bootstrap)".into(),
+            });
+        }
 
         // Populate vector table hooks for recognized ISR labels.
         for (names, vec_addr, desc) in VECTOR_HOOKS {
@@ -410,6 +592,20 @@ impl<'a> Assembler<'a> {
             }
         }
 
+        // Copy linked text & data bytes if present
+        if !linked_text_bytes.is_empty() {
+            let t_start = linked_text_start as usize;
+            let t_end = t_start + linked_text_bytes.len();
+            bytes[t_start..t_end].copy_from_slice(&linked_text_bytes);
+        }
+
+        if !linked_data_bytes.is_empty() {
+            let d_start = total_data_start as usize;
+            let d_end = d_start + linked_data_bytes.len();
+            bytes[d_start..d_end].copy_from_slice(&linked_data_bytes);
+        }
+
+        let mut cur_d_addr = (total_data_start + linked_data_size) as usize;
         for v in &self.data_vars {
             let mut vbytes = Vec::new();
             for e in v.plan.as_ref().unwrap() {
@@ -429,7 +625,8 @@ impl<'a> Assembler<'a> {
                 bytes: vbytes.clone(),
                 source: self.src_line(v.span.line),
             });
-            bytes.extend_from_slice(&vbytes);
+            bytes[cur_d_addr..cur_d_addr + vbytes.len()].copy_from_slice(&vbytes);
+            cur_d_addr += vbytes.len();
         }
 
         for v in &self.bss_vars {
@@ -439,24 +636,14 @@ impl<'a> Assembler<'a> {
                 source: self.src_line(v.span.line),
             });
         }
-        bytes.extend(std::iter::repeat(0u8).take(bss_size as usize)); // .bss zero fill
 
-        // .text: re-walk items in order so labels and instructions interleave in the listing.
-        let mut taddr = text_base as u16;
+        let mut taddr = main_text_base;
         let mut current_parent_label: Option<String> = None;
         for seg in &self.program.segments {
             if let Segment::Text(items) = seg {
                 for item in items {
                     match item {
-                        TextItem::Label(name, span) => {
-                            current_parent_label = Some(name.clone());
-                            listing.push(ListingRow {
-                                addr: taddr,
-                                bytes: Vec::new(),
-                                source: self.src_line(span.line),
-                            });
-                        }
-                        TextItem::GlobalLabel(name, span) => {
+                        TextItem::Label(name, span) | TextItem::GlobalLabel(name, span) => {
                             current_parent_label = Some(name.clone());
                             listing.push(ListingRow {
                                 addr: taddr,
@@ -472,14 +659,7 @@ impl<'a> Assembler<'a> {
                             });
                             let _ = name;
                         }
-                        TextItem::GlobalDecl(_name, span) => {
-                            listing.push(ListingRow {
-                                addr: taddr,
-                                bytes: Vec::new(),
-                                source: self.src_line(span.line),
-                            });
-                        }
-                        TextItem::ExternDecl(_name, span) => {
+                        TextItem::GlobalDecl(_name, span) | TextItem::ExternDecl(_name, span) => {
                             listing.push(ListingRow {
                                 addr: taddr,
                                 bytes: Vec::new(),
@@ -498,7 +678,9 @@ impl<'a> Assembler<'a> {
                                 bytes: b.clone(),
                                 source: self.src_line(ins.span.line),
                             });
-                            bytes.extend_from_slice(&b);
+                            let start = taddr as usize;
+                            let end = start + b.len();
+                            bytes[start..end].copy_from_slice(&b);
                             taddr = taddr.wrapping_add(b.len() as u16);
                         }
                     }
@@ -506,11 +688,7 @@ impl<'a> Assembler<'a> {
             }
         }
 
-        if bytes.len() > 0x10000 {
-            return Err(AsmError::new(Span::default(), AsmErrorKind::ImageOverflow));
-        }
-
-        let text_size = taddr.saturating_sub(text_base as u16);
+        let _ = main_text_size;
 
         // Build exported symbol table (excluding 'main')
         let mut export_symbols = Vec::new();
@@ -523,18 +701,25 @@ impl<'a> Assembler<'a> {
                 }
             }
         }
+        for lib in &self.linked_containers {
+            for (sym, addr) in &lib.export_symbols {
+                if !export_symbols.iter().any(|(n, _)| n == sym) {
+                    export_symbols.push((sym.clone(), *addr));
+                }
+            }
+        }
 
         Ok((
             LoadImage {
                 bytes,
                 entry,
                 sp_init: 0xFFFF,
-                text_addr: text_base as u16,
-                text_size,
-                data_addr: data_base as u16,
-                data_size: data_size as u16,
-                bss_addr: bss_base as u16,
-                bss_size: bss_size as u16,
+                text_addr: total_text_start,
+                text_size: total_text_size,
+                data_addr: total_data_start,
+                data_size: total_data_size,
+                bss_addr: total_bss_start,
+                bss_size: total_bss_size,
                 export_symbols,
             },
             symtab,

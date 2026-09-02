@@ -18,8 +18,8 @@ pub mod parser;
 pub mod token;
 
 pub use assemble::{
-    assemble, assemble_listing, assemble_with_options, assemble_with_symbols, load, ListingRow,
-    LoadImage,
+    assemble, assemble_and_link, assemble_listing, assemble_with_options, assemble_with_symbols,
+    load, ListingRow, LoadImage,
 };
 pub use container::{BinaryContainer, ContainerHeader};
 pub use ast::{BssDecl, DataDef, Define, Instr, POperand, Program, Segment, Size, TextItem, Value};
