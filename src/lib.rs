@@ -38,7 +38,9 @@ pub mod cpu;
 
 pub use asm::{
     assemble, assemble_and_link, assemble_listing, assemble_with_options, assemble_with_symbols,
-    load, BinaryContainer, ContainerHeader, LoadImage,
+    extract_strings, format_header, format_segments, format_strings, format_symbols, get_segments,
+    inspect_container, load, BinaryContainer, ContainerHeader, ExtractedString, InspectOptions,
+    LoadImage, SegmentRecord,
 };
 pub use bus::{ControlLines, SystemBus};
 pub use cpu::flags::Flags;

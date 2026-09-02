@@ -3,6 +3,8 @@
 //! Translates raw binary byte streams or structured .8085.bin containers into
 //! human-readable assembly instructions and symbol annotations.
 
+use std::collections::HashMap;
+
 use crate::asm::container::BinaryContainer;
 
 /// A single disassembled instruction row.
@@ -43,12 +45,35 @@ pub fn disassemble_bytes(bytes: &[u8]) -> Result<Vec<DisassemblyRow>, String> {
 pub fn disassemble_container(container: &BinaryContainer) -> Vec<DisassemblyRow> {
     let mut rows = Vec::new();
 
+    // Map address -> list of symbol names
+    let mut symbol_map: HashMap<u16, Vec<String>> = HashMap::new();
+    for (sym, addr) in &container.export_symbols {
+        symbol_map.entry(*addr).or_default().push(sym.clone());
+    }
+
     // Executable Code Section (.text) only
     if container.header.text_size > 0 && !container.text_bytes.is_empty() {
         let code_rows = disassemble_linear(&container.text_bytes, container.header.text_addr);
         for mut r in code_rows {
-            if r.addr == container.header.entry_pc {
-                r.mnemonic = format!("{:<20} ; <main>", r.mnemonic);
+            let mut labels = Vec::new();
+
+            // Check for exported global symbols at this address
+            if let Some(syms) = symbol_map.get(&r.addr) {
+                for sym in syms {
+                    labels.push(format!("<{sym}>"));
+                }
+            }
+
+            // Check if this address is the main entry point
+            if r.addr == container.header.entry_pc && container.header.entry_pc != 0 {
+                let main_tag = "<main>".to_string();
+                if !labels.contains(&main_tag) {
+                    labels.push(main_tag);
+                }
+            }
+
+            if !labels.is_empty() {
+                r.mnemonic = format!("{:<20} ; {}", r.mnemonic, labels.join(" "));
             }
             rows.push(r);
         }

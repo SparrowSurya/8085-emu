@@ -40,13 +40,30 @@ cargo run --bin e8085 -- run greet.8085.bin
 ```
 
 ### 3. Disassembling Binary Images (`disassemble`)
-Disassemble a `.8085.bin` machine code file into standard 8085 assembly instructions:
+Disassemble a `.8085.bin` machine code file into standard 8085 assembly instructions with exported symbol and entry-point annotations:
 
 ```bash
 cargo run --bin e8085 -- disassemble greet.8085.bin
 ```
 
-### 4. Running Rust API Programmatic Examples
+### 4. Inspecting Binary Containers (`inspect` & `strings`)
+Analyze container structure, segment memory maps, exported symbol tables, and extract printable strings:
+
+```bash
+# Full diagnostic report (default --all)
+cargo run --bin e8085 -- inspect greet.8085.bin
+
+# Inspect specific sections
+cargo run --bin e8085 -- inspect greet.8085.bin --header
+cargo run --bin e8085 -- inspect greet.8085.bin --segments
+cargo run --bin e8085 -- inspect greet.8085.bin --symbols
+cargo run --bin e8085 -- inspect greet.8085.bin --strings
+
+# Extract printable ASCII strings (shortcut)
+cargo run --bin e8085 -- strings greet.8085.bin -n 4
+```
+
+### 5. Running Rust API Programmatic Examples
 Run any of the Rust API examples demonstrating direct hardware and emulator interaction:
 
 ```bash
@@ -60,7 +77,7 @@ cargo run --example usb_dma_transfer
 cargo run --example keyboard_input_interrupt
 ```
 
-### 5. Running the Test Suite
+### 6. Running the Test Suite
 ```bash
 # Run all unit tests, integration tests, and doc-tests
 cargo test --all-targets && cargo test --doc

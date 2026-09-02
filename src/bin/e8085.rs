@@ -8,7 +8,7 @@ use clap::{Parser, Subcommand};
 use emu8085::asm::assemble_and_link;
 use emu8085::asm::container::{BinaryContainer, CONTAINER_MAGIC};
 use emu8085::asm::load;
-use emu8085::{Addr, Machine, TerminalDevice};
+use emu8085::{Addr, InspectOptions, Machine, TerminalDevice};
 
 /// Maximum 8085 RAM capacity (64 KB).
 const MAX_RAM_SIZE: usize = 65536;
@@ -55,6 +55,46 @@ enum Commands {
         /// Binary file to disassemble (.8085.bin or .bin)
         file: String,
     },
+
+    /// Inspect a .8085.bin binary container (header, segments, symbols, strings)
+    Inspect {
+        /// Binary file to inspect (.8085.bin or .bin)
+        file: String,
+
+        /// Show all diagnostic sections (default behavior; overrides individual flags)
+        #[arg(short = 'a', long = "all")]
+        all: bool,
+
+        /// Show container header information only
+        #[arg(short = 'H', long = "header")]
+        header: bool,
+
+        /// Show segment layout, boundaries, and offsets only
+        #[arg(short = 'S', long = "segments")]
+        segments: bool,
+
+        /// Show exported symbols and main entry point only
+        #[arg(short = 's', long = "symbols")]
+        symbols: bool,
+
+        /// Extract and display embedded printable strings only
+        #[arg(short = 't', long = "strings")]
+        strings: bool,
+
+        /// Minimum string length for extraction (default: 3)
+        #[arg(short = 'n', long = "min-len", default_value = "3")]
+        min_len: usize,
+    },
+
+    /// Extract printable ASCII strings from a binary container or file
+    Strings {
+        /// Binary file to inspect (.8085.bin or .bin)
+        file: String,
+
+        /// Minimum string length (default: 3)
+        #[arg(short = 'n', long = "min-len", default_value = "3")]
+        min_len: usize,
+    },
 }
 
 fn main() {
@@ -66,7 +106,70 @@ fn main() {
             compile_file(&file, &link, output.as_deref())
         }
         Commands::Disassemble { file } => disassemble_file(&file),
+        Commands::Inspect {
+            file,
+            all,
+            header,
+            segments,
+            symbols,
+            strings,
+            min_len,
+        } => inspect_file(&file, all, header, segments, symbols, strings, min_len),
+        Commands::Strings { file, min_len } => strings_file(&file, min_len),
     }
+}
+
+fn inspect_file(
+    path: &str,
+    all: bool,
+    header: bool,
+    segments: bool,
+    symbols: bool,
+    strings: bool,
+    min_len: usize,
+) {
+    let bytes = std::fs::read(path).unwrap_or_else(|e| {
+        eprintln!("cannot read binary file '{path}': {e}");
+        std::process::exit(2);
+    });
+
+    if bytes.len() < 4 || &bytes[0..4] != CONTAINER_MAGIC {
+        eprintln!("error: file '{path}' is not a valid .8085.bin binary container");
+        std::process::exit(1);
+    }
+
+    let container = BinaryContainer::decode(&bytes).unwrap_or_else(|e| {
+        eprintln!("error reading container '{path}': {e}");
+        std::process::exit(1);
+    });
+
+    let is_selective = header || segments || symbols || strings;
+    let show_all = all || !is_selective;
+
+    let options = if show_all {
+        InspectOptions {
+            show_header: true,
+            show_segments: true,
+            show_symbols: true,
+            show_strings: true,
+            min_string_len: min_len,
+        }
+    } else {
+        InspectOptions {
+            show_header: header,
+            show_segments: segments,
+            show_symbols: symbols,
+            show_strings: strings,
+            min_string_len: min_len,
+        }
+    };
+
+    let report = emu8085::inspect_container(&container, bytes.len(), &options);
+    print!("{report}");
+}
+
+fn strings_file(path: &str, min_len: usize) {
+    inspect_file(path, false, false, false, false, true, min_len);
 }
 
 fn disassemble_file(path: &str) {

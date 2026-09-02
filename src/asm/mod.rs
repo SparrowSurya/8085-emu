@@ -12,6 +12,7 @@ pub mod container;
 pub mod encode;
 pub mod error;
 pub mod include;
+pub mod inspect;
 pub mod keyword;
 pub mod lexer;
 pub mod parser;
@@ -22,6 +23,10 @@ pub use assemble::{
     load, ListingRow, LoadImage,
 };
 pub use container::{BinaryContainer, ContainerHeader};
+pub use inspect::{
+    extract_strings, format_header, format_segments, format_strings, format_symbols, get_segments,
+    inspect_container, ExtractedString, InspectOptions, SegmentRecord,
+};
 pub use ast::{BssDecl, DataDef, Define, Instr, POperand, Program, Segment, Size, TextItem, Value};
 pub use encode::{encode, AReg16, AReg8, Operand};
 pub use error::{AsmError, AsmErrorKind, Span};

@@ -153,26 +153,41 @@ cargo run --bin e8085 -- run target/hello_world.8085.bin
 ```
 
 ### 3. Disassemble Binary Image (`disassemble`)
-Decodes a `.8085.bin` container into clean assembly instructions from strictly the `.text` segment:
+Decodes a `.8085.bin` container into clean assembly instructions from strictly the `.text` segment, annotating instructions with exported global symbols and entry point:
 ```bash
-cargo run --bin e8085 -- disassemble target/hello_world.8085.bin
+cargo run --bin e8085 -- disassemble greet.8085.bin
 ```
 **Output**:
 ```text
-004D: 3E 00            MVI A, 0x00          ; <main>
-004F: D3 02            OUT 0x02
-0051: 3E 0D            MVI A, 0x0D
-0053: D3 01            OUT 0x01
-0055: 21 40 00         LXI HL, 0x0040
-0058: 06 0D            MVI B, 0x0D
-005A: 7E               MOV A, M
-005B: D3 01            OUT 0x01
-005D: 23               INX HL
-005E: 05               DCR B
-005F: C2 5A 00         JNZ 0x005A
-0062: 3E 01            MVI A, 0x01
-0064: D3 02            OUT 0x02
-0066: 76               HLT
+0040: 3E 00            MVI A, 0x00          ; <print>
+0042: D3 02            OUT 0x02
+...
+0054: 3E 02            MVI A, 0x02          ; <input>
+...
+0071: 4F               MOV C, A             ; <putch>
+...
+0082: 3E 0A            MVI A, 0x0A          ; <endl>
+0084: C3 71 00         JMP 0x0071
+0087: 21 AB 00         LXI HL, 0x00AB       ; <main>
+...
+00AA: 76               HLT
+```
+
+### 4. Inspect Binary Container (`inspect` & `strings`)
+Analyzes container header metadata, calculates segment memory boundaries/file offsets, lists exported symbol tables, and extracts printable strings:
+
+```bash
+# Display full diagnostic report (default --all)
+cargo run --bin e8085 -- inspect greet.8085.bin
+
+# Inspect specific sections
+cargo run --bin e8085 -- inspect greet.8085.bin --header
+cargo run --bin e8085 -- inspect greet.8085.bin --segments
+cargo run --bin e8085 -- inspect greet.8085.bin --symbols
+cargo run --bin e8085 -- inspect greet.8085.bin --strings
+
+# Extract printable strings with custom minimum length
+cargo run --bin e8085 -- strings greet.8085.bin -n 4
 ```
 
 ---
