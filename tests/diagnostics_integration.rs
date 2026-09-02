@@ -5,12 +5,45 @@ use emu8085::asm::container::BinaryContainer;
 use emu8085::asm::{assemble, assemble_and_link, extract_strings, get_segments, inspect_container, InspectOptions};
 use emu8085::disassemble_container;
 
+const TEST_LIB_SRC: &str = r#"
+segment .text
+    global foo
+    global bar
+
+foo:
+    mvi A, 0x05
+.loop:
+    dcr A
+    jnz .loop
+    ret
+
+bar:
+    mvi A, 0x0A
+    out 0x01
+    ret
+"#;
+
+const TEST_PROG_SRC: &str = r#"
+segment .data
+    msg "Hello Diagnostics"
+
+segment .text
+    global main
+    extern foo
+    extern bar
+
+main:
+    lxi HL, msg
+    call foo
+    call bar
+    hlt
+"#;
+
 #[test]
 fn test_inspect_header_and_segments_on_library() {
-    let term_src = include_str!("../programs/terminal.e8085");
-    let term_image = assemble(term_src).expect("assembles terminal library");
-    let term_container = term_image.to_container();
-    let encoded = term_container.encode();
+    let lib_image = assemble(TEST_LIB_SRC).expect("assembles library");
+    let lib_container = lib_image.to_container();
+    let encoded = lib_container.encode();
     let decoded = BinaryContainer::decode(&encoded).expect("decodes container");
 
     let segments = get_segments(&decoded);
@@ -31,44 +64,34 @@ fn test_inspect_header_and_segments_on_library() {
     assert!(report.contains("SEGMENT TABLE"));
     assert!(report.contains("SYMBOL TABLE & ENTRY"));
     assert!(report.contains("Pure Subroutine Library"));
-    assert!(report.contains("print"));
-    assert!(report.contains("input"));
-    assert!(report.contains("putch"));
-    assert!(report.contains("endl"));
+    assert!(report.contains("foo"));
+    assert!(report.contains("bar"));
 }
 
 #[test]
 fn test_inspect_strings_extraction() {
-    let term_src = include_str!("../programs/terminal.e8085");
-    let term_image = assemble(term_src).expect("assembles terminal helper");
-    let term_container = term_image.to_container();
+    let lib_image = assemble(TEST_LIB_SRC).expect("assembles library");
+    let lib_container = lib_image.to_container();
 
-    let greet_src = include_str!("../programs/greet.e8085");
-    let standalone_image = assemble_and_link(greet_src, None, &[term_container])
-        .expect("statically links greet executable");
+    let standalone_image = assemble_and_link(TEST_PROG_SRC, None, &[lib_container])
+        .expect("statically links executable");
 
     let container = standalone_image.to_container();
     let extracted = extract_strings(&container, 4);
 
     assert!(
-        extracted.iter().any(|s| s.content.contains("What is your name?")),
-        "should find prompt string"
-    );
-    assert!(
-        extracted.iter().any(|s| s.content.contains("Hello, ")),
+        extracted.iter().any(|s| s.content.contains("Hello Diagnostics")),
         "should find greeting string"
     );
 }
 
 #[test]
 fn test_disassemble_multi_symbol_annotations() {
-    let term_src = include_str!("../programs/terminal.e8085");
-    let term_image = assemble(term_src).expect("assembles terminal helper");
-    let term_container = term_image.to_container();
+    let lib_image = assemble(TEST_LIB_SRC).expect("assembles library");
+    let lib_container = lib_image.to_container();
 
-    let greet_src = include_str!("../programs/greet.e8085");
-    let standalone_image = assemble_and_link(greet_src, None, &[term_container])
-        .expect("statically links greet executable");
+    let standalone_image = assemble_and_link(TEST_PROG_SRC, None, &[lib_container])
+        .expect("statically links executable");
 
     let container = standalone_image.to_container();
     let rows = disassemble_container(&container);
@@ -80,26 +103,24 @@ fn test_disassemble_multi_symbol_annotations() {
         .join("\n");
 
     // Subroutine banners
-    assert!(printed.contains("Subroutine: print"), "has print subroutine banner");
+    assert!(printed.contains("Subroutine: foo"), "has foo subroutine banner");
     assert!(printed.contains("Function: main"), "has main function banner");
 
     // Symbolic call targets
-    assert!(printed.contains("CALL print"), "replaces 0x0040 with CALL print");
-    assert!(printed.contains("CALL input"), "replaces 0x0054 with CALL input");
-    assert!(printed.contains("CALL endl"), "replaces 0x0082 with CALL endl");
+    assert!(printed.contains("CALL foo"), "replaces address with CALL foo");
+    assert!(printed.contains("CALL bar"), "replaces address with CALL bar");
 
     // String preview comment
-    assert!(printed.contains("What is your name?"), "displays string literal preview");
+    assert!(printed.contains("Hello Diagnostics"), "displays string literal preview");
 
     // Internal loop label
-    assert!(printed.contains("loc_0047"), "generates internal loop label for JNZ target");
+    assert!(printed.contains("loc_0042"), "generates internal loop label for JNZ target");
 }
 
 #[test]
 fn test_inspect_options_priority_and_selective_filters() {
-    let term_src = include_str!("../programs/terminal.e8085");
-    let term_image = assemble(term_src).expect("assembles terminal helper");
-    let container = term_image.to_container();
+    let lib_image = assemble(TEST_LIB_SRC).expect("assembles library");
+    let container = lib_image.to_container();
 
     // 1. Header only
     let header_only = InspectOptions {
@@ -125,18 +146,16 @@ fn test_inspect_options_priority_and_selective_filters() {
     let report2 = inspect_container(&container, 100, &symbols_only);
     assert!(!report2.contains("CONTAINER HEADER"));
     assert!(report2.contains("SYMBOL TABLE & ENTRY"));
-    assert!(report2.contains("print"));
+    assert!(report2.contains("foo"));
 }
 
 #[test]
 fn test_disassemble_colored_output() {
-    let term_src = include_str!("../programs/terminal.e8085");
-    let term_image = assemble(term_src).expect("assembles terminal helper");
-    let term_container = term_image.to_container();
+    let lib_image = assemble(TEST_LIB_SRC).expect("assembles library");
+    let lib_container = lib_image.to_container();
 
-    let greet_src = include_str!("../programs/greet.e8085");
-    let standalone_image = assemble_and_link(greet_src, None, &[term_container])
-        .expect("statically links greet executable");
+    let standalone_image = assemble_and_link(TEST_PROG_SRC, None, &[lib_container])
+        .expect("statically links executable");
 
     let container = standalone_image.to_container();
     let rows = disassemble_container(&container);
@@ -148,7 +167,6 @@ fn test_disassemble_colored_output() {
         .collect::<Vec<_>>()
         .join("\n");
 
-    // Check ANSI codes:
     // Cyan (\x1b[36m) for instructions
     assert!(colored_output.contains("\x1b[36m"), "should contain cyan for instructions");
     // Magenta (\x1b[35m) for registers
@@ -156,7 +174,7 @@ fn test_disassemble_colored_output() {
     // Yellow (\x1b[33m) for numbers
     assert!(colored_output.contains("\x1b[33m"), "should contain yellow for numbers");
     // Blue (\x1b[34m) for labels and symbols
-    assert!(colored_output.contains("\x1b[34mprint\x1b[0m"), "should contain blue for print symbol");
+    assert!(colored_output.contains("\x1b[34mfoo\x1b[0m"), "should contain blue for foo symbol");
     // White (\x1b[37m) for address and opcodes
     assert!(colored_output.contains("\x1b[37m"), "should contain white for address/opcodes");
 }
@@ -164,13 +182,11 @@ fn test_disassemble_colored_output() {
 #[test]
 fn test_disassemble_cycles_and_vectors_options() {
     use emu8085::DisassembleOptions;
-    let term_src = include_str!("../programs/terminal.e8085");
-    let term_image = assemble(term_src).expect("assembles terminal helper");
-    let term_container = term_image.to_container();
+    let lib_image = assemble(TEST_LIB_SRC).expect("assembles library");
+    let lib_container = lib_image.to_container();
 
-    let greet_src = include_str!("../programs/greet.e8085");
-    let standalone_image = assemble_and_link(greet_src, None, &[term_container])
-        .expect("statically links greet executable");
+    let standalone_image = assemble_and_link(TEST_PROG_SRC, None, &[lib_container])
+        .expect("statically links executable");
 
     let container = standalone_image.to_container();
     let opts = DisassembleOptions {
@@ -194,7 +210,8 @@ fn test_disassemble_cycles_and_vectors_options() {
     // T-State cycle counts
     assert!(text.contains("[18 T]"), "shows 18 T for CALL");
     assert!(text.contains("[10 T]"), "shows 10 T for OUT / LXI");
-    assert!(text.contains("[4 T]"), "shows 4 T for MOV / INR / DCR");
+    assert!(text.contains("[4 T]"), "shows 4 T for DCR / NOP");
 }
+
 
 

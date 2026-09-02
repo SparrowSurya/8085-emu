@@ -1,0 +1,23 @@
+{
+  "libraries": [
+    {
+      "name": "terminal",
+      "dir": "devices",
+      "file": "devices/terminal.e8085",
+      "expected_symbols": ["print", "input", "putch", "endl"]
+    },
+    {
+      "name": "math",
+      "dir": "lib",
+      "file": "lib/math.e8085",
+      "expected_symbols": ["divide", "multiply", "modulo", "power"]
+    },
+    {
+      "name": "conv",
+      "dir": "lib",
+      "file": "lib/conv.e8085",
+      "link_libs": ["lib/math.e8085"],
+      "expected_symbols": ["to_uint8", "to_str8"]
+    }
+  ]
+}

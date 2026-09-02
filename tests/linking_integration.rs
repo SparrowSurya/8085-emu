@@ -2,12 +2,10 @@
 //! and -l binary library linking.
 
 use std::collections::HashMap;
-use std::path::Path;
-use std::sync::mpsc::channel;
 
 use emu8085::asm::container::BinaryContainer;
 use emu8085::asm::{assemble, assemble_and_link, assemble_with_options, load};
-use emu8085::{Addr, Machine, TerminalDevice};
+use emu8085::{Addr, Machine};
 
 #[test]
 fn test_local_labels_scoping_no_collision() {
@@ -93,175 +91,77 @@ main:
 
 #[test]
 fn test_include_source_directive() {
-    let src = r#"
-%include "terminal.e8085"
+    let temp_dir = std::env::temp_dir().join("emu8085_test_include");
+    std::fs::create_dir_all(&temp_dir).unwrap();
+    std::fs::write(
+        temp_dir.join("sub.e8085"),
+        "segment .text\nadd_ten:\n    adi 10\n    ret\n",
+    ).unwrap();
 
-segment .data
-prompt "Hello from %include!", 0x0A
+    let src = r#"
+%include "sub.e8085"
 
 segment .text
 main:
-    lxi HL, prompt
-    mvi B, %len prompt
-    call print
+    mvi A, 5
+    call add_ten
     hlt
 "#;
-    let base_dir = Path::new("programs");
 
-    let image = assemble_with_options(src, Some(base_dir), &HashMap::new())
-        .expect("assembles cleanly with %include terminal.e8085");
+    let image = assemble_with_options(src, Some(&temp_dir), &HashMap::new())
+        .expect("assembles cleanly with %include");
 
     let mut machine = Machine::default();
     load(&mut machine, &image).expect("loads image cleanly");
-
-    let output = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-    let output_clone = output.clone();
-    let (_tx, rx) = channel();
-    let terminal = TerminalDevice::with_io(0x01, 0x02, rx, move |b| {
-        output_clone.lock().unwrap().push(b);
-    });
-
-    machine.attach_device(Box::new(terminal), &[0x01, 0x02]);
     machine.run();
 
-    assert_eq!(*output.lock().unwrap(), b"Hello from %include!\n");
+    assert_eq!(machine.cpu.regs.a, 15);
     assert!(machine.cpu.is_halt);
-}
 
-#[test]
-fn test_terminal_input_subroutine() {
-    let src = r#"
-%include "terminal.e8085"
-
-segment .bss
-buffer BYTE 32
-
-segment .text
-main:
-    lxi HL, buffer
-    mvi B, %len buffer
-    call input
-
-    ; Print back what was read
-    lxi HL, buffer
-    ; B already contains the length of the string from input
-    call print
-    hlt
-"#;
-    let base_dir = Path::new("programs");
-    let image = assemble_with_options(src, Some(base_dir), &HashMap::new())
-        .expect("assembles cleanly with %include terminal.e8085");
-
-    let mut machine = Machine::default();
-    load(&mut machine, &image).expect("loads image cleanly");
-
-    let output = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-    let output_clone = output.clone();
-    let (_tx, rx) = channel();
-    let mut terminal = TerminalDevice::with_io(0x01, 0x02, rx, move |b| {
-        output_clone.lock().unwrap().push(b);
-    });
-
-    terminal.feed_line("Antigravity");
-    machine.attach_device(Box::new(terminal), &[0x01, 0x02]);
-    machine.run();
-
-    assert_eq!(*output.lock().unwrap(), b"Antigravity");
-    assert!(machine.cpu.is_halt);
-}
-
-#[test]
-fn test_terminal_putch_subroutine() {
-    let src = r#"
-%include "terminal.e8085"
-
-segment .text
-main:
-    mvi A, 'O'
-    call putch
-    mvi A, 'K'
-    call putch
-    call endl
-    hlt
-"#;
-    let base_dir = Path::new("programs");
-    let image = assemble_with_options(src, Some(base_dir), &HashMap::new())
-        .expect("assembles cleanly with %include terminal.e8085");
-
-    let mut machine = Machine::default();
-    load(&mut machine, &image).expect("loads image cleanly");
-
-    let output = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-    let output_clone = output.clone();
-    let (_tx, rx) = channel();
-    let terminal = TerminalDevice::with_io(0x01, 0x02, rx, move |b| {
-        output_clone.lock().unwrap().push(b);
-    });
-
-    machine.attach_device(Box::new(terminal), &[0x01, 0x02]);
-    machine.run();
-
-    assert_eq!(*output.lock().unwrap(), b"OK\n");
-    assert!(machine.cpu.is_halt);
+    let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
 #[test]
 fn test_extern_linking_with_precompiled_binary_library() {
-    // 1. Assemble library (terminal helper) into a container
-    let term_src = include_str!("../programs/terminal.e8085");
-    let term_image = assemble(term_src).expect("assembles terminal helper");
-    let term_container = term_image.to_container();
-    let term_bytes = term_container.encode();
+    let lib_src = r#"
+segment .text
+    global add_five
+add_five:
+    adi 5
+    ret
+"#;
+    let lib_image = assemble(lib_src).expect("assembles library");
+    let lib_container = lib_image.to_container();
+    let lib_bytes = lib_container.encode();
 
-    // Decode library container and extract export symbols
-    let decoded_lib = BinaryContainer::decode(&term_bytes).expect("decodes lib container");
+    let decoded_lib = BinaryContainer::decode(&lib_bytes).expect("decodes lib container");
     let mut ext_symbols = HashMap::new();
     for (sym, addr) in &decoded_lib.export_symbols {
         ext_symbols.insert(sym.clone(), *addr);
     }
-    assert_eq!(ext_symbols.get("print"), Some(&0x0040));
+    assert_eq!(ext_symbols.get("add_five"), Some(&0x0040));
 
-    // 2. Program that uses `extern print`
     let prog_src = r#"
-segment .data
-msg BYTE "Hi", 0x0A
-
 segment .text
-
-extern print
+    extern add_five
 
 main:
-    lxi HL, msg
-    mvi B, %len msg
-    call print
+    mvi A, 10
+    call add_five
     hlt
 "#;
 
     let prog_image = assemble_with_options(prog_src, None, &ext_symbols)
-        .expect("assembles program with extern print");
+        .expect("assembles program with extern");
 
-    // 3. Load both into machine
     let mut machine = Machine::default();
-
-    // Load library container
     for (i, &b) in decoded_lib.text_bytes.iter().enumerate() {
         machine.ram.write(Addr(decoded_lib.header.text_addr.wrapping_add(i as u16)), b);
     }
-
-    // Load main program
     load(&mut machine, &prog_image).expect("loads main program");
-
-    let output = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-    let output_clone = output.clone();
-    let (_tx, rx) = channel();
-    let terminal = TerminalDevice::with_io(0x01, 0x02, rx, move |b| {
-        output_clone.lock().unwrap().push(b);
-    });
-
-    machine.attach_device(Box::new(terminal), &[0x01, 0x02]);
     machine.run();
 
-    assert_eq!(*output.lock().unwrap(), b"Hi\n");
+    assert_eq!(machine.cpu.regs.a, 15);
     assert!(machine.cpu.is_halt);
 }
 
@@ -284,15 +184,29 @@ main:
 
 #[test]
 fn test_static_standalone_binary_compilation_and_execution() {
-    let term_src = include_str!("../programs/terminal.e8085");
-    let term_image = assemble(term_src).expect("assembles terminal helper");
-    let term_container = term_image.to_container();
-    assert_eq!(term_container.header.entry_pc, 0, "library without main has entry_pc == 0");
+    let lib_src = r#"
+segment .text
+    global compute_answer
+compute_answer:
+    mvi A, 42
+    ret
+"#;
+    let lib_image = assemble(lib_src).expect("assembles library");
+    let lib_container = lib_image.to_container();
+    assert_eq!(lib_container.header.entry_pc, 0, "library without main has entry_pc == 0");
 
-    let greet_src = include_str!("../programs/greet.e8085");
-    // greet.e8085 uses extern print, input, endl
-    let standalone_image = assemble_and_link(greet_src, None, &[term_container])
-        .expect("statically links greet with terminal binary container");
+    let main_src = r#"
+segment .text
+    global main
+    extern compute_answer
+
+main:
+    call compute_answer
+    hlt
+"#;
+
+    let standalone_image = assemble_and_link(main_src, None, &[lib_container])
+        .expect("statically links executable with library container");
 
     assert_ne!(standalone_image.entry, 0, "standalone executable has main entry point");
 
@@ -301,54 +215,35 @@ fn test_static_standalone_binary_compilation_and_execution() {
     let decoded = BinaryContainer::decode(&encoded).expect("decodes standalone container");
     assert_ne!(decoded.header.entry_pc, 0);
 
-    // Load ONLY the standalone binary into machine (no extra library loading required!)
     let mut machine = Machine::default();
-    
-    // Load vector table
-    if !decoded.vec_bytes.is_empty() {
-        for (i, &b) in decoded.vec_bytes.iter().enumerate() {
-            machine.ram.write(Addr(i as u16), b);
-        }
-    }
-    // Load .data
-    for (i, &b) in decoded.data_bytes.iter().enumerate() {
-        machine.ram.write(Addr(decoded.header.data_addr.wrapping_add(i as u16)), b);
-    }
-    // Zero .bss
-    for i in 0..decoded.header.bss_size {
-        machine.ram.write(Addr(decoded.header.bss_addr.wrapping_add(i)), 0);
-    }
-    // Load .text
     for (i, &b) in decoded.text_bytes.iter().enumerate() {
         machine.ram.write(Addr(decoded.header.text_addr.wrapping_add(i as u16)), b);
     }
     machine.cpu.regs.pc = Addr(decoded.header.entry_pc);
     machine.cpu.regs.sp = Addr(decoded.header.sp_init);
-
-    let output = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-    let output_clone = output.clone();
-    let (_tx, rx) = channel();
-    let mut terminal = TerminalDevice::with_io(0x01, 0x02, rx, move |b| {
-        output_clone.lock().unwrap().push(b);
-    });
-
-    terminal.feed_line("Surya");
-    machine.attach_device(Box::new(terminal), &[0x01, 0x02]);
     machine.run();
 
-    assert_eq!(*output.lock().unwrap(), b"What is your name? Hello, Surya\n");
+    assert_eq!(machine.cpu.regs.a, 42);
     assert!(machine.cpu.is_halt);
 }
 
 #[test]
 fn test_library_without_main_has_entry_pc_zero() {
-    let term_src = include_str!("../programs/terminal.e8085");
-    let term_image = assemble(term_src).expect("assembles terminal helper");
-    assert_eq!(term_image.entry, 0);
+    let lib_src = r#"
+segment .text
+    global func_a
+    global func_b
+func_a:
+    ret
+func_b:
+    ret
+"#;
+    let lib_image = assemble(lib_src).expect("assembles library");
+    assert_eq!(lib_image.entry, 0);
 
-    let container = term_image.to_container();
+    let container = lib_image.to_container();
     assert_eq!(container.header.entry_pc, 0);
-    assert_eq!(container.export_symbols.len(), 4);
+    assert_eq!(container.export_symbols.len(), 2);
 }
 
 

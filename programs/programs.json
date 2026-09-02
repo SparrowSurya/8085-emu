@@ -1,0 +1,51 @@
+{
+  "programs": [
+    {
+      "name": "array_sum",
+      "file": "array_sum.e8085",
+      "type": "register",
+      "expect_reg_a": 10
+    },
+    {
+      "name": "directives",
+      "file": "directives.e8085",
+      "type": "register",
+      "expect_reg_a": 4,
+      "expect_reg_h": 0,
+      "expect_reg_l": 68
+    },
+    {
+      "name": "subroutine",
+      "file": "subroutine.e8085",
+      "type": "register",
+      "expect_reg_a": 8,
+      "expect_reg_sp": 61440
+    },
+    {
+      "name": "print_stars",
+      "file": "print_stars.e8085",
+      "type": "printer",
+      "expect_output": "*****"
+    },
+    {
+      "name": "software_interrupts",
+      "file": "software_interrupts.e8085",
+      "type": "printer",
+      "expect_output": "6"
+    },
+    {
+      "name": "hello_world",
+      "file": "hello_world.e8085",
+      "type": "terminal",
+      "expect_output": "Hello World!\n"
+    },
+    {
+      "name": "greet",
+      "file": "greet.e8085",
+      "type": "terminal",
+      "link_libs": ["devices/terminal.e8085"],
+      "stdin": "Sparrow",
+      "expect_output": "What is your name? Hello, Sparrow\n"
+    }
+  ]
+}

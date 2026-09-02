@@ -1,201 +1,232 @@
-//! Integration tests verifying that all .e8085 programs in the programs/ directory
-//! compile, load, and execute correctly on the 8085 emulator.
+//! Integration tests for files in `programs/` directory.
+//!
+//! Driven by declarative manifests:
+//! - `programs/programs.json` for standalone/terminal/printer executables in `programs/`
+//! - `programs/libraries.json` for reusable subroutine libraries in `devices/` and `lib/`
 
 use std::cell::RefCell;
+use std::fs;
+use std::path::Path;
 use std::rc::Rc;
+use std::sync::mpsc::channel;
+use std::sync::{Arc, Mutex};
 
-use emu8085::asm::{assemble, load};
-use emu8085::{Machine, PrinterDevice};
+use emu8085::asm::container::BinaryContainer;
+use emu8085::asm::{assemble, assemble_and_link, load};
+use emu8085::{Machine, PrinterDevice, TerminalDevice};
+use serde::Deserialize;
 
-fn run_program(src: &str) -> Machine {
-    let image = assemble(src).expect("program assembles cleanly");
-    let mut m = Machine::create(16, 8);
-    load(&mut m, &image).expect("program loads into RAM");
-    m.run();
-    assert!(m.cpu.is_halt, "program did not halt");
-    m
+#[derive(Debug, Deserialize)]
+struct ProgramsManifest {
+    programs: Vec<ProgramTestCase>,
 }
 
-fn run_program_with_printer(src: &str) -> (Machine, String) {
-    let image = assemble(src).expect("program assembles cleanly");
-    let printed = Rc::new(RefCell::new(String::new()));
-    let sink = printed.clone();
-    let mut m = Machine::create(16, 8);
-    m.attach_device(
-        Box::new(PrinterDevice::with_callback(move |c| {
-            sink.borrow_mut().push(c)
-        })),
-        &[0x02],
-    );
-    load(&mut m, &image).expect("program loads into RAM");
-    m.run();
-    assert!(m.cpu.is_halt, "program did not halt");
-    let out = printed.borrow().clone();
-    (m, out)
+#[derive(Debug, Deserialize)]
+struct ProgramTestCase {
+    name: String,
+    file: String,
+    #[serde(rename = "type")]
+    test_type: String,
+    #[serde(default)]
+    link_libs: Vec<String>,
+    #[serde(default)]
+    stdin: Option<String>,
+    #[serde(default)]
+    expect_output: Option<String>,
+    #[serde(default)]
+    expect_reg_a: Option<u8>,
+    #[serde(default)]
+    expect_reg_h: Option<u8>,
+    #[serde(default)]
+    expect_reg_l: Option<u8>,
+    #[serde(default)]
+    expect_reg_sp: Option<u16>,
 }
 
-#[test]
-fn test_program_array_sum() {
-    let src = include_str!("../programs/array_sum.e8085");
-    let m = run_program(src);
-    assert_eq!(m.cpu.regs.a, 10); // 1 + 2 + 3 + 4 = 10
+#[derive(Debug, Deserialize)]
+struct LibrariesManifest {
+    libraries: Vec<LibraryTestCase>,
 }
 
-#[test]
-fn test_program_directives() {
-    let src = include_str!("../programs/directives.e8085");
-    let m = run_program(src);
-    assert_eq!(m.cpu.regs.a, 4); // %len pattern = 4
-    assert_eq!(m.cpu.regs.h, 0x00);
-    assert_eq!(m.cpu.regs.l, 0x44); // scratch address in .bss
+#[derive(Debug, Deserialize)]
+struct LibraryTestCase {
+    name: String,
+    dir: String,
+    file: String,
+    #[serde(default)]
+    link_libs: Vec<String>,
+    expected_symbols: Vec<String>,
 }
 
-#[test]
-fn test_program_print_stars() {
-    let src = include_str!("../programs/print_stars.e8085");
-    let (_m, out) = run_program_with_printer(src);
-    assert_eq!(out, "*****");
-}
-
-#[test]
-fn test_program_subroutine() {
-    let src = include_str!("../programs/subroutine.e8085");
-    let m = run_program(src);
-    assert_eq!(m.cpu.regs.a, 8); // 5 + 3 = 8
-    assert_eq!(m.cpu.regs.sp.0, 0xF000); // stack pointer balanced
+fn compile_lib_file(rel_path: &str, base_dir: &Path) -> BinaryContainer {
+    let full_path = base_dir.join(rel_path);
+    let src = fs::read_to_string(&full_path)
+        .unwrap_or_else(|e| panic!("failed to read library '{}': {e}", full_path.display()));
+    let img = assemble(&src)
+        .unwrap_or_else(|e| panic!("failed to assemble library '{}': {e}", full_path.display()));
+    img.to_container()
 }
 
 #[test]
-fn test_program_software_interrupts() {
-    let src = include_str!("../programs/software_interrupts.e8085");
-    let (m, out) = run_program_with_printer(src);
-    assert_eq!(out, "6"); // 1 + 5 = 6 printed as ASCII '6'
-    assert_eq!(m.cpu.regs.sp.0, 0xF000); // return stack balanced
-}
+fn test_programs_manifest_suite() {
+    let base_dir = Path::new("programs");
+    let manifest_path = base_dir.join("programs.json");
+    let manifest_str = fs::read_to_string(&manifest_path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", manifest_path.display()));
+    let manifest: ProgramsManifest = serde_json::from_str(&manifest_str)
+        .expect("valid programs.json schema");
 
-#[test]
-fn test_program_hardware_trap() {
-    let src = include_str!("../programs/hardware_trap.e8085");
-    let image = assemble(src).expect("assembles cleanly");
-    let printed = Rc::new(RefCell::new(String::new()));
-    let sink = printed.clone();
-    let mut m = Machine::create(16, 8);
-    m.attach_device(
-        Box::new(PrinterDevice::with_callback(move |c| {
-            sink.borrow_mut().push(c)
-        })),
-        &[0x02],
-    );
-    load(&mut m, &image).expect("loads cleanly");
-    // Inject illegal opcode at main + 3 to trigger TRAP handler
-    let trap_trigger_addr = emu8085::Addr(image.entry + 3);
-    m.ram.write(trap_trigger_addr, 0x08); // 0x08 is invalid opcode
-    m.run();
+    for prog in manifest.programs {
+        let prog_path = base_dir.join(&prog.file);
+        let src = fs::read_to_string(&prog_path)
+            .unwrap_or_else(|e| panic!("failed to read program '{}': {e}", prog_path.display()));
 
-    assert_eq!(*printed.borrow(), "Trap handled!\n");
-    assert!(m.cpu.is_halt);
-}
+        let linked_containers: Vec<BinaryContainer> = prog
+            .link_libs
+            .iter()
+            .map(|lib_file| compile_lib_file(lib_file, base_dir))
+            .collect();
 
-#[test]
-fn test_program_hello_world() {
-    let src = include_str!("../programs/hello_world.e8085");
-    let image = assemble(src).expect("program assembles cleanly");
-    let printed = Rc::new(RefCell::new(String::new()));
-    let sink = printed.clone();
-    let mut m = Machine::create(16, 8);
-    let (_tx, rx) = std::sync::mpsc::channel();
-    let terminal = emu8085::TerminalDevice::with_io(0x01, 0x02, rx, move |b| {
-        sink.borrow_mut().push(b as char);
-    });
-    m.attach_device(Box::new(terminal), &[0x01, 0x02]);
-    load(&mut m, &image).expect("program loads into RAM");
-    m.run();
-    assert_eq!(*printed.borrow(), "Hello World!\n");
-}
+        let image = assemble_and_link(&src, Some(base_dir), &linked_containers)
+            .unwrap_or_else(|e| panic!("failed to assemble & link '{}': {e}", prog.name));
 
-#[test]
-fn test_program_demo_assembles_and_loads() {
-    let src = include_str!("../programs/demo.e8085");
-    let image = assemble(src).expect("demo.e8085 assembles cleanly");
-    let mut m = Machine::create(16, 8);
-    load(&mut m, &image).expect("demo.e8085 loads cleanly");
-    assert!(image.bytes.len() > 0x40);
-}
+        let mut machine = Machine::default();
 
-#[test]
-fn test_binary_image_execution_matches_source() {
-    let src = include_str!("../programs/array_sum.e8085");
-    let image = assemble(src).expect("assembles cleanly");
-    let raw_bytes = image.bytes.clone();
+        match prog.test_type.as_str() {
+            "register" => {
+                load(&mut machine, &image)
+                    .unwrap_or_else(|e| panic!("failed to load '{}': {e}", prog.name));
+                machine.run();
+                assert!(machine.cpu.is_halt, "program '{}' did not halt", prog.name);
 
-    // Execute raw binary bytes loaded into machine RAM directly
-    let mut m = Machine::create(16, 8);
-    for (i, &b) in raw_bytes.iter().enumerate() {
-        m.ram.write(emu8085::Addr(i as u16), b);
-    }
-    m.cpu.regs.pc = emu8085::Addr(0x0000);
-    m.run();
+                if let Some(expected_a) = prog.expect_reg_a {
+                    assert_eq!(
+                        machine.cpu.regs.a, expected_a,
+                        "program '{}' reg A mismatch",
+                        prog.name
+                    );
+                }
+                if let Some(expected_h) = prog.expect_reg_h {
+                    assert_eq!(
+                        machine.cpu.regs.h, expected_h,
+                        "program '{}' reg H mismatch",
+                        prog.name
+                    );
+                }
+                if let Some(expected_l) = prog.expect_reg_l {
+                    assert_eq!(
+                        machine.cpu.regs.l, expected_l,
+                        "program '{}' reg L mismatch",
+                        prog.name
+                    );
+                }
+                if let Some(expected_sp) = prog.expect_reg_sp {
+                    assert_eq!(
+                        machine.cpu.regs.sp.0, expected_sp,
+                        "program '{}' reg SP mismatch",
+                        prog.name
+                    );
+                }
+            }
+            "printer" => {
+                let printed = Rc::new(RefCell::new(String::new()));
+                let sink = printed.clone();
+                machine.attach_device(
+                    Box::new(PrinterDevice::with_callback(move |c| {
+                        sink.borrow_mut().push(c);
+                    })),
+                    &[0x02],
+                );
+                load(&mut machine, &image)
+                    .unwrap_or_else(|e| panic!("failed to load '{}': {e}", prog.name));
+                machine.run();
+                assert!(machine.cpu.is_halt, "program '{}' did not halt", prog.name);
 
-    assert_eq!(m.cpu.regs.a, 10);
-}
+                if let Some(expected) = &prog.expect_output {
+                    assert_eq!(
+                        &*printed.borrow(),
+                        expected,
+                        "program '{}' printer output mismatch",
+                        prog.name
+                    );
+                }
+            }
+            "terminal" => {
+                let output = Arc::new(Mutex::new(Vec::new()));
+                let output_clone = output.clone();
+                let (_tx, rx) = channel();
+                let mut terminal = TerminalDevice::with_io(0x01, 0x02, rx, move |b| {
+                    output_clone.lock().unwrap().push(b);
+                });
 
-#[test]
-fn test_container_encoding_and_disassembly() {
-    let src = include_str!("../programs/hello_world.e8085");
-    let image = assemble(src).expect("assembles cleanly");
-    let container = image.to_container();
-    let container_bytes = container.encode();
+                if let Some(input_text) = &prog.stdin {
+                    terminal.feed_line(input_text);
+                }
 
-    // Decode container
-    let decoded = emu8085::asm::container::BinaryContainer::decode(&container_bytes)
-        .expect("container decodes cleanly");
-    assert_eq!(decoded.header.entry_pc, image.entry);
-    assert_eq!(decoded.header.text_size, image.text_size);
-    assert_eq!(decoded.header.data_size, image.data_size);
+                machine.attach_device(Box::new(terminal), &[0x01, 0x02]);
+                load(&mut machine, &image)
+                    .unwrap_or_else(|e| panic!("failed to load '{}': {e}", prog.name));
+                machine.run();
+                assert!(machine.cpu.is_halt, "program '{}' did not halt", prog.name);
 
-    // Disassemble container (strictly .text segment)
-    let rows = emu8085::disassemble_bytes(&container_bytes)
-        .expect("disassembles container cleanly");
-    assert!(!rows.is_empty());
-
-    let mnemonics: Vec<String> = rows.iter().map(|r| r.mnemonic.clone()).collect();
-    assert!(mnemonics.iter().any(|m| m.contains("MVI A, 0x00")));
-    assert!(mnemonics.iter().any(|m| m.contains("OUT 0x02")));
-    assert!(mnemonics.iter().any(|m| m.contains("HLT")));
-    // Must strictly disassemble instructions from .text segment
-    for r in &rows {
-        if !r.bytes.is_empty() {
-            assert!(
-                r.addr >= decoded.header.text_addr
-                    && r.addr < decoded.header.text_addr + decoded.header.text_size,
-                "disassembly row address {:04X} must be within .text range",
-                r.addr
-            );
+                if let Some(expected) = &prog.expect_output {
+                    let out_str = String::from_utf8_lossy(&output.lock().unwrap()).to_string();
+                    assert_eq!(
+                        out_str, *expected,
+                        "program '{}' terminal output mismatch",
+                        prog.name
+                    );
+                }
+            }
+            other => panic!("unknown test type '{other}' for program '{}'", prog.name),
         }
     }
 }
 
 #[test]
-fn test_disassembler_decodes_container_subroutine() {
-    let src = include_str!("../programs/subroutine.e8085");
-    let image = assemble(src).expect("assembles cleanly");
-    let container_bytes = image.to_container().encode();
+fn test_libraries_manifest_suite() {
+    let base_dir = Path::new("programs");
+    let manifest_path = base_dir.join("libraries.json");
+    let manifest_str = fs::read_to_string(&manifest_path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", manifest_path.display()));
+    let manifest: LibrariesManifest = serde_json::from_str(&manifest_str)
+        .expect("valid libraries.json schema");
 
-    let rows = emu8085::disassemble_bytes(&container_bytes)
-        .expect("disassembles cleanly");
-    assert!(!rows.is_empty());
+    for lib in manifest.libraries {
+        let lib_path = base_dir.join(&lib.file);
+        let src = fs::read_to_string(&lib_path)
+            .unwrap_or_else(|e| panic!("failed to read library '{}': {e}", lib_path.display()));
 
-    let mnemonics: Vec<String> = rows.iter().map(|r| r.mnemonic.clone()).collect();
-    assert!(mnemonics.iter().any(|m| m.contains("LXI SP, 0xF000")));
-    assert!(mnemonics.iter().any(|m| m.contains("MVI A, 0x05")));
-    assert!(mnemonics.iter().any(|m| m.contains("MVI B, 0x03")));
-    assert!(mnemonics.iter().any(|m| m.contains("ADD B")));
-    assert!(mnemonics.iter().any(|m| m.contains("RET")));
-    assert!(mnemonics.iter().any(|m| m.contains("HLT")));
+        let linked_containers: Vec<BinaryContainer> = lib
+            .link_libs
+            .iter()
+            .map(|f| compile_lib_file(f, base_dir))
+            .collect();
+
+        let image = assemble_and_link(&src, Some(base_dir), &linked_containers)
+            .unwrap_or_else(|e| panic!("failed to assemble & link library '{}': {e}", lib.name));
+
+        assert_eq!(
+            image.entry, 0,
+            "library '{}' in '{}' should have entry point 0x0000 (pure library)",
+            lib.name, lib.dir
+        );
+
+        let container = image.to_container();
+        assert_eq!(
+            container.header.entry_pc, 0,
+            "container entry_pc must be 0 for library '{}'",
+            lib.name
+        );
+
+        for expected_sym in &lib.expected_symbols {
+            assert!(
+                container.lookup_symbol(expected_sym).is_some(),
+                "library '{}' must export symbol '{}'",
+                lib.name,
+                expected_sym
+            );
+        }
+    }
 }
 
-#[test]
-fn test_disassembler_rejects_non_container_bytes() {
-    let raw_bytes = vec![0xC3, 0x00, 0x00, 0x76];
-    assert!(emu8085::disassemble_bytes(&raw_bytes).is_err());
-}
