@@ -1,0 +1,314 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "8085 Assembly",
+  "scopeName": "source.e8085",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#directives" },
+    { "include": "#segments" },
+    { "include": "#modular_keywords" },
+    { "include": "#types" },
+    { "include": "#labels" },
+    { "include": "#control_instructions" },
+    { "include": "#memory_instructions" },
+    { "include": "#mnemonics" },
+    { "include": "#var_declarations" },
+    { "include": "#registers" },
+    { "include": "#constants" },
+    { "include": "#numbers" },
+    { "include": "#strings" },
+    { "include": "#characters" },
+    { "include": "#local_variables" },
+    { "include": "#variables" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.semicolon.e8085",
+          "match": ";.*$"
+        }
+      ]
+    },
+    "directives": {
+      "patterns": [
+        {
+          "match": "(%(?i:include))\\s+(\"[^\"]*\"|'[^']*')",
+          "captures": {
+            "1": { "name": "keyword.control.directive.include.e8085" },
+            "2": { "name": "string.quoted.path.include.e8085" }
+          }
+        },
+        {
+          "match": "(%(?i:define))\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.control.directive.e8085" },
+            "2": { "name": "entity.name.constant.e8085" }
+          }
+        },
+        {
+          "match": "(%(?i:len))\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.control.directive.e8085" },
+            "2": { "name": "variable.other.e8085" }
+          }
+        },
+        {
+          "name": "keyword.control.directive.e8085",
+          "match": "(?i)%(define|repeat|len|include)\\b"
+        }
+      ]
+    },
+    "segments": {
+      "patterns": [
+        {
+          "name": "keyword.control.segment.e8085",
+          "match": "(?i)\\bsegment\\b"
+        },
+        {
+          "name": "entity.name.section.segment.e8085 storage.type.section.e8085",
+          "match": "(?i)\\.(text|data|bss)\\b"
+        }
+      ]
+    },
+    "modular_keywords": {
+      "patterns": [
+        {
+          "match": "^\\s*((?i:global|export))\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*(:)",
+          "captures": {
+            "1": { "name": "keyword.control.storage.modifier.e8085" },
+            "2": { "name": "entity.name.function.label.global.e8085" },
+            "3": { "name": "punctuation.separator.colon.e8085" }
+          }
+        },
+        {
+          "match": "^\\s*((?i:global|export))\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.control.storage.modifier.e8085" },
+            "2": { "name": "entity.name.function.label.global.e8085" }
+          }
+        },
+        {
+          "match": "^\\s*((?i:extern))\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.control.storage.modifier.e8085" },
+            "2": { "name": "entity.name.function.extern.e8085" }
+          }
+        },
+        {
+          "name": "keyword.control.storage.modifier.e8085",
+          "match": "(?i)\\b(global|export|extern)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "storage.type.e8085",
+          "match": "(?i)\\b(BYTE|WORD)\\b"
+        }
+      ]
+    },
+    "labels": {
+      "patterns": [
+        {
+          "match": "^\\s*(\\.[a-zA-Z_][a-zA-Z0-9_]*)\\s*(:)",
+          "captures": {
+            "1": { "name": "entity.name.function.label.local.e8085" },
+            "2": { "name": "punctuation.separator.colon.e8085" }
+          }
+        },
+        {
+          "match": "^\\s*([a-zA-Z_][a-zA-Z0-9_]*)\\s*(:)",
+          "captures": {
+            "1": { "name": "entity.name.function.label.e8085" },
+            "2": { "name": "punctuation.separator.colon.e8085" }
+          }
+        }
+      ]
+    },
+    "var_declarations": {
+      "patterns": [
+        {
+          "match": "^\\s*(?!(?i:MOV|MVI|LXI|LDA|STA|LDAX|STAX|LHLD|SHLD|XCHG|XTHL|SPHL|PCHL|ADD|ADI|ADC|ACI|SUB|SUI|SBB|SBI|INR|DCR|INX|DCX|DAD|DAA|ANA|ANI|XRA|XRI|ORA|ORI|CMP|CPI|CMA|CMC|STC|RLC|RRC|RAL|RAR|PUSH|POP|IN|OUT|NOP|HLT|EI|DI|RIM|SIM|JMP|JZ|JNZ|JC|JNC|JP|JM|JPE|JPO|CALL|CZ|CNZ|CC|CNC|CP|CM|CPE|CPO|RET|RZ|RNZ|RC|RNC|RP|RM|RPE|RPO|RST|DB|DW|DS|GLOBAL|EXPORT|EXTERN)\\b)([a-zA-Z_][a-zA-Z0-9_]*)\\s+((?i:BYTE|WORD))\\b",
+          "captures": {
+            "1": { "name": "variable.other.declaration.e8085" },
+            "2": { "name": "storage.type.e8085" }
+          }
+        },
+        {
+          "match": "^\\s*(?!(?i:MOV|MVI|LXI|LDA|STA|LDAX|STAX|LHLD|SHLD|XCHG|XTHL|SPHL|PCHL|ADD|ADI|ADC|ACI|SUB|SUI|SBB|SBI|INR|DCR|INX|DCX|DAD|DAA|ANA|ANI|XRA|XRI|ORA|ORI|CMP|CPI|CMA|CMC|STC|RLC|RRC|RAL|RAR|PUSH|POP|IN|OUT|NOP|HLT|EI|DI|RIM|SIM|JMP|JZ|JNZ|JC|JNC|JP|JM|JPE|JPO|CALL|CZ|CNZ|CC|CNC|CP|CM|CPE|CPO|RET|RZ|RNZ|RC|RNC|RP|RM|RPE|RPO|RST|DB|DW|DS|GLOBAL|EXPORT|EXTERN)\\b)([a-zA-Z_][a-zA-Z0-9_]*)\\s+(?=\"[^\"]*\"|'[^']*'|0[xXbBoO]|%repeat|[0-9])",
+          "captures": {
+            "1": { "name": "variable.other.declaration.e8085" }
+          }
+        }
+      ]
+    },
+    "control_instructions": {
+      "patterns": [
+        {
+          "match": "(?i)\\b(JMP|JZ|JNZ|JC|JNC|JP|JM|JPE|JPO|CALL|CZ|CNZ|CC|CNC|CP|CM|CPE|CPO)\\b\\s+(\\.[a-zA-Z_][a-zA-Z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.control.flow.mnemonic.e8085" },
+            "2": { "name": "entity.name.function.label.local.target.e8085" }
+          }
+        },
+        {
+          "match": "(?i)\\b(JMP|JZ|JNZ|JC|JNC|JP|JM|JPE|JPO|CALL|CZ|CNZ|CC|CNC|CP|CM|CPE|CPO)\\b\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.control.flow.mnemonic.e8085" },
+            "2": { "name": "entity.name.function.label.target.e8085" }
+          }
+        },
+        {
+          "name": "keyword.control.flow.mnemonic.e8085",
+          "match": "(?i)\\b(JMP|JZ|JNZ|JC|JNC|JP|JM|JPE|JPO|CALL|CZ|CNZ|CC|CNC|CP|CM|CPE|CPO|RET|RZ|RNZ|RC|RNC|RP|RM|RPE|RPO|RST)\\b"
+        }
+      ]
+    },
+    "memory_instructions": {
+      "patterns": [
+        {
+          "match": "(?i)\\b(LDA|STA|LHLD|SHLD)\\b\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.operator.mnemonic.datatransfer.e8085" },
+            "2": { "name": "variable.other.e8085" }
+          }
+        }
+      ]
+    },
+    "mnemonics": {
+      "patterns": [
+        {
+          "name": "keyword.operator.mnemonic.datatransfer.e8085",
+          "match": "(?i)\\b(MOV|MVI|LXI|LDA|STA|LDAX|STAX|LHLD|SHLD|XCHG|XTHL|SPHL|PCHL)\\b"
+        },
+        {
+          "name": "keyword.operator.mnemonic.math.e8085",
+          "match": "(?i)\\b(ADD|ADI|ADC|ACI|SUB|SUI|SBB|SBI|INR|DCR|INX|DCX|DAD|DAA)\\b"
+        },
+        {
+          "name": "keyword.operator.mnemonic.bitwise.e8085",
+          "match": "(?i)\\b(ANA|ANI|XRA|XRI|ORA|ORI|CMP|CPI|CMA|CMC|STC|RLC|RRC|RAL|RAR)\\b"
+        },
+        {
+          "name": "keyword.operator.mnemonic.stack.e8085",
+          "match": "(?i)\\b(PUSH|POP)\\b"
+        },
+        {
+          "name": "keyword.operator.mnemonic.io.e8085",
+          "match": "(?i)\\b(IN|OUT)\\b"
+        },
+        {
+          "name": "keyword.other.mnemonic.control.e8085",
+          "match": "(?i)\\b(NOP|HLT|EI|DI|RIM|SIM)\\b"
+        }
+      ]
+    },
+    "registers": {
+      "patterns": [
+        {
+          "name": "storage.type.register.memory.e8085 variable.language.register.memory.e8085",
+          "match": "(?i)\\bM\\b"
+        },
+        {
+          "name": "storage.type.register.psw.e8085 variable.language.register.psw.e8085",
+          "match": "(?i)\\bPSW\\b"
+        },
+        {
+          "name": "storage.type.register.sp.e8085 variable.language.register.sp.e8085",
+          "match": "(?i)\\bSP\\b"
+        },
+        {
+          "name": "storage.type.register.pair.e8085 variable.language.register.pair.e8085",
+          "match": "(?i)\\b(BC|DE|HL)\\b"
+        },
+        {
+          "name": "storage.type.register.accumulator.e8085 variable.language.register.accumulator.e8085",
+          "match": "(?i)\\bA\\b"
+        },
+        {
+          "name": "storage.type.register.8bit.e8085 variable.language.register.8bit.e8085",
+          "match": "(?i)\\b(B|C|D|E|H|L)\\b"
+        }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        {
+          "name": "entity.name.constant.e8085",
+          "match": "\\b[A-Z_][A-Z0-9_]*\\b"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.hex.e8085",
+          "match": "\\b0[xX][0-9a-fA-F]+\\b"
+        },
+        {
+          "name": "constant.numeric.binary.e8085",
+          "match": "\\b0[bB][01]+\\b"
+        },
+        {
+          "name": "constant.numeric.octal.e8085",
+          "match": "\\b0[oO][0-7]+\\b"
+        },
+        {
+          "name": "constant.numeric.decimal.e8085",
+          "match": "\\b[0-9]+\\b"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.e8085",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": []
+        }
+      ]
+    },
+    "characters": {
+      "patterns": [
+        {
+          "name": "string.quoted.single.e8085",
+          "begin": "'",
+          "end": "'",
+          "patterns": []
+        }
+      ]
+    },
+    "local_variables": {
+      "patterns": [
+        {
+          "name": "entity.name.function.label.local.e8085 variable.other.local.e8085",
+          "match": "\\.[a-zA-Z_][a-zA-Z0-9_]*"
+        }
+      ]
+    },
+    "variables": {
+      "patterns": [
+        {
+          "name": "variable.other.e8085",
+          "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*\\b"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.separator.comma.e8085",
+          "match": ","
+        },
+        {
+          "name": "punctuation.separator.colon.e8085",
+          "match": ":"
+        }
+      ]
+    }
+  }
+}
