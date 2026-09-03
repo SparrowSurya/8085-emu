@@ -27,7 +27,7 @@ flowchart TD
 ### Stage 1: Lexical Analysis (`src/asm/lexer.rs`, `src/asm/token.rs`)
 The lexer scans the raw UTF-8 source string into a stream of tokens, tracking line and column spans for error reporting.
 
-- **Directives**: `%define`, `%repeat`, `%len`.
+- **Directives**: `%define` (1-byte values), `%include` (strictly double-quoted `"..."`), `%repeat`, `%len`.
 - **Segments**: `segment`, `.data`, `.bss`, `.text`.
 - **Data Sizes**: `BYTE`, `WORD`.
 - **Numeric Literals**:
@@ -35,22 +35,25 @@ The lexer scans the raw UTF-8 source string into a stream of tokens, tracking li
   - Binary: `0b1010_0101`, `0B1111`
   - Octal: `0o77`, `0O123`
   - Decimal: `42`, `1000`
-- **String and Character Literals**: `"Hello 8085!\n"`, `'A'`.
-- **Registers & Keywords**: `A`, `B`, `C`, `D`, `E`, `H`, `L`, `M`, `BC`, `DE`, `HL`, `SP`, `PSW`.
+- **String and Character Literals with Escape Sequences**: `"Hello 8085!\n\0"`, `'A'`, `'\n'`, `'\t'`, `'\0'`, `'\\'`, `'\''`, `\xHH`. Single-quoted character literals `'x'` are treated as 1-byte constant numeric values.
+- **Registers & Keywords**: `A`, `B`, `C`, `D`, `E`, `H`, `L`, `M`, `BC`, `DE`, `HL`, `SP`, `PSW`, `global`, `extern`.
 - **Comments**: Semicolon (`;`) to end of line.
 
 ### Stage 2: Parsing & AST Construction (`src/asm/parser.rs`, `src/asm/ast.rs`)
 The recursive-descent parser constructs an Abstract Syntax Tree ([`Program`](../src/asm/ast.rs)) representing:
-- **Global Directives**: `%define` constants.
-- **Data Declarations**: Initialized `BYTE` / `WORD` items with optional `%repeat` expressions.
+- **Global Directives**: `%include` file imports and `%define` 1-byte constants.
+- **Declarations**: `global` exported symbols (disallowing `global main`), and `extern` external dependencies.
+- **Data Declarations**: Initialized `BYTE` / `WORD` items with `%repeat` expressions.
 - **BSS Reservations**: Uninitialized `BYTE` / `WORD` reservation counts.
-- **Text Items**: Label definitions and instructions with parsed operands (registers, immediate values, symbol references, or `%len` queries).
+- **Text Items**: Label definitions and instructions with parsed operands (registers, immediate values, character literals, symbol references, or `%len` queries).
 
 ### Stage 3: Preprocessor & Constant Resolution
 Before layout, the assembler resolves preprocessor constants:
-- Substitutes `%define` constants into immediate operands and repeat counts.
+- Validates and substitutes `%define` 1-byte constants into immediate operands and repeat counts.
 - Supports **define chaining** (a `%define` referencing an earlier `%define`).
-- Evaluates `%len <var>` to the exact byte count of a previously defined data array or BSS reservation.
+- Evaluates `%len <var>` (space-separated) to the exact byte count of a previously defined data array or BSS reservation.
+- Merges `%include` files with circular inclusion detection.
+- Validates control flow instructions (`CALL`, `JMP`, condition variants) to ensure they target executable code labels or externs, preventing data variables from being called or jumped to.
 
 ### Stage 4: Memory Layout & Vector Table Generation
 The 8085 architecture reserves the first 64 bytes (`0x0000`..`0x003F`) for hardware reset and interrupt vectors. The assembler automatically builds this memory layout:

@@ -7,14 +7,14 @@ This extension provides rich syntax highlighting, language configuration, and se
 ## Features
 
 ### 1. Directives & Preprocessor
-- `%define IDENTIFIER VALUE` — Macro and constant definitions.
+- `%define IDENTIFIER VALUE` — 1-byte constant definitions ($\le \text{0xFF}$, 1-byte character literal `'x'`, or 1-byte string).
 - `%repeat COUNT VALUE` — Repeated data expansion in `.data`.
-- `%len IDENTIFIER` — Byte-length evaluation for variables.
-- `%include "path/to/file"` / `%include 'path/to/file'` — File inclusion with circular protection.
+- `%len IDENTIFIER` — Byte-length evaluation for variables (`%len var`).
+- `%include "path/to/file.e8085"` — File inclusion in double quotes with circular protection.
 
 ### 2. Scoping & Modular Keywords
-- `global <label>:` / `export <label>:` — Export labels globally for linking.
-- `extern <symbol>` — External symbol declarations.
+- `global <label>:` — Export labels globally for linking (disallowing `global main`).
+- `extern <symbol>` — External symbol declarations (satisfied by local definition if included).
 - `.label:` / `jz .label` — Subroutine-scoped local labels.
 
 ### 3. Segments & Memory Layout
@@ -50,12 +50,13 @@ This extension provides rich syntax highlighting, language configuration, and se
 - **I/O Ports**: `IN`, `OUT`
 - **Machine Control**: `NOP`, `HLT`, `EI`, `DI`, `RIM`, `SIM`
 
-### 9. Numeric Literals & Comments
+### 9. Numeric Literals, Escape Sequences & Comments
 - **Hexadecimal**: `0xFF`, `0x1234`
 - **Binary**: `0b1010`, `0B11001100`
 - **Octal**: `0o77`, `0O377`
 - **Decimal**: `0`, `42`, `255`
-- **Strings & Characters**: `"Hello, World!"`, `'A'`
+- **Character Literals**: Single-quoted 1-byte constant literals (`'A'`, `'\n'`, `'\t'`, `'\0'`, `'\''`, `'\\'`, `\xHH`).
+- **Strings with Escapes**: `"Hello, World!\n\0"`
 - **Comments**: Semicolon comments (`; ...`) extending to the end of the line.
 
 ---

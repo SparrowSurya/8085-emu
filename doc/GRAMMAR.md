@@ -71,13 +71,16 @@ main:
 
 ## 3. Preprocessor Directives
 
-### `%define` (Constant Definition)
-Defines named numeric constants, characters, or string identifiers. Supports define chaining.
+### `%define` (1-Byte Constant Definition)
+Defines named 1-byte numeric constants, character literals (`'x'`), or 1-byte strings. Supports define chaining. All `%define` directives must appear before any `segment`.
+
+> **Note**: `%define` values are strictly restricted to 1 byte ($\le \text{0xFF}$). Multi-byte values or multi-character strings are rejected.
 
 ```assembly
 %define PORT_DATA   0x01
 %define PORT_CMD    0x02
 %define DEFAULT_VAL 42
+%define NEWLINE_CH  '\n'          ; 1-byte character literal
 %define BACKUP_VAL  DEFAULT_VAL   ; Define chaining
 
 segment .text
@@ -88,36 +91,37 @@ main:
 ```
 
 ### `%repeat` (Data Duplication)
-Repeats an expression or string a specified number of times within `segment .data`.
+Repeats an expression or string a specified number of times within `segment .data`. Can appear anywhere in data definitions.
 
 ```assembly
+%define FILL_COUNT 16
+
 segment .data
-  zero_table BYTE %repeat 16 0x00
+  zero_table BYTE %repeat FILL_COUNT 0x00
   pattern    BYTE %repeat 4 0xAA 0x55
   dashes     BYTE %repeat 8 "-"
 ```
 
 ### `%len` (Size Evaluation)
-Evaluates to the exact byte size of a previously defined `.data` array or `.bss` reservation.
+Evaluates to the exact byte size of a previously defined `.data` array or `.bss` reservation. Uses space-separated syntax (no parentheses).
 
 ```assembly
 segment .data
-  prompt BYTE "Enter name: "
+  prompt BYTE "Enter name:\n\0"
 
 segment .text
 main:
-  mvi B, %len prompt   ; B = 12
+  mvi B, %len prompt   ; B = 13 (includes escape sequences \n and \0)
   lxi HL, prompt
   ; ...
 ```
 
 ### `%include` (File Inclusion)
-Imports definitions, global labels, and constants from an external source file:
+Imports definitions, global labels, and constants from an external source file. File paths must be enclosed **strictly in double quotes**:
 
 ```assembly
-%include "terminal.e8085"
-; or with single quotes:
-%include 'math/helpers.e8085'
+%include "devices/terminal.e8085"
+%include "lib/math.e8085"
 ```
 
 ---
@@ -125,7 +129,9 @@ Imports definitions, global labels, and constants from an external source file:
 ## 4. Scoping & Modular Keywords
 
 ### `global`
-Exports a label or subroutine globally so it can be referenced across modules and entered into the `.8085.bin` Export Symbol Table:
+Exports a label or subroutine globally so it can be referenced across modules and entered into the `.8085.bin` Export Symbol Table.
+
+> **Note**: Declaring `global main:` or `global main` is forbidden, as `main` is reserved as the program entry point and automatically mapped to the reset vector.
 
 ```assembly
 segment .text
@@ -143,7 +149,7 @@ helper:
 ```
 
 ### `extern`
-Declares a symbol that will be resolved externally at link time (via linked `.8085.bin` container or `%include`):
+Declares a symbol that will be resolved externally at link time (via linked `.8085.bin` container or `%include`). If the symbol is defined locally in the compilation unit (e.g. from an included module), the local definition satisfies the declaration cleanly without error.
 
 ```assembly
 segment .text
@@ -155,6 +161,19 @@ main:
     call print
     hlt
 ```
+
+### Character & String Escape Sequences
+Both single-quoted character literals (`'x'`) and double-quoted string literals (`"..."`) support standard escape sequences:
+- `\n` — Line feed (`0x0A`)
+- `\t` — Horizontal tab (`0x09`)
+- `\r` — Carriage return (`0x0D`)
+- `\0` — Null byte (`0x00`)
+- `\'` — Single quote (`0x27`)
+- `\"` — Double quote (`0x22`)
+- `\\` — Backslash (`0x5C`)
+- `\xHH` — 2-digit hexadecimal byte value (e.g. `\x1B` $\rightarrow$ `0x1B`)
+
+Character literals `'x'` are treated as 1-byte constant numeric literals and can be used in instructions (`mvi A, 'A'`, `cpi '\n'`), `%define`, and `.data`. Single quotes with multiple characters (`'abc'`) or empty quotes (`''`) are rejected.
 
 ### Local Labels (`.name:`, `jz .name`)
 Scoped directly to the preceding parent (non-local) label. Prevents name collisions across separate subroutines:
@@ -219,7 +238,7 @@ func_b:
 
 The assembler automatically wires 3-byte `JMP <isr>` hooks into the 8085 Interrupt Vector Table (`0x0000`..`0x003F`) when standardized ISR label names are defined:
 
-```assembly
+```e8085
 ; ==========================================================
 ; Interrupt Service Routine Conventions
 ; ==========================================================

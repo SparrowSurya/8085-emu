@@ -214,15 +214,16 @@ emu8085/
   - Software interrupts: **RST 0** (`0x0000`) through **RST 7** (`0x0038`) with automatic Interrupt Vector Table mapping to `isr_rst<n>` subroutines.
 - **Direct Memory Access (DMA)**: Hardware `HOLD` / `HLDA` bus-master handshake allowing peripherals like `USBDevice` to stream directly to/from memory.
 - **Modular Assembler & Static Linker**:
-  - Two-pass assembler supporting `%define`, `%repeat`, `%len`, segments (`.data`, `.bss`, `.text`), 4 number bases, and string literals.
-  - Source inclusion with `%include "file.e8085"`.
+  - Two-pass assembler supporting 1-byte `%define`, `%repeat`, `%len` (space-separated), segments (`.data`, `.bss`, `.text`), 4 number bases, single-quoted 1-byte character literals (`'x'`), and escape sequences (`\n`, `\t`, `\r`, `\0`, `\'`, `\"`, `\\`, `\xHH`).
+  - Strict double-quoted source inclusion with `%include "file.e8085"`.
   - Subroutine-scoped local labels (`.name:` and `jz .name`).
-  - Modular library export (`global`) with export symbol tables.
-  - External referencing (`extern <symbol>`) with static binary linking (`-l <library.8085.bin>`) to produce standalone executables.
-  - Entry-point verification: non-executable library binaries (without `main`) are rejected from execution.
+  - Modular library export (`global`) with export symbol tables (disallowing `global main`).
+  - External referencing (`extern <symbol>`) with static binary linking (`-l <library.8085.bin>`) to produce standalone executables (externs cleanly satisfied by local definitions).
+  - Semantic operand validation ensuring `CALL` and `JMP` target code labels or externs rather than data variables.
+  - Entry-point verification: non-executable library binaries (without `main`) are rejected from standalone execution.
 - **Language Server Protocol (`e8085-lsp`)**:
   - Asynchronous LSP 3.17 server (`tower-lsp` + `tokio`).
-  - Rich hover documentation, Goto Definition across files, contextual auto-completion, workspace symbol renaming, live compiler diagnostics, hardware cycle inlay hints, and quick fixes.
+  - Rich hover documentation (including multi-radix numeric/character breakdown and `%include` module docstrings), Goto Definition across files, contextual auto-completion, workspace symbol renaming, live compiler diagnostics with CFG reachability analysis & unused symbol warnings, hardware cycle inlay hints, and quick fixes.
 - **Rich Peripheral Set**:
   - `TerminalDevice`: Two-port virtual terminal supporting line-buffered input and output.
   - `PrinterDevice`: Character stream capture device with callbacks.

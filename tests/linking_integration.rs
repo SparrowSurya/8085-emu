@@ -209,7 +209,6 @@ compute_answer:
 
     let main_src = r#"
 segment .text
-    global main
     extern compute_answer
 
 main:
