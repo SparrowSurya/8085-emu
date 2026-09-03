@@ -1,6 +1,6 @@
-use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position, Range};
+use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position, Range, Url};
 
-use super::document::Document;
+use super::document::{Document, resolve_relative_path};
 
 /// Provides rich hover documentation for 8085 instructions, registers, directives, and symbols.
 pub fn get_hover(doc: &Document, position: &Position) -> Option<Hover> {
@@ -1179,14 +1179,26 @@ fn get_directive_hover(directive: &str) -> Option<&'static str> {
 fn get_user_symbol_hover(doc: &Document, symbol: &str, position: &Position) -> Option<String> {
     let lines: Vec<&str> = doc.text.lines().collect();
 
+    // 1. First check the current file
+    if let Some(hover) = get_user_symbol_hover_in_single_doc(&lines, symbol, Some(position)) {
+        return Some(hover);
+    }
+
+    // 2. If not defined locally, search in %include imported files
+    let mut visited = std::collections::HashSet::new();
+    find_user_symbol_hover_in_included_files(doc, symbol, &mut visited)
+}
+
+fn get_user_symbol_hover_in_single_doc(lines: &[&str], symbol: &str, position: Option<&Position>) -> Option<String> {
     // 1. Check extern declarations (e.g. `extern print`)
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
         if let Some(rest) = trimmed.strip_prefix("extern ") {
             let name = rest.trim();
             if name == symbol {
-                let doc_comment = collect_preceding_comments(&lines, i);
-                let mut out = format!("**Extern** `{}`", symbol);
+                let doc_comment = collect_preceding_comments(lines, i);
+                // let mut out = format!("**Extern** `{}`", symbol);
+                let mut out = format!("```\nextern {}\n```", symbol);
                 if !doc_comment.is_empty() {
                     out.push_str("\n\n");
                     out.push_str(&doc_comment);
@@ -1198,7 +1210,7 @@ fn get_user_symbol_hover(doc: &Document, symbol: &str, position: &Position) -> O
 
     // 2. Check local labels (starts with '.')
     if symbol.starts_with('.') {
-        let current_line = position.line as usize;
+        let current_line = position.map(|p| p.line as usize).unwrap_or(lines.len());
         let mut parent_start = 0;
         let mut parent_name = "unknown";
         for i in (0..=current_line.min(lines.len().saturating_sub(1))).rev() {
@@ -1229,8 +1241,8 @@ fn get_user_symbol_hover(doc: &Document, symbol: &str, position: &Position) -> O
             if let Some(rest) = trimmed.strip_suffix(':') {
                 let clean = rest.trim();
                 if clean == symbol {
-                    let doc_comment = collect_preceding_comments(&lines, line_num);
-                    let mut out = format!("**Label** `{}` (`{}`)", symbol, parent_name);
+                    let doc_comment = collect_preceding_comments(lines, line_num);
+                    let mut out = format!("```\n{}{}:\n```", parent_name, symbol);
                     if !doc_comment.is_empty() {
                         out.push_str("\n\n");
                         out.push_str(&doc_comment);
@@ -1251,8 +1263,8 @@ fn get_user_symbol_hover(doc: &Document, symbol: &str, position: &Position) -> O
                 .trim();
 
             if label_ident == symbol {
-                let doc_comment = collect_preceding_comments(&lines, i);
-                let mut out = format!("**Label** `{}`", symbol);
+                let doc_comment = collect_preceding_comments(lines, i);
+                let mut out = format!("```\n{}:\n````", symbol);
                 if !doc_comment.is_empty() {
                     out.push_str("\n\n");
                     out.push_str(&doc_comment);
@@ -1269,8 +1281,8 @@ fn get_user_symbol_hover(doc: &Document, symbol: &str, position: &Position) -> O
             let parts: Vec<&str> = trimmed.split_whitespace().collect();
             if parts.len() >= 3 && parts[1] == symbol {
                 let val = &trimmed[trimmed.find(parts[2]).unwrap_or(0)..];
-                let doc_comment = collect_preceding_comments(&lines, i);
-                let mut out = format!("**Constant** `{}` `{}`", symbol, val);
+                let doc_comment = collect_preceding_comments(lines, i);
+                let mut out = format!("```\n%define {} {}\n```", symbol, val);
                 if !doc_comment.is_empty() {
                     out.push_str("\n\n");
                     out.push_str(&doc_comment);
@@ -1289,13 +1301,13 @@ fn get_user_symbol_hover(doc: &Document, symbol: &str, position: &Position) -> O
 
         let parts: Vec<&str> = trimmed.split_whitespace().collect();
         if !parts.is_empty() && parts[0] == symbol {
-            let doc_comment = collect_preceding_comments(&lines, i);
+            let doc_comment = collect_preceding_comments(lines, i);
             let decl_rest = trimmed[parts[0].len()..].trim();
 
             let mut out = if decl_rest.starts_with('"') || decl_rest.starts_with('\'') {
-                format!("**Variable** `{}` string `{}`", symbol, decl_rest)
+                format!("```\n{} byte {}\n```", symbol, decl_rest)
             } else {
-                format!("**Variable** `{}` {}", symbol, decl_rest)
+                format!("```\n{} {}\n```", symbol, decl_rest)
             };
 
             if !doc_comment.is_empty() {
@@ -1303,6 +1315,51 @@ fn get_user_symbol_hover(doc: &Document, symbol: &str, position: &Position) -> O
                 out.push_str(&doc_comment);
             }
             return Some(out);
+        }
+    }
+
+    None
+}
+
+fn find_user_symbol_hover_in_included_files(
+    doc: &Document,
+    symbol: &str,
+    visited: &mut std::collections::HashSet<std::path::PathBuf>,
+) -> Option<String> {
+    for line in doc.text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("%include") {
+            let quote_char = if line.contains('"') {
+                Some('"')
+            } else if line.contains('\'') {
+                Some('\'')
+            } else {
+                None
+            };
+
+            if let Some(q) = quote_char {
+                if let Some(start_quote) = line.find(q) {
+                    if let Some(end_quote_offset) = line[start_quote + 1..].find(q) {
+                        let rel_path = &line[start_quote + 1..start_quote + 1 + end_quote_offset];
+                        if let Some(target_path) = resolve_relative_path(&doc.uri, rel_path) {
+                            if visited.insert(target_path.clone()) {
+                                if let Ok(content) = std::fs::read_to_string(&target_path) {
+                                    let inc_lines: Vec<&str> = content.lines().collect();
+                                    if let Some(hover) = get_user_symbol_hover_in_single_doc(&inc_lines, symbol, None) {
+                                        return Some(hover);
+                                    }
+                                    if let Ok(inc_uri) = Url::from_file_path(&target_path) {
+                                        let inc_doc = Document::new(inc_uri, 1, content);
+                                        if let Some(hover) = find_user_symbol_hover_in_included_files(&inc_doc, symbol, visited) {
+                                            return Some(hover);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -1653,5 +1710,35 @@ main:
         } else {
             panic!("expected markup");
         }
+    }
+
+    #[test]
+    fn test_hover_imported_symbol_from_include() {
+        let temp_dir = std::env::temp_dir();
+        let helper_file = temp_dir.join("lib_math_helper.e8085");
+        let helper_content = r#"
+; Multiplies two 8-bit numbers in B and C
+; Returns product in HL
+multiply_fast:
+    ret
+"#;
+        std::fs::write(&helper_file, helper_content).unwrap();
+
+        let main_file = temp_dir.join("main_calc.e8085");
+        let text = "%include \"lib_math_helper.e8085\"\n\nmain:\n    call multiply_fast\n    hlt\n".to_string();
+        let uri = Url::from_file_path(&main_file).unwrap();
+        let doc = Document::new(uri, 1, text);
+
+        // Hover over `multiply_fast` in main
+        let h_sym = get_hover(&doc, &Position { line: 3, character: 12 }).unwrap();
+        if let HoverContents::Markup(m) = h_sym.contents {
+            assert!(m.value.contains("**Label** `multiply_fast`"));
+            assert!(m.value.contains("Multiplies two 8-bit numbers in B and C"));
+            assert!(m.value.contains("Returns product in HL"));
+        } else {
+            panic!("expected markup with imported docstring");
+        }
+
+        let _ = std::fs::remove_file(helper_file);
     }
 }
