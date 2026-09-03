@@ -315,7 +315,6 @@ pub fn assemble_listing(src: &str) -> Result<(LoadImage, Vec<ListingRow>), AsmEr
 #[derive(Debug, Clone)]
 enum DVal {
     Num(u32),
-    Str(String),
     Ch(u8),
 }
 
@@ -746,9 +745,28 @@ impl<'a> Assembler<'a> {
     /// Resolve a define's value to a literal (chaining through earlier defines).
     fn define_value(&self, v: &Value, span: Span) -> Result<DVal, AsmError> {
         match v {
-            Value::Number(n) => Ok(DVal::Num(*n)),
-            Value::Str(s) => Ok(DVal::Str(s.clone())),
+            Value::Number(n) => {
+                if *n > 0xFF {
+                    return Err(AsmError::new(
+                        span,
+                        AsmErrorKind::ImmediateOutOfRange {
+                            value: *n,
+                            max: 0xFF,
+                        },
+                    ));
+                }
+                Ok(DVal::Num(*n))
+            }
             Value::Char(b) => Ok(DVal::Ch(*b)),
+            Value::Str(s) => {
+                if s.len() == 1 {
+                    Ok(DVal::Ch(s.as_bytes()[0]))
+                } else if s.is_empty() {
+                    Err(AsmError::new(span, AsmErrorKind::EmptyCharLiteral))
+                } else {
+                    Err(AsmError::new(span, AsmErrorKind::StringInText(s.clone())))
+                }
+            }
             Value::Ident(name) => self
                 .defines
                 .get(name)
@@ -827,12 +845,6 @@ impl<'a> Assembler<'a> {
             Value::Ident(name) => match self.defines.get(name) {
                 Some(DVal::Num(n)) => push_scalar(*n, size, span, out),
                 Some(DVal::Ch(b)) => push_scalar(*b as u32, size, span, out),
-                Some(DVal::Str(s)) => {
-                    for &b in s.as_bytes() {
-                        out.push(Emit::Byte(b));
-                    }
-                    Ok(())
-                }
                 // Not a define -> a symbol's address; only meaningful as a WORD.
                 None => match size {
                     Size::Word => {
@@ -885,36 +897,13 @@ impl<'a> Assembler<'a> {
         if let Some(sz) = self.sizes.get(name) {
             return Ok(*sz as u32);
         }
-        if let Some(DVal::Str(s)) = self.defines.get(name) {
-            return Ok(s.len() as u32);
+        if self.defines.contains_key(name) {
+            return Ok(1);
         }
         Err(AsmError::new(
             span,
             AsmErrorKind::UndefinedName(name.to_string()),
         ))
-    }
-
-    fn is_defined_in_program(&self, name: &str) -> bool {
-        if self.data_vars.iter().any(|v| v.name == name)
-            || self.bss_vars.iter().any(|v| v.name == name)
-        {
-            return true;
-        }
-        for seg in &self.program.segments {
-            if let Segment::Text(items) = seg {
-                for item in items {
-                    match item {
-                        TextItem::Label(l, _) | TextItem::GlobalLabel(l, _) => {
-                            if l == name {
-                                return true;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
-        false
     }
 
     // ── .text layout & operand resolution ───────────────────────────────────
@@ -962,16 +951,7 @@ impl<'a> Assembler<'a> {
                                 export_syms.push(name.clone());
                             }
                         }
-                        TextItem::ExternDecl(name, span) => {
-                            if self.is_defined_in_program(name) {
-                                return Err(AsmError::new(
-                                    *span,
-                                    AsmErrorKind::DuplicateName(format!(
-                                        "symbol '{name}' cannot be both declared extern and defined"
-                                    )),
-                                ));
-                            }
-                        }
+                        TextItem::ExternDecl(_name, _span) => {}
                         TextItem::Instr(ins) => {
                             // Length is value-independent, so encode with zero placeholders.
                             let zero_ops =
@@ -982,17 +962,6 @@ impl<'a> Assembler<'a> {
                         }
                     }
                 }
-            }
-        }
-
-        for ext in &self.program.externs {
-            if self.is_defined_in_program(ext) {
-                return Err(AsmError::new(
-                    Span::default(),
-                    AsmErrorKind::DuplicateName(format!(
-                        "symbol '{ext}' cannot be both declared extern and defined"
-                    )),
-                ));
             }
         }
 
@@ -1117,9 +1086,6 @@ impl<'a> Assembler<'a> {
                 match self.defines.get(name) {
                     Some(DVal::Num(n)) => Operand::Imm(*n),
                     Some(DVal::Ch(b)) => Operand::Imm(*b as u32),
-                    Some(DVal::Str(s)) => {
-                        return Err(AsmError::new(span, AsmErrorKind::StringInText(s.clone())));
-                    }
                     None => match symtab {
                         None => Operand::Imm(0),
                         Some(t) => {
@@ -1366,12 +1332,38 @@ mod tests {
                 .kind,
             AsmErrorKind::GlobalMainForbidden
         ));
+        // An extern declaration satisfied by a local definition is valid
+        assert!(assemble("extern func\nsegment .text\nfunc:\nhlt\nmain:\ncall func\nhlt\n").is_ok());
         assert!(matches!(
-            assemble("extern func\nsegment .text\nfunc:\nhlt\n")
+            assemble("%define BIG 0x100\nsegment .text\nmain:\nhlt\n")
                 .unwrap_err()
                 .kind,
-            AsmErrorKind::DuplicateName(_)
+            AsmErrorKind::ImmediateOutOfRange { .. }
         ));
+    }
+
+    #[test]
+    fn char_literals_and_escape_sequences_assemble() {
+        let img = assemble(
+            "%define NL '\\n'\n\
+             segment .data\n\
+             msg \"Hello\\n\\0\"\n\
+             ch BYTE 'A'\n\
+             segment .text\n\
+             main:\n\
+             mvi A, NL\n\
+             cpi ' '\n\
+             hlt\n",
+        )
+        .unwrap();
+
+        // NL = 0x0A -> mvi A, 0x0A = 3E 0A
+        // cpi ' ' = FE 20
+        // hlt = 76
+        // msg at 0x0040: 'H'(0x48), 'e'(0x65), 'l'(0x6C), 'l'(0x6C), 'o'(0x6F), '\n'(0x0A), '\0'(0x00) -> len 7
+        assert_eq!(&img.bytes[0x40..0x47], &[0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x0A, 0x00]);
+        // ch at 0x0047: 'A'(0x41)
+        assert_eq!(img.bytes[0x47], 0x41);
     }
 
     #[test]

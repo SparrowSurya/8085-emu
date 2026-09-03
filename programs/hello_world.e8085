@@ -34,6 +34,4 @@ send:
     mvi A, TERM_CMD_DISPLAY
     out TERM_CMD_PORT
 
-    ; End
-exit:
     hlt

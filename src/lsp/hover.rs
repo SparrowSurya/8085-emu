@@ -76,6 +76,27 @@ fn parse_numeric_literal(word: &str) -> Option<u32> {
         return None;
     }
 
+    if clean.starts_with('\'') && clean.ends_with('\'') && clean.len() >= 2 {
+        let inner = &clean[1..clean.len() - 1];
+        if inner.len() == 1 {
+            return Some(inner.as_bytes()[0] as u32);
+        } else if inner.starts_with('\\') {
+            match &inner[1..] {
+                "n" => return Some(b'\n' as u32),
+                "t" => return Some(b'\t' as u32),
+                "r" => return Some(b'\r' as u32),
+                "0" => return Some(0),
+                "\\" => return Some(b'\\' as u32),
+                "'" => return Some(b'\'' as u32),
+                "\"" => return Some(b'"' as u32),
+                hex if (hex.starts_with('x') || hex.starts_with('X')) && hex.len() == 3 => {
+                    return u32::from_str_radix(&hex[1..], 16).ok();
+                }
+                _ => {}
+            }
+        }
+    }
+
     if let Some(hex) = clean.strip_prefix("0x").or_else(|| clean.strip_prefix("0X")) {
         return u32::from_str_radix(hex, 16).ok();
     }
@@ -1761,6 +1782,33 @@ main:
         if let HoverContents::Markup(m) = h_const.contents {
             assert_eq!(m.value, "```\n%define LIMIT 42\n```");
             assert!(!m.value.contains("unrelated comment"));
+        } else {
+            panic!("expected markup");
+        }
+    }
+
+    #[test]
+    fn test_hover_char_literal_and_escapes() {
+        let uri = Url::parse("file:///char_test.e8085").unwrap();
+        let text = "segment .text\nmain:\n    mvi A, 'A'\n    cpi '\\n'\n    hlt\n".to_string();
+        let doc = Document::new(uri, 1, text);
+
+        // Hover over 'A'
+        let h_a = get_hover(&doc, &Position { line: 2, character: 12 }).unwrap();
+        if let HoverContents::Markup(m) = h_a.contents {
+            assert!(m.value.contains("Decimal:     65"));
+            assert!(m.value.contains("Hexadecimal: 0x41"));
+            assert!(m.value.contains("ASCII:       'A'"));
+        } else {
+            panic!("expected markup");
+        }
+
+        // Hover over '\n'
+        let h_nl = get_hover(&doc, &Position { line: 3, character: 10 }).unwrap();
+        if let HoverContents::Markup(m) = h_nl.contents {
+            assert!(m.value.contains("Decimal:     10"));
+            assert!(m.value.contains("Hexadecimal: 0xA"));
+            assert!(m.value.contains("ASCII:       '\\n'"));
         } else {
             panic!("expected markup");
         }

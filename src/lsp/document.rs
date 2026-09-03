@@ -86,6 +86,11 @@ impl Document {
             return None;
         }
 
+        // Check if cursor is on a character literal 'x' or '\n'
+        if let Some((ch_str, ch_range)) = self.get_char_literal_at_offset(offset) {
+            return Some((ch_str, ch_range));
+        }
+
         // Find boundary of identifier (letters, digits, underscore, dot, percent)
         fn is_ident_char(b: u8) -> bool {
             b.is_ascii_alphanumeric() || b == b'_' || b == b'.' || b == b'%'
@@ -112,6 +117,44 @@ impl Document {
         };
 
         Some((word, range))
+    }
+
+    fn get_char_literal_at_offset(&self, offset: usize) -> Option<(String, Range)> {
+        let bytes = self.text.as_bytes();
+        if bytes.is_empty() {
+            return None;
+        }
+        let pos = offset.min(bytes.len().saturating_sub(1));
+        // Search left for '\'' on the same line
+        let mut start = pos;
+        while start > 0 && bytes[start] != b'\'' && bytes[start] != b'\n' && pos - start < 10 {
+            start -= 1;
+        }
+        if bytes[start] != b'\'' {
+            return None;
+        }
+        // Search right for closing '\'' on the same line
+        let mut end = start + 1;
+        while end < bytes.len() && bytes[end] != b'\'' && bytes[end] != b'\n' && end - start < 10 {
+            if bytes[end] == b'\\' && end + 1 < bytes.len() {
+                end += 2;
+            } else {
+                end += 1;
+            }
+        }
+        if end < bytes.len() && bytes[end] == b'\'' {
+            let slice = &self.text[start..=end];
+            if slice.starts_with('\'') && slice.ends_with('\'') && slice.len() >= 3 {
+                let range = Range {
+                    start: self.offset_to_position(start),
+                    end: self.offset_to_position(end + 1),
+                };
+                if offset >= start && offset <= end + 1 {
+                    return Some((slice.to_string(), range));
+                }
+            }
+        }
+        None
     }
 }
 

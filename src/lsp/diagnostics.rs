@@ -803,4 +803,16 @@ mod tests {
         assert_eq!(rel.len(), 1);
         assert_eq!(rel[0].location.range.start.line, 1);
     }
+
+    #[test]
+    fn test_triangle_pattern_program_has_no_diagnostics() {
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let triangle_file = workspace.join("programs/triangle_pattern.e8085");
+        if let Ok(text) = std::fs::read_to_string(&triangle_file) {
+            let uri = Url::from_file_path(&triangle_file).unwrap();
+            let doc = Document::new(uri, 1, text);
+            let diags = compute_diagnostics(&doc);
+            assert_eq!(diags, vec![], "unexpected diagnostics: {diags:?}");
+        }
+    }
 }

@@ -131,8 +131,66 @@ impl Lexer {
         TokenKind::Ident(s)
     }
 
+    fn lex_escape(&mut self, start: Span) -> Result<char, AsmError> {
+        self.bump(); // consume '\'
+        match self.peek() {
+            None | Some('\n') => Err(AsmError::new(start, AsmErrorKind::UnterminatedString)),
+            Some('n') => {
+                self.bump();
+                Ok('\n')
+            }
+            Some('t') => {
+                self.bump();
+                Ok('\t')
+            }
+            Some('r') => {
+                self.bump();
+                Ok('\r')
+            }
+            Some('0') => {
+                self.bump();
+                Ok('\0')
+            }
+            Some('\\') => {
+                self.bump();
+                Ok('\\')
+            }
+            Some('\'') => {
+                self.bump();
+                Ok('\'')
+            }
+            Some('"') => {
+                self.bump();
+                Ok('"')
+            }
+            Some('x') | Some('X') => {
+                self.bump(); // consume 'x'
+                let h1 = self.peek().and_then(|c| c.to_digit(16)).ok_or_else(|| {
+                    AsmError::new(
+                        start,
+                        AsmErrorKind::MalformedNumber("\\x escape requires 2 hex digits".into()),
+                    )
+                })?;
+                self.bump();
+                let h2 = self.peek().and_then(|c| c.to_digit(16)).ok_or_else(|| {
+                    AsmError::new(
+                        start,
+                        AsmErrorKind::MalformedNumber("\\x escape requires 2 hex digits".into()),
+                    )
+                })?;
+                self.bump();
+                let byte = ((h1 << 4) | h2) as u8;
+                Ok(byte as char)
+            }
+            Some(other) => {
+                self.bump();
+                Ok(other)
+            }
+        }
+    }
+
     fn lex_string(&mut self, start: Span) -> Result<TokenKind, AsmError> {
-        self.bump(); // opening quote
+        self.bump(); // opening quote '"'
         let mut s = String::new();
         loop {
             match self.peek() {
@@ -143,6 +201,10 @@ impl Lexer {
                     self.bump(); // closing quote
                     return Ok(TokenKind::Str(s));
                 }
+                Some('\\') => {
+                    let esc = self.lex_escape(start)?;
+                    s.push(esc);
+                }
                 Some(c) => {
                     s.push(c);
                     self.bump();
@@ -152,33 +214,43 @@ impl Lexer {
     }
 
     fn lex_char(&mut self, start: Span) -> Result<TokenKind, AsmError> {
-        self.bump(); // opening quote
-        let mut s = String::new();
-        loop {
-            match self.peek() {
-                None | Some('\n') => {
-                    return Err(AsmError::new(start, AsmErrorKind::UnterminatedString));
+        self.bump(); // opening quote '\''
+        if self.peek() == Some('\'') {
+            self.bump(); // closing quote
+            return Err(AsmError::new(start, AsmErrorKind::EmptyCharLiteral));
+        }
+
+        let ch = match self.peek() {
+            None | Some('\n') => {
+                return Err(AsmError::new(start, AsmErrorKind::UnterminatedString));
+            }
+            Some('\\') => self.lex_escape(start)?,
+            Some(c) => {
+                self.bump();
+                c
+            }
+        };
+
+        if self.peek() == Some('\'') {
+            self.bump(); // closing quote
+            if (ch as u32) <= 0xFF {
+                Ok(TokenKind::Char(ch as u8))
+            } else {
+                Err(AsmError::new(start, AsmErrorKind::MultiCharLiteral))
+            }
+        } else {
+            // More characters before closing quote or newline/EOF
+            while let Some(c) = self.peek() {
+                if c == '\'' || c == '\n' {
+                    break;
                 }
-                Some('\'') => {
-                    self.bump(); // closing quote
-                    if s.is_empty() {
-                        return Err(AsmError::new(start, AsmErrorKind::EmptyCharLiteral));
-                    } else if s.len() == 1 {
-                        let c = s.chars().next().unwrap();
-                        if (c as u32) <= 0xFF {
-                            return Ok(TokenKind::Char(c as u8));
-                        } else {
-                            return Ok(TokenKind::Str(s));
-                        }
-                    } else {
-                        // Multi-character single-quoted string (e.g. for %include 'file.e8085')
-                        return Ok(TokenKind::Str(s));
-                    }
-                }
-                Some(c) => {
-                    s.push(c);
-                    self.bump();
-                }
+                self.bump();
+            }
+            if self.peek() == Some('\'') {
+                self.bump();
+                Err(AsmError::new(start, AsmErrorKind::MultiCharLiteral))
+            } else {
+                Err(AsmError::new(start, AsmErrorKind::UnterminatedString))
             }
         }
     }
@@ -262,13 +334,17 @@ mod tests {
     fn strings_chars_and_punctuation() {
         use TokenKind::*;
         assert_eq!(
-            kinds("mov A, 'x'  \"hi\" :"),
+            kinds("mov A, 'x'  \"hi\\n\" '\t' '\\'' '\\\\' '\\x41' :"),
             vec![
                 Ident("mov".into()),
                 Ident("A".into()),
                 Comma,
                 Char(b'x'),
-                Str("hi".into()),
+                Str("hi\n".into()),
+                Char(b'\t'),
+                Char(b'\''),
+                Char(b'\\'),
+                Char(0x41),
                 Colon,
                 Eof,
             ]
@@ -311,7 +387,7 @@ mod tests {
             AsmErrorKind::UnterminatedString
         );
         assert_eq!(lex("''").unwrap_err().kind, AsmErrorKind::EmptyCharLiteral);
-        assert_eq!(lex("'ab'").unwrap()[0].kind, TokenKind::Str("ab".into()));
+        assert_eq!(lex("'ab'").unwrap_err().kind, AsmErrorKind::MultiCharLiteral);
         assert!(matches!(
             lex("0x").unwrap_err().kind,
             AsmErrorKind::MalformedNumber(_)

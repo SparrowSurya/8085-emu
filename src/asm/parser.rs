@@ -207,7 +207,7 @@ impl Parser {
                     unreachable!()
                 }
             }
-            _ => return Err(self.unexpected("a quoted file path")),
+            _ => return Err(self.unexpected("a double-quoted file path")),
         };
         self.expect_newline()?;
         Ok(Include { path, span })
