@@ -1,13 +1,12 @@
-use std::path::Path;
-use tower_lsp::lsp_types::{GotoDefinitionResponse, Location, Position, Range, Url};
+use tower_lsp::lsp_types::{GotoDefinitionResponse, Location, LocationLink, Position, Range, Url};
 
-use super::document::Document;
+use super::document::{Document, resolve_relative_path};
 
 /// Resolves the definition location for a symbol or included file at the given cursor position.
 pub fn get_definition(doc: &Document, position: &Position) -> Option<GotoDefinitionResponse> {
     // 1. Check if the line is an %include directive and the cursor is on the include path
-    if let Some(loc) = get_include_definition(doc, position) {
-        return Some(GotoDefinitionResponse::Scalar(loc));
+    if let Some(link) = get_include_definition(doc, position) {
+        return Some(GotoDefinitionResponse::Link(vec![link]));
     }
 
     let (word, _) = doc.get_word_at_position(position)?;
@@ -32,28 +31,50 @@ pub fn get_definition(doc: &Document, position: &Position) -> Option<GotoDefinit
     None
 }
 
-fn get_include_definition(doc: &Document, position: &Position) -> Option<Location> {
+fn get_include_definition(doc: &Document, position: &Position) -> Option<LocationLink> {
     let line = doc.text.lines().nth(position.line as usize)?;
     let trimmed = line.trim();
 
     if trimmed.starts_with("%include") {
-        if let Some(start_quote) = line.find('"') {
-            if let Some(end_quote) = line[start_quote + 1..].find('"') {
-                let end_quote_idx = start_quote + 1 + end_quote;
-                let rel_path = &line[start_quote + 1..end_quote_idx];
+        let quote_char = if line.contains('"') {
+            Some('"')
+        } else if line.contains('\'') {
+            Some('\'')
+        } else {
+            None
+        }?;
 
-                let target_path = resolve_relative_path(&doc.uri, rel_path)?;
-                let target_uri = Url::from_file_path(target_path).ok()?;
+        let start_quote = line.find(quote_char)?;
+        let end_quote_offset = line[start_quote + 1..].find(quote_char)?;
+        let end_quote = start_quote + 1 + end_quote_offset;
 
-                return Some(Location {
-                    uri: target_uri,
-                    range: Range {
-                        start: Position { line: 0, character: 0 },
-                        end: Position { line: 0, character: 0 },
-                    },
-                });
-            }
-        }
+        let rel_path = &line[start_quote + 1..end_quote];
+
+        let target_path = resolve_relative_path(&doc.uri, rel_path)?;
+        let target_uri = Url::from_file_path(target_path).ok()?;
+
+        let origin_selection_range = Range {
+            start: Position {
+                line: position.line,
+                character: start_quote as u32,
+            },
+            end: Position {
+                line: position.line,
+                character: (end_quote + 1) as u32,
+            },
+        };
+
+        let target_range = Range {
+            start: Position { line: 0, character: 0 },
+            end: Position { line: 0, character: 0 },
+        };
+
+        return Some(LocationLink {
+            origin_selection_range: Some(origin_selection_range),
+            target_uri,
+            target_range,
+            target_selection_range: target_range,
+        });
     }
 
     None
@@ -212,28 +233,34 @@ fn is_reserved_keyword(word: &str) -> bool {
     )
 }
 
-fn resolve_relative_path(doc_uri: &Url, rel_path: &str) -> Option<std::path::PathBuf> {
-    if let Ok(doc_path) = doc_uri.to_file_path() {
-        if let Some(parent) = doc_path.parent() {
-            let candidate = parent.join(rel_path);
-            if candidate.exists() {
-                return Some(candidate);
-            }
-        }
-    }
-
-    // Try relative to workspace root (current directory)
-    let candidate = Path::new(rel_path);
-    if candidate.exists() {
-        return Some(candidate.to_path_buf());
-    }
-
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_goto_include_file_link() {
+        let temp_dir = std::env::temp_dir();
+        let target_file = temp_dir.join("lib_helper.e8085");
+        std::fs::write(&target_file, "helper:\n    ret\n").unwrap();
+
+        let source_file = temp_dir.join("main.e8085");
+        let text = "%include \"lib_helper.e8085\"\nmain:\n    call helper\n".to_string();
+        let uri = Url::from_file_path(&source_file).unwrap();
+        let doc = Document::new(uri, 1, text);
+
+        let def_res = get_definition(&doc, &Position { line: 0, character: 12 }).unwrap();
+        if let GotoDefinitionResponse::Link(links) = def_res {
+            assert_eq!(links.len(), 1);
+            let link = &links[0];
+            let origin = link.origin_selection_range.as_ref().unwrap();
+            assert_eq!(origin.start.character, 9);  // Opening quote "
+            assert_eq!(origin.end.character, 27);    // Closing quote "
+        } else {
+            panic!("expected Link with origin_selection_range");
+        }
+
+        let _ = std::fs::remove_file(target_file);
+    }
 
     #[test]
     fn test_goto_global_label_and_variable() {

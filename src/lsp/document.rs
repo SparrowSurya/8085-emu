@@ -159,6 +159,23 @@ impl DocumentStore {
     }
 }
 
+/// Resolves a relative file path against a document URI or current working directory.
+pub fn resolve_relative_path(doc_uri: &Url, rel_path: &str) -> Option<std::path::PathBuf> {
+    if let Ok(doc_path) = doc_uri.to_file_path() {
+        if let Some(parent) = doc_path.parent() {
+            let candidate = parent.join(rel_path);
+            if candidate.exists() {
+                return Some(candidate);
+            }
+        }
+    }
+    let candidate = std::path::PathBuf::from(rel_path);
+    if candidate.exists() {
+        return Some(candidate);
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

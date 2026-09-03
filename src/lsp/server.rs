@@ -48,7 +48,7 @@ impl LanguageServer for E8085LanguageServer {
                     work_done_progress_options: WorkDoneProgressOptions::default(),
                 })),
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
-                inlay_hint_provider: Some(OneOf::Left(true)),
+                inlay_hint_provider: None,
                 ..ServerCapabilities::default()
             },
             server_info: Some(ServerInfo {

@@ -3,7 +3,7 @@ use std::path::Path;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 
 use super::document::Document;
-use crate::asm::assemble_with_options;
+use crate::asm::{assemble_with_options, parse};
 
 /// Analyzes an `.e8085` source document and returns compiler error diagnostics.
 pub fn compute_diagnostics(doc: &Document) -> Vec<Diagnostic> {
@@ -17,8 +17,38 @@ pub fn compute_diagnostics(doc: &Document) -> Vec<Diagnostic> {
 
     let base_ref = base_dir.as_deref().unwrap_or_else(|| Path::new("."));
 
-    // Run assembler front-end in analysis mode
-    if let Err(err) = assemble_with_options(&doc.text, Some(base_ref), &HashMap::new()) {
+    // Collect all declared `extern <name>` symbols so references to external functions do not produce false errors
+    let mut extern_symbols = HashMap::new();
+    if let Ok(tokens) = crate::asm::lex(&doc.text) {
+        if let Ok(program) = parse(tokens) {
+            for ext in &program.externs {
+                extern_symbols.insert(ext.clone(), 0x8000);
+            }
+            for seg in &program.segments {
+                if let crate::asm::Segment::Text(items) = seg {
+                    for item in items {
+                        if let crate::asm::TextItem::ExternDecl(name, _) = item {
+                            extern_symbols.insert(name.clone(), 0x8000);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Also fallback scan lines for `extern <ident>`
+    for line in doc.text.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("extern ") {
+            let name = rest.trim();
+            if !name.is_empty() {
+                extern_symbols.insert(name.to_string(), 0x8000);
+            }
+        }
+    }
+
+    // Run assembler front-end in analysis mode with declared extern symbols
+    if let Err(err) = assemble_with_options(&doc.text, Some(base_ref), &extern_symbols) {
         let line = err.span.line.saturating_sub(1);
         let col = err.span.col.saturating_sub(1);
 
@@ -66,6 +96,27 @@ mod tests {
 
         let diags = compute_diagnostics(&doc);
         assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn test_extern_label_produces_no_diagnostic() {
+        let uri = Url::parse("file:///test.e8085").unwrap();
+        let text = "extern my_label\nsegment .text\nmain:\n    call my_label\n    hlt\n".to_string();
+        let doc = Document::new(uri, 1, text);
+
+        let diags = compute_diagnostics(&doc);
+        assert!(diags.is_empty(), "declared extern symbol should not produce diagnostic errors: {:?}", diags);
+    }
+
+    #[test]
+    fn test_undeclared_undefined_label_produces_diagnostic() {
+        let uri = Url::parse("file:///test.e8085").unwrap();
+        let text = "segment .text\nmain:\n    call undefined_label\n    hlt\n".to_string();
+        let doc = Document::new(uri, 1, text);
+
+        let diags = compute_diagnostics(&doc);
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("undefined name"));
     }
 
     #[test]

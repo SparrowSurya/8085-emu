@@ -1,9 +1,14 @@
-use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position};
+use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position, Range};
 
 use super::document::Document;
 
 /// Provides rich hover documentation for 8085 instructions, registers, directives, and symbols.
 pub fn get_hover(doc: &Document, position: &Position) -> Option<Hover> {
+    // 0. Check %include Directive & Module documentation
+    if let Some(hover) = get_include_hover(doc, position) {
+        return Some(hover);
+    }
+
     let (word, range) = doc.get_word_at_position(position)?;
     let upper_word = word.to_uppercase();
 
@@ -629,6 +634,91 @@ fn get_user_symbol_hover(doc: &Document, symbol: &str) -> Option<String> {
     None
 }
 
+fn get_include_hover(doc: &Document, position: &Position) -> Option<Hover> {
+    let line = doc.text.lines().nth(position.line as usize)?;
+    let trimmed = line.trim();
+
+    if trimmed.starts_with("%include") {
+        let quote_char = if line.contains('"') {
+            Some('"')
+        } else if line.contains('\'') {
+            Some('\'')
+        } else {
+            None
+        }?;
+
+        let start_quote = line.find(quote_char)?;
+        let end_quote_offset = line[start_quote + 1..].find(quote_char)?;
+        let end_quote = start_quote + 1 + end_quote_offset;
+
+        let rel_path = &line[start_quote + 1..end_quote];
+
+        let target_path = super::document::resolve_relative_path(&doc.uri, rel_path)?;
+        let module_doc = extract_file_module_doc(&target_path);
+
+        let mut val = format!(
+            "### Included Module `{}`\n- **Resolved Path**: `{}`\n",
+            rel_path,
+            target_path.display()
+        );
+        if let Some(doc_text) = module_doc {
+            if !doc_text.is_empty() {
+                val.push_str("\n---\n**Module Documentation**:\n");
+                val.push_str(&doc_text);
+            }
+        }
+
+        let range = Range {
+            start: Position {
+                line: position.line,
+                character: start_quote as u32,
+            },
+            end: Position {
+                line: position.line,
+                character: (end_quote + 1) as u32,
+            },
+        };
+
+        return Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: val,
+            }),
+            range: Some(range),
+        });
+    }
+
+    None
+}
+
+fn extract_file_module_doc(path: &std::path::Path) -> Option<String> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let mut comments = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if let Some(comment) = trimmed.strip_prefix(';') {
+            let clean = comment.trim();
+            if !clean.starts_with("====") && !clean.starts_with("----") {
+                comments.push(clean);
+            }
+        } else if trimmed.is_empty() {
+            if !comments.is_empty() {
+                // Keep collecting comments if there's a space within the doc block
+            }
+        } else {
+            // First non-comment, non-empty statement (e.g. %define, segment, instructions)
+            break;
+        }
+    }
+
+    if comments.is_empty() {
+        None
+    } else {
+        Some(comments.join("\n"))
+    }
+}
+
 fn collect_preceding_comments(lines: &[&str], target_line_idx: usize) -> String {
     let mut comments = Vec::new();
     let mut curr = target_line_idx;
@@ -656,6 +746,34 @@ fn collect_preceding_comments(lines: &[&str], target_line_idx: usize) -> String 
 mod tests {
     use super::*;
     use tower_lsp::lsp_types::Url;
+
+    #[test]
+    fn test_hover_include_module_doc() {
+        let temp_dir = std::env::temp_dir();
+        let target_file = temp_dir.join("test_terminal_doc.e8085");
+        let target_content = "; Module providing TerminalDevice I/O subroutines.\n; Supports print, input, and putch.\n\nsegment .text\nprint:\n    ret\n";
+        std::fs::write(&target_file, target_content).unwrap();
+
+        let source_file = temp_dir.join("main_hover.e8085");
+        let text = "%include \"test_terminal_doc.e8085\"\nmain:\n    hlt\n".to_string();
+        let uri = Url::from_file_path(&source_file).unwrap();
+        let doc = Document::new(uri, 1, text);
+
+        let h_inc = get_hover(&doc, &Position { line: 0, character: 12 }).unwrap();
+        if let HoverContents::Markup(m) = h_inc.contents {
+            assert!(m.value.contains("test_terminal_doc.e8085"));
+            assert!(m.value.contains("Module providing TerminalDevice I/O"));
+            assert!(m.value.contains("Supports print, input, and putch."));
+        } else {
+            panic!("expected markup");
+        }
+
+        let range = h_inc.range.unwrap();
+        assert_eq!(range.start.character, 9);
+        assert_eq!(range.end.character, 34);
+
+        let _ = std::fs::remove_file(target_file);
+    }
 
     #[test]
     fn test_hover_instruction_and_register() {
