@@ -18,6 +18,14 @@ pub fn get_completions(doc: &Document, position: &Position) -> Option<Completion
     let char_idx = (position.character as usize).min(line.len());
     let line_prefix = line[..char_idx].trim_start();
 
+    // 1. Check if typing path inside `%include "..."`
+    if let Some(include_items) = get_include_path_completions(doc, position, line, char_idx) {
+        return Some(CompletionResponse::List(CompletionList {
+            is_incomplete: false,
+            items: include_items,
+        }));
+    }
+
     let active_segment = get_active_segment(doc, position.line as usize);
     let mut items = Vec::new();
 
@@ -41,7 +49,9 @@ pub fn get_completions(doc: &Document, position: &Position) -> Option<Completion
             if line_prefix.starts_with('%') {
                 items.extend(get_data_directives());
             } else {
+                items.extend(get_data_directives());
                 items.extend(get_data_segment_completions());
+                items.extend(get_constant_and_len_completions(doc));
             }
         }
         Some(SegmentKind::Bss) => {
@@ -59,15 +69,79 @@ pub fn get_completions(doc: &Document, position: &Position) -> Option<Completion
     }))
 }
 
+fn get_include_path_completions(
+    doc: &Document,
+    _position: &Position,
+    line: &str,
+    char_idx: usize,
+) -> Option<Vec<CompletionItem>> {
+    let prefix = &line[..char_idx];
+    let trimmed = prefix.trim_start();
+    if !trimmed.starts_with("%include") {
+        return None;
+    }
+
+    let quote_pos = prefix.find('"').or_else(|| prefix.find('\''))?;
+    if char_idx <= quote_pos {
+        return None;
+    }
+
+    let raw_rel = &prefix[quote_pos + 1..char_idx];
+    let doc_path = doc.uri.to_file_path().ok()?;
+    let base_dir = doc_path.parent()?;
+
+    let (search_dir, typed_prefix) = if let Some(last_slash) = raw_rel.rfind('/') {
+        let sub = &raw_rel[..last_slash];
+        let pre = &raw_rel[last_slash + 1..];
+        (base_dir.join(sub), pre)
+    } else {
+        (base_dir.to_path_buf(), raw_rel)
+    };
+
+    let entries = std::fs::read_dir(&search_dir).ok()?;
+    let mut items = Vec::new();
+
+    for entry in entries.flatten() {
+        let file_name = entry.file_name().to_string_lossy().to_string();
+        if file_name.starts_with('.') && !typed_prefix.starts_with('.') {
+            continue;
+        }
+
+        if let Ok(file_type) = entry.file_type() {
+            if file_type.is_dir() {
+                items.push(CompletionItem {
+                    label: format!("{file_name}/"),
+                    kind: Some(CompletionItemKind::FOLDER),
+                    detail: Some("Folder".to_string()),
+                    insert_text: Some(format!("{file_name}/")),
+                    ..Default::default()
+                });
+            } else if file_type.is_file() {
+                if file_name.ends_with(".e8085") || file_name.ends_with(".inc") {
+                    items.push(CompletionItem {
+                        label: file_name.clone(),
+                        kind: Some(CompletionItemKind::FILE),
+                        detail: Some("8085 Assembly file".to_string()),
+                        insert_text: Some(file_name),
+                        ..Default::default()
+                    });
+                }
+            }
+        }
+    }
+
+    Some(items)
+}
+
 fn get_active_segment(doc: &Document, line_num: usize) -> Option<SegmentKind> {
     let mut current_segment = None;
     for (idx, line) in doc.text.lines().enumerate() {
         if idx > line_num {
             break;
         }
-        let trimmed = line.trim();
-        if trimmed.starts_with("segment ") {
-            let seg_name = trimmed.strip_prefix("segment ").unwrap().trim();
+        let code_line = line.split(';').next().unwrap_or("").trim();
+        if code_line.starts_with("segment ") {
+            let seg_name = code_line.strip_prefix("segment ").unwrap().trim();
             if seg_name.eq_ignore_ascii_case(".text") || seg_name.eq_ignore_ascii_case("text") {
                 current_segment = Some(SegmentKind::Text);
             } else if seg_name.eq_ignore_ascii_case(".data") || seg_name.eq_ignore_ascii_case("data") {
@@ -85,19 +159,19 @@ fn get_instruction_operand_completions(
     position: &Position,
     line_prefix: &str,
 ) -> Option<Vec<CompletionItem>> {
-    let trimmed = line_prefix.trim_start();
-    if trimmed.is_empty() {
+    let code_line = line_prefix.split(';').next().unwrap_or("").trim_start();
+    if code_line.is_empty() {
         return None;
     }
 
     // Split on whitespace or comma to detect mnemonic and operand position
-    let parts: Vec<&str> = trimmed.split_whitespace().collect();
+    let parts: Vec<&str> = code_line.split_whitespace().collect();
     if parts.is_empty() {
         return None;
     }
 
     let mnemonic = parts[0].to_uppercase();
-    let has_comma = trimmed.contains(',');
+    let has_comma = code_line.contains(',');
 
     match mnemonic.as_str() {
         // 1. Branch & Subroutine Call Target Labels
@@ -210,19 +284,19 @@ fn make_reg_item(name: &str, detail: &str) -> CompletionItem {
 
 fn get_label_completions(doc: &Document, position: &Position) -> Vec<CompletionItem> {
     let mut items = Vec::new();
-    let lines: Vec<&str> = doc.text.lines().collect();
+    let raw_lines: Vec<&str> = doc.text.lines().collect();
 
     // 1. Determine enclosing parent label scope for local labels
     let current_line = position.line as usize;
-    let mut parent_name: Option<&str> = None;
+    let mut parent_name: Option<String> = None;
     let mut parent_start = 0;
 
-    for i in (0..=current_line.min(lines.len().saturating_sub(1))).rev() {
-        let trimmed = lines[i].trim();
-        if let Some(rest) = trimmed.strip_suffix(':') {
+    for i in (0..=current_line.min(raw_lines.len().saturating_sub(1))).rev() {
+        let code_line = raw_lines[i].split(';').next().unwrap_or("").trim();
+        if let Some(rest) = code_line.strip_suffix(':') {
             let clean = rest.strip_prefix("global ").unwrap_or(rest).trim();
             if !clean.starts_with('.') && !clean.is_empty() {
-                parent_name = Some(clean);
+                parent_name = Some(clean.to_string());
                 parent_start = i;
                 break;
             }
@@ -230,10 +304,10 @@ fn get_label_completions(doc: &Document, position: &Position) -> Vec<CompletionI
     }
 
     // 2. Global Labels & Extern Declarations in current doc
-    for line in &lines {
-        let trimmed = line.trim();
+    for line in &raw_lines {
+        let code_line = line.split(';').next().unwrap_or("").trim();
 
-        if let Some(rest) = trimmed.strip_prefix("extern ") {
+        if let Some(rest) = code_line.strip_prefix("extern ") {
             let name = rest.trim();
             if !name.is_empty() {
                 items.push(CompletionItem {
@@ -245,7 +319,7 @@ fn get_label_completions(doc: &Document, position: &Position) -> Vec<CompletionI
             }
         }
 
-        if let Some(rest) = trimmed.strip_suffix(':') {
+        if let Some(rest) = code_line.strip_suffix(':') {
             let clean = rest.strip_prefix("global ").unwrap_or(rest).trim();
             if !clean.starts_with('.') && !clean.is_empty() {
                 items.push(CompletionItem {
@@ -260,9 +334,9 @@ fn get_label_completions(doc: &Document, position: &Position) -> Vec<CompletionI
 
     // 3. Local labels inside the current parent subroutine scope
     if parent_name.is_some() {
-        for line in lines[parent_start..].iter().skip(1) {
-            let trimmed = line.trim();
-            if let Some(rest) = trimmed.strip_suffix(':') {
+        for line in raw_lines[parent_start..].iter().skip(1) {
+            let code_line = line.split(';').next().unwrap_or("").trim();
+            if let Some(rest) = code_line.strip_suffix(':') {
                 let clean = rest.strip_prefix("global ").unwrap_or(rest).trim();
                 if clean.starts_with('.') {
                     items.push(CompletionItem {
@@ -280,18 +354,18 @@ fn get_label_completions(doc: &Document, position: &Position) -> Vec<CompletionI
     }
 
     // 4. Labels from %include imported files
-    for line in &lines {
-        let trimmed = line.trim();
-        if trimmed.starts_with("%include") {
-            if let Some(quote_char) = if trimmed.contains('"') { Some('"') } else if trimmed.contains('\'') { Some('\'') } else { None } {
-                if let Some(start_q) = line.find(quote_char) {
-                    if let Some(end_q) = line[start_q + 1..].find(quote_char) {
-                        let rel_path = &line[start_q + 1..start_q + 1 + end_q];
+    for line in &raw_lines {
+        let code_line = line.split(';').next().unwrap_or("").trim();
+        if code_line.starts_with("%include") {
+            if let Some(quote_char) = if code_line.contains('"') { Some('"') } else if code_line.contains('\'') { Some('\'') } else { None } {
+                if let Some(start_q) = code_line.find(quote_char) {
+                    if let Some(end_q) = code_line[start_q + 1..].find(quote_char) {
+                        let rel_path = &code_line[start_q + 1..start_q + 1 + end_q];
                         if let Some(target_path) = resolve_relative_path(&doc.uri, rel_path) {
                             if let Ok(content) = std::fs::read_to_string(target_path) {
                                 for inc_line in content.lines() {
-                                    let inc_trimmed = inc_line.trim();
-                                    if let Some(rest) = inc_trimmed.strip_suffix(':') {
+                                    let inc_code = inc_line.split(';').next().unwrap_or("").trim();
+                                    if let Some(rest) = inc_code.strip_suffix(':') {
                                         let clean = rest.strip_prefix("global ").unwrap_or(rest).trim();
                                         if !clean.starts_with('.') && !clean.is_empty() {
                                             items.push(CompletionItem {
@@ -318,15 +392,19 @@ fn get_memory_symbol_completions(doc: &Document) -> Vec<CompletionItem> {
     let mut items = Vec::new();
 
     for line in doc.text.lines() {
-        let trimmed = line.trim();
+        let code_line = line.split(';').next().unwrap_or("").trim();
+        if code_line.is_empty() {
+            continue;
+        }
+
+        let parts: Vec<&str> = code_line.split_whitespace().collect();
 
         // 1. Data & BSS Variables
-        let parts: Vec<&str> = trimmed.split_whitespace().collect();
         if !parts.is_empty()
             && !is_reserved_keyword(parts[0])
             && !parts[0].starts_with('%')
             && !parts[0].ends_with(':')
-            && (trimmed.contains('"') || trimmed.contains("BYTE") || trimmed.contains("WORD"))
+            && (code_line.contains('"') || code_line.contains("BYTE") || code_line.contains("WORD"))
         {
             items.push(CompletionItem {
                 label: parts[0].to_string(),
@@ -337,7 +415,7 @@ fn get_memory_symbol_completions(doc: &Document) -> Vec<CompletionItem> {
         }
 
         // 2. Constants (%define)
-        if trimmed.starts_with("%define") && parts.len() >= 2 {
+        if code_line.starts_with("%define") && parts.len() >= 2 {
             items.push(CompletionItem {
                 label: parts[1].to_string(),
                 kind: Some(CompletionItemKind::CONSTANT),
@@ -347,7 +425,7 @@ fn get_memory_symbol_completions(doc: &Document) -> Vec<CompletionItem> {
         }
 
         // 3. Global Labels
-        if let Some(rest) = trimmed.strip_suffix(':') {
+        if let Some(rest) = code_line.strip_suffix(':') {
             let clean = rest.strip_prefix("global ").unwrap_or(rest).trim();
             if !clean.starts_with('.') && !clean.is_empty() {
                 items.push(CompletionItem {
@@ -362,22 +440,22 @@ fn get_memory_symbol_completions(doc: &Document) -> Vec<CompletionItem> {
 
     // 4. Imported symbols from %include
     for line in doc.text.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("%include") {
-            if let Some(quote_char) = if trimmed.contains('"') { Some('"') } else if trimmed.contains('\'') { Some('\'') } else { None } {
-                if let Some(start_q) = line.find(quote_char) {
-                    if let Some(end_q) = line[start_q + 1..].find(quote_char) {
-                        let rel_path = &line[start_q + 1..start_q + 1 + end_q];
+        let code_line = line.split(';').next().unwrap_or("").trim();
+        if code_line.starts_with("%include") {
+            if let Some(quote_char) = if code_line.contains('"') { Some('"') } else if code_line.contains('\'') { Some('\'') } else { None } {
+                if let Some(start_q) = code_line.find(quote_char) {
+                    if let Some(end_q) = code_line[start_q + 1..].find(quote_char) {
+                        let rel_path = &code_line[start_q + 1..start_q + 1 + end_q];
                         if let Some(target_path) = resolve_relative_path(&doc.uri, rel_path) {
                             if let Ok(content) = std::fs::read_to_string(target_path) {
                                 for inc_line in content.lines() {
-                                    let inc_trimmed = inc_line.trim();
-                                    let parts: Vec<&str> = inc_trimmed.split_whitespace().collect();
+                                    let inc_code = inc_line.split(';').next().unwrap_or("").trim();
+                                    let parts: Vec<&str> = inc_code.split_whitespace().collect();
                                     if !parts.is_empty()
                                         && !is_reserved_keyword(parts[0])
                                         && !parts[0].starts_with('%')
                                         && !parts[0].ends_with(':')
-                                        && (inc_trimmed.contains('"') || inc_trimmed.contains("BYTE") || inc_trimmed.contains("WORD"))
+                                        && (inc_code.contains('"') || inc_code.contains("BYTE") || inc_code.contains("WORD"))
                                     {
                                         items.push(CompletionItem {
                                             label: parts[0].to_string(),
@@ -386,7 +464,7 @@ fn get_memory_symbol_completions(doc: &Document) -> Vec<CompletionItem> {
                                             ..Default::default()
                                         });
                                     }
-                                    if inc_trimmed.starts_with("%define") && parts.len() >= 2 {
+                                    if inc_code.starts_with("%define") && parts.len() >= 2 {
                                         items.push(CompletionItem {
                                             label: parts[1].to_string(),
                                             kind: Some(CompletionItemKind::CONSTANT),
@@ -410,10 +488,14 @@ fn get_constant_and_len_completions(doc: &Document) -> Vec<CompletionItem> {
     let mut items = Vec::new();
 
     for line in doc.text.lines() {
-        let trimmed = line.trim();
-        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        let code_line = line.split(';').next().unwrap_or("").trim();
+        if code_line.is_empty() {
+            continue;
+        }
 
-        if trimmed.starts_with("%define") && parts.len() >= 2 {
+        let parts: Vec<&str> = code_line.split_whitespace().collect();
+
+        if code_line.starts_with("%define") && parts.len() >= 2 {
             items.push(CompletionItem {
                 label: parts[1].to_string(),
                 kind: Some(CompletionItemKind::CONSTANT),
@@ -427,13 +509,13 @@ fn get_constant_and_len_completions(doc: &Document) -> Vec<CompletionItem> {
             && !is_reserved_keyword(parts[0])
             && !parts[0].starts_with('%')
             && !parts[0].ends_with(':')
-            && (trimmed.contains('"') || trimmed.contains("BYTE") || trimmed.contains("WORD"))
+            && (code_line.contains('"') || code_line.contains("BYTE") || code_line.contains("WORD"))
         {
             items.push(CompletionItem {
-                label: format!("%len({})", parts[0]),
+                label: format!("%len {}", parts[0]),
                 kind: Some(CompletionItemKind::FUNCTION),
                 detail: Some(format!("Byte length of {}", parts[0])),
-                insert_text: Some(format!("%len({})", parts[0])),
+                insert_text: Some(format!("%len {}", parts[0])),
                 ..Default::default()
             });
         }
@@ -506,7 +588,7 @@ fn get_data_directives() -> Vec<CompletionItem> {
         ),
         make_snippet_item(
             "%len",
-            "%len(${1:var_name})",
+            "%len ${1:var_name}",
             "Compute byte length of a symbol",
         ),
     ]
@@ -770,6 +852,85 @@ main:
             assert!(list.items.iter().any(|item| item.label == "SP"));
         } else {
             panic!("expected list of completions");
+        }
+    }
+
+    #[test]
+    fn test_immediate_and_address_operand_completions() {
+        let uri = Url::parse("file:///test.e8085").unwrap();
+        let text = r#"
+%define MAX_LIMIT 100
+
+segment .data
+; comment_var BYTE 5
+scores BYTE 10, 20
+
+segment .bss
+buffer BYTE 64
+
+segment .text
+main:
+    mvi A, 
+    adi 
+    lda 
+    lxi H, 
+    hlt
+"#.to_string();
+        let doc = Document::new(uri, 1, text);
+
+        // 1. mvi A, <cursor> -> constants
+        let res_mvi = get_completions(&doc, &Position { line: 12, character: 11 }).unwrap();
+        if let CompletionResponse::List(list) = res_mvi {
+            assert!(list.items.iter().any(|item| item.label == "MAX_LIMIT"));
+            assert!(list.items.iter().any(|item| item.label == "%len scores"));
+            // Comments must NOT be suggested as variables
+            assert!(!list.items.iter().any(|item| item.label.contains("comment_var")));
+        } else {
+            panic!("expected list");
+        }
+
+        // 2. adi <cursor> -> constants
+        let res_adi = get_completions(&doc, &Position { line: 13, character: 8 }).unwrap();
+        if let CompletionResponse::List(list) = res_adi {
+            assert!(list.items.iter().any(|item| item.label == "MAX_LIMIT"));
+        } else {
+            panic!("expected list");
+        }
+
+        // 3. lda <cursor> -> variables
+        let res_lda = get_completions(&doc, &Position { line: 14, character: 8 }).unwrap();
+        if let CompletionResponse::List(list) = res_lda {
+            assert!(list.items.iter().any(|item| item.label == "scores"));
+            assert!(list.items.iter().any(|item| item.label == "buffer"));
+            assert!(list.items.iter().any(|item| item.label == "MAX_LIMIT"));
+            assert!(!list.items.iter().any(|item| item.label.contains("comment_var")));
+        } else {
+            panic!("expected list");
+        }
+
+        // 4. lxi H, <cursor> -> variables & constants
+        let res_lxi = get_completions(&doc, &Position { line: 15, character: 11 }).unwrap();
+        if let CompletionResponse::List(list) = res_lxi {
+            assert!(list.items.iter().any(|item| item.label == "scores"));
+            assert!(list.items.iter().any(|item| item.label == "buffer"));
+            assert!(!list.items.iter().any(|item| item.label.contains("comment_var")));
+        } else {
+            panic!("expected list");
+        }
+    }
+
+    #[test]
+    fn test_data_segment_repeat_and_directives() {
+        let uri = Url::parse("file:///test.e8085").unwrap();
+        let text = "segment .data\n    arr BYTE 10 ".to_string();
+        let doc = Document::new(uri, 1, text);
+
+        let res = get_completions(&doc, &Position { line: 1, character: 17 }).unwrap();
+        if let CompletionResponse::List(list) = res {
+            assert!(list.items.iter().any(|item| item.label == "%repeat"));
+            assert!(list.items.iter().any(|item| item.label == "%len"));
+        } else {
+            panic!("expected list");
         }
     }
 }

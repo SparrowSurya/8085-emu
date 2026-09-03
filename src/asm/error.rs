@@ -115,6 +115,13 @@ pub enum AsmErrorKind {
     UndefinedName(String),
     /// Two labels or variables share a name.
     DuplicateName(String),
+    /// Two labels or variables share a name, with source position of the first definition.
+    DuplicateDefinition {
+        /// The duplicate name.
+        name: String,
+        /// Where the name was first defined.
+        first_defined: Span,
+    },
     /// A string-valued `%define` was used in a `.text` operand.
     StringInText(String),
     /// A value that must be a number (a `%repeat` count, `%len` argument, or a byte/word
@@ -134,6 +141,8 @@ pub enum AsmErrorKind {
     CircularInclude(String),
     /// Failed to read or process an `%include` file.
     IncludeError(String),
+    /// The `main` label cannot be declared `global`.
+    GlobalMainForbidden,
     /// Attempted to access a private symbol from another module.
     PrivateSymbolAccess {
         /// The referenced symbol.
@@ -177,6 +186,9 @@ impl fmt::Display for AsmErrorKind {
             TooManyOperands => write!(f, "too many operands (instructions take at most two)"),
             UndefinedName(s) => write!(f, "undefined name {s:?}"),
             DuplicateName(s) => write!(f, "duplicate definition of {s:?}"),
+            DuplicateDefinition { name, first_defined } => {
+                write!(f, "duplicate definition of '{name}' (first defined at {first_defined})")
+            }
             StringInText(s) => write!(f, "string constant {s:?} cannot be used in .text"),
             NotANumber(s) => write!(f, "{s} must evaluate to a number"),
             EmptyText => write!(f, ".text has no instructions"),
@@ -188,6 +200,7 @@ impl fmt::Display for AsmErrorKind {
             UnresolvedSymbol(s) => write!(f, "unresolved external symbol {s:?}"),
             CircularInclude(s) => write!(f, "circular include detected for {s}"),
             IncludeError(s) => write!(f, "include error: {s}"),
+            GlobalMainForbidden => write!(f, "main label cannot be declared global"),
             PrivateSymbolAccess { symbol, module } => {
                 write!(f, "symbol {symbol:?} is private to module {module:?}")
             }

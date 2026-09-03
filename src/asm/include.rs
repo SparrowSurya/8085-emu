@@ -79,6 +79,10 @@ fn resolve_program_includes(
         }
     }
 
+    let mut had_data = false;
+    let mut had_bss = false;
+    let mut had_text = false;
+
     // 2. Add current program's defines
     for d in &program.defines {
         if !merged_defines
@@ -92,20 +96,29 @@ fn resolve_program_includes(
     // 3. Add current program's segments
     for seg in &program.segments {
         match seg {
-            Segment::Data(defs) => merged_data.extend(defs.clone()),
-            Segment::Bss(decls) => merged_bss.extend(decls.clone()),
-            Segment::Text(items) => merged_text.extend(items.clone()),
+            Segment::Data(defs) => {
+                had_data = true;
+                merged_data.extend(defs.clone());
+            }
+            Segment::Bss(decls) => {
+                had_bss = true;
+                merged_bss.extend(decls.clone());
+            }
+            Segment::Text(items) => {
+                had_text = true;
+                merged_text.extend(items.clone());
+            }
         }
     }
 
     let mut segments = Vec::new();
-    if !merged_data.is_empty() {
+    if had_data || !merged_data.is_empty() {
         segments.push(Segment::Data(merged_data));
     }
-    if !merged_bss.is_empty() {
+    if had_bss || !merged_bss.is_empty() {
         segments.push(Segment::Bss(merged_bss));
     }
-    if !merged_text.is_empty() {
+    if had_text || !merged_text.is_empty() {
         segments.push(Segment::Text(merged_text));
     }
 

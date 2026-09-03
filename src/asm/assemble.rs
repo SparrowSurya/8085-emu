@@ -417,6 +417,7 @@ impl<'a> Assembler<'a> {
         let main_bss_size: u32 = self.bss_vars.iter().map(|v| v.size as u32).sum();
 
         let mut symtab: HashMap<String, u16> = self.external_symbols.clone();
+        let mut sym_spans: HashMap<String, Span> = HashMap::new();
         let mut export_names = Vec::new();
 
         let (
@@ -431,7 +432,7 @@ impl<'a> Assembler<'a> {
             entry,
         ) = if !self.linked_containers.is_empty() {
             let main_text_base = linked_text_end;
-            let raw_entry = self.layout_text(main_text_base, &mut symtab, &mut export_names)?;
+            let raw_entry = self.layout_text(main_text_base, &mut symtab, &mut sym_spans, &mut export_names)?;
 
             let mut taddr = main_text_base;
             let mut current_parent_label: Option<String> = None;
@@ -459,14 +460,14 @@ impl<'a> Assembler<'a> {
             let data_base = main_text_base.wrapping_add(main_text_size);
             let mut addr = data_base.wrapping_add(linked_data_size);
             for v in &self.data_vars {
-                insert_symbol(&mut symtab, &v.name, addr, v.span)?;
+                insert_symbol(&mut symtab, &mut sym_spans, &v.name, addr, v.span)?;
                 addr += v.size;
             }
             let total_data_size = linked_data_size + main_data_size as u16;
 
             let bss_base = addr;
             for v in &self.bss_vars {
-                insert_symbol(&mut symtab, &v.name, addr, v.span)?;
+                insert_symbol(&mut symtab, &mut sym_spans, &v.name, addr, v.span)?;
                 addr += v.size;
             }
             let total_bss_size = main_bss_size as u16;
@@ -500,16 +501,16 @@ impl<'a> Assembler<'a> {
 
             let mut addr = data_base as u16;
             for v in &self.data_vars {
-                insert_symbol(&mut symtab, &v.name, addr, v.span)?;
+                insert_symbol(&mut symtab, &mut sym_spans, &v.name, addr, v.span)?;
                 addr += v.size;
             }
             let mut addr = bss_base as u16;
             for v in &self.bss_vars {
-                insert_symbol(&mut symtab, &v.name, addr, v.span)?;
+                insert_symbol(&mut symtab, &mut sym_spans, &v.name, addr, v.span)?;
                 addr += v.size;
             }
 
-            let raw_entry = self.layout_text(text_base as u16, &mut symtab, &mut export_names)?;
+            let raw_entry = self.layout_text(text_base as u16, &mut symtab, &mut sym_spans, &mut export_names)?;
 
             let mut taddr = text_base as u16;
             let mut current_parent_label: Option<String> = None;
@@ -893,12 +894,36 @@ impl<'a> Assembler<'a> {
         ))
     }
 
+    fn is_defined_in_program(&self, name: &str) -> bool {
+        if self.data_vars.iter().any(|v| v.name == name)
+            || self.bss_vars.iter().any(|v| v.name == name)
+        {
+            return true;
+        }
+        for seg in &self.program.segments {
+            if let Segment::Text(items) = seg {
+                for item in items {
+                    match item {
+                        TextItem::Label(l, _) | TextItem::GlobalLabel(l, _) => {
+                            if l == name {
+                                return true;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        false
+    }
+
     // ── .text layout & operand resolution ───────────────────────────────────
 
     fn layout_text(
         &self,
         text_base: u16,
         symtab: &mut HashMap<String, u16>,
+        sym_spans: &mut HashMap<String, Span>,
         export_syms: &mut Vec<String>,
     ) -> Result<u16, AsmError> {
         let mut count = 0usize;
@@ -913,11 +938,11 @@ impl<'a> Assembler<'a> {
                     match item {
                         TextItem::Label(name, span) => {
                             current_parent_label = Some(name.clone());
-                            insert_symbol(symtab, name, addr, *span)?;
+                            insert_symbol(symtab, sym_spans, name, addr, *span)?;
                         }
                         TextItem::GlobalLabel(name, span) => {
                             current_parent_label = Some(name.clone());
-                            insert_symbol(symtab, name, addr, *span)?;
+                            insert_symbol(symtab, sym_spans, name, addr, *span)?;
                             if !export_syms.contains(name) {
                                 export_syms.push(name.clone());
                             }
@@ -930,14 +955,23 @@ impl<'a> Assembler<'a> {
                                 )
                             })?;
                             let scoped_name = format!("{parent}.{name}");
-                            insert_symbol(symtab, &scoped_name, addr, *span)?;
+                            insert_symbol(symtab, sym_spans, &scoped_name, addr, *span)?;
                         }
                         TextItem::GlobalDecl(name, _span) => {
                             if !export_syms.contains(name) {
                                 export_syms.push(name.clone());
                             }
                         }
-                        TextItem::ExternDecl(_name, _span) => {}
+                        TextItem::ExternDecl(name, span) => {
+                            if self.is_defined_in_program(name) {
+                                return Err(AsmError::new(
+                                    *span,
+                                    AsmErrorKind::DuplicateName(format!(
+                                        "symbol '{name}' cannot be both declared extern and defined"
+                                    )),
+                                ));
+                            }
+                        }
                         TextItem::Instr(ins) => {
                             // Length is value-independent, so encode with zero placeholders.
                             let zero_ops =
@@ -948,6 +982,17 @@ impl<'a> Assembler<'a> {
                         }
                     }
                 }
+            }
+        }
+
+        for ext in &self.program.externs {
+            if self.is_defined_in_program(ext) {
+                return Err(AsmError::new(
+                    Span::default(),
+                    AsmErrorKind::DuplicateName(format!(
+                        "symbol '{ext}' cannot be both declared extern and defined"
+                    )),
+                ));
             }
         }
 
@@ -975,7 +1020,7 @@ impl<'a> Assembler<'a> {
     ) -> Result<Vec<Operand>, AsmError> {
         ins.operands
             .iter()
-            .map(|p| self.operand(p, ins.span, None, parent_label))
+            .map(|p| self.operand(p, ins.span, None, parent_label, Some(&ins.mnemonic)))
             .collect()
     }
 
@@ -988,7 +1033,7 @@ impl<'a> Assembler<'a> {
     ) -> Result<Vec<Operand>, AsmError> {
         ins.operands
             .iter()
-            .map(|p| self.operand(p, ins.span, Some(symtab), parent_label))
+            .map(|p| self.operand(p, ins.span, Some(symtab), parent_label, Some(&ins.mnemonic)))
             .collect()
     }
 
@@ -1000,7 +1045,51 @@ impl<'a> Assembler<'a> {
         span: Span,
         symtab: Option<&HashMap<String, u16>>,
         parent_label: Option<&str>,
+        mnemonic: Option<&str>,
     ) -> Result<Operand, AsmError> {
+        if let Some(m) = mnemonic {
+            if is_branch_mnemonic(m) {
+                match p {
+                    POperand::Sym(name) => {
+                        if self.data_vars.iter().any(|v| v.name == *name)
+                            || self.bss_vars.iter().any(|v| v.name == *name)
+                        {
+                            return Err(AsmError::new(
+                                span,
+                                AsmErrorKind::BadOperand {
+                                    mnemonic: m.to_string(),
+                                    detail: format!(
+                                        "expected code label or subroutine, found data variable '{name}'"
+                                    ),
+                                },
+                            ));
+                        }
+                        if self.defines.contains_key(name) {
+                            return Err(AsmError::new(
+                                span,
+                                AsmErrorKind::BadOperand {
+                                    mnemonic: m.to_string(),
+                                    detail: format!(
+                                        "expected code label or subroutine, found defined constant '{name}'"
+                                    ),
+                                },
+                            ));
+                        }
+                    }
+                    POperand::Len(_) => {
+                        return Err(AsmError::new(
+                            span,
+                            AsmErrorKind::BadOperand {
+                                mnemonic: m.to_string(),
+                                detail: "%len cannot be used as target of call or jump".into(),
+                            },
+                        ));
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         Ok(match p {
             POperand::Reg8(r) => Operand::Reg8(*r),
             POperand::Reg16(r) => Operand::Reg16(*r),
@@ -1062,18 +1151,48 @@ impl<'a> Assembler<'a> {
     }
 }
 
+fn is_branch_mnemonic(m: &str) -> bool {
+    matches!(
+        m.to_uppercase().as_str(),
+        "CALL"
+            | "CZ"
+            | "CNZ"
+            | "CC"
+            | "CNC"
+            | "CP"
+            | "CM"
+            | "CPE"
+            | "CPO"
+            | "JMP"
+            | "JZ"
+            | "JNZ"
+            | "JC"
+            | "JNC"
+            | "JP"
+            | "JM"
+            | "JPE"
+            | "JPO"
+    )
+}
+
 fn insert_symbol(
     symtab: &mut HashMap<String, u16>,
+    sym_spans: &mut HashMap<String, Span>,
     name: &str,
     addr: u16,
     span: Span,
 ) -> Result<(), AsmError> {
-    if symtab.insert(name.to_string(), addr).is_some() {
+    if let Some(&first_defined) = sym_spans.get(name) {
         return Err(AsmError::new(
             span,
-            AsmErrorKind::DuplicateName(name.to_string()),
+            AsmErrorKind::DuplicateDefinition {
+                name: name.to_string(),
+                first_defined,
+            },
         ));
     }
+    symtab.insert(name.to_string(), addr);
+    sym_spans.insert(name.to_string(), span);
     Ok(())
 }
 
@@ -1223,7 +1342,7 @@ mod tests {
             assemble("segment .data\nx BYTE 1\nx BYTE 2\nsegment .text\nhlt\n")
                 .unwrap_err()
                 .kind,
-            AsmErrorKind::DuplicateName(_)
+            AsmErrorKind::DuplicateDefinition { .. } | AsmErrorKind::DuplicateName(_)
         ));
         assert!(matches!(
             assemble("segment .text\n").unwrap_err().kind,
@@ -1234,6 +1353,24 @@ mod tests {
                 .unwrap_err()
                 .kind,
             AsmErrorKind::ImmediateOutOfRange { .. }
+        ));
+        assert!(matches!(
+            assemble("segment .data\nvar BYTE 10\nsegment .text\nmain:\ncall var\nhlt\n")
+                .unwrap_err()
+                .kind,
+            AsmErrorKind::BadOperand { .. }
+        ));
+        assert!(matches!(
+            assemble("segment .text\nglobal main:\nhlt\n")
+                .unwrap_err()
+                .kind,
+            AsmErrorKind::GlobalMainForbidden
+        ));
+        assert!(matches!(
+            assemble("extern func\nsegment .text\nfunc:\nhlt\n")
+                .unwrap_err()
+                .kind,
+            AsmErrorKind::DuplicateName(_)
         ));
     }
 

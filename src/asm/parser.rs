@@ -137,7 +137,10 @@ impl Parser {
             } else if self.is_global_ahead() && !matches!(self.peek_at(2), TokenKind::Colon) {
                 let span = self.span();
                 self.bump(); // 'global'
-                let (name, _) = self.ident()?;
+                let (name, nspan) = self.ident()?;
+                if name.eq_ignore_ascii_case("main") {
+                    return Err(AsmError::new(nspan, AsmErrorKind::GlobalMainForbidden));
+                }
                 self.expect_newline()?;
                 globals.push(name);
                 let _ = span;
@@ -345,7 +348,10 @@ impl Parser {
             if self.is_global_ahead() {
                 let span = self.span();
                 self.bump(); // 'global'
-                let (name, _) = self.ident()?;
+                let (name, nspan) = self.ident()?;
+                if name.eq_ignore_ascii_case("main") {
+                    return Err(AsmError::new(nspan, AsmErrorKind::GlobalMainForbidden));
+                }
                 if matches!(self.peek(), TokenKind::Colon) {
                     self.bump(); // ':'
                     self.expect_newline()?;
