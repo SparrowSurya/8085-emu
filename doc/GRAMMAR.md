@@ -124,19 +124,19 @@ Imports definitions, global labels, and constants from an external source file:
 
 ## 4. Scoping & Modular Keywords
 
-### `global` / `export`
+### `global`
 Exports a label or subroutine globally so it can be referenced across modules and entered into the `.8085.bin` Export Symbol Table:
 
 ```assembly
 segment .text
 
-; Inline export declaration
+; Inline global declaration
 global print:
     mvi A, 0x00
     out 0x02
     ret
 
-; Or separate export declaration
+; Or separate global declaration
 global helper
 helper:
     ret

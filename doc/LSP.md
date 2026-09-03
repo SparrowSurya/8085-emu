@@ -12,7 +12,7 @@ It provides real-time semantic analysis, documentation hover tooltips, definitio
 Hovering over any token in an `.e8085` source file displays rich markdown documentation:
 - **8085 Instructions**: Shows opcode summary, byte size, hardware T-state execution cycles (e.g. `MOV` $\rightarrow$ `4T`, `CALL` $\rightarrow$ `18T`), flags affected (`Z, S, P, CY, AC`), and operation pseudocode.
 - **Registers**: Shows 8-bit registers (`A`, `B`, `C`, `D`, `E`, `H`, `L`, `M`), 16-bit register pairs (`BC`, `DE`, `HL`, `SP`), and Program Status Word (`PSW` flags `[S Z 0 AC 0 P 1 CY]`).
-- **Directives**: Documents `%define`, `%include`, `%repeat`, `%len`, `segment .text/.data/.bss`, `global`, `export`, `extern`, `BYTE`, and `WORD`.
+- **Directives**: Documents `%define`, `%include`, `%repeat`, `%len`, `segment .text/.data/.bss`, `global`, `extern`, `BYTE`, and `WORD`.
 - **User Symbols**: Displays symbol type (Global Subroutine, Local Code Label, Variable), memory segment, definition line number, and extracts doc-comments written with `;` above the definition.
 
 ### 1.2 Goto Definition (`textDocument/definition`)

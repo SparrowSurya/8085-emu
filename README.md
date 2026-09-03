@@ -217,7 +217,7 @@ emu8085/
   - Two-pass assembler supporting `%define`, `%repeat`, `%len`, segments (`.data`, `.bss`, `.text`), 4 number bases, and string literals.
   - Source inclusion with `%include "file.e8085"`.
   - Subroutine-scoped local labels (`.name:` and `jz .name`).
-  - Modular library export (`global` / `export`) with export symbol tables.
+  - Modular library export (`global`) with export symbol tables.
   - External referencing (`extern <symbol>`) with static binary linking (`-l <library.8085.bin>`) to produce standalone executables.
   - Entry-point verification: non-executable library binaries (without `main`) are rejected from execution.
 - **Language Server Protocol (`e8085-lsp`)**:

@@ -240,7 +240,6 @@ fn get_in_scope_symbols(doc: &Document) -> Vec<CompletionItem> {
         if let Some(rest) = trimmed.strip_suffix(':') {
             let label = rest
                 .strip_prefix("global ")
-                .or_else(|| rest.strip_prefix("export "))
                 .unwrap_or(rest)
                 .trim();
             if !label.is_empty() {
@@ -290,7 +289,7 @@ fn is_reserved_keyword(word: &str) -> bool {
         "JC" | "JNC" | "JP" | "JM" | "JPE" | "JPO" | "CALL" | "CZ" | "CNZ" | "CC" |
         "CNC" | "CP" | "CM" | "CPE" | "CPO" | "RET" | "RZ" | "RNZ" | "RC" | "RNC" |
         "RP" | "RM" | "RPE" | "RPO" | "RST" | "BYTE" | "WORD" | "SEGMENT" | "GLOBAL" |
-        "EXPORT" | "EXTERN"
+        "EXTERN"
     )
 }
 

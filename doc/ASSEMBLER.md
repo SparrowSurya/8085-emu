@@ -278,7 +278,7 @@ The header is immediately followed by the section payloads in order:
 
 The assembler supports modular development across multiple files and subroutines:
 
-### 1. `global` / `export` Keywords
+### 1. `global` Keyword
 Marks a label or variable as accessible from other modules and records it in the `.8085.bin` Export Symbol Table:
 ```assembly
 segment .text

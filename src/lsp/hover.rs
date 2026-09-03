@@ -571,8 +571,8 @@ fn get_directive_hover(directive: &str) -> Option<&'static str> {
              - `segment .data`: Initialized strings, arrays, and constants\n\
              - `segment .bss`: Uninitialized zero-allocated memory buffers",
         ),
-        "global" | "export" => Some(
-            "### Keyword `global name:` / `export name:`\n\
+        "global" => Some(
+            "### Keyword `global name:`\n\
              Exports a label or subroutine symbol to the `.symtab` symbol table so external programs can link it.",
         ),
         "extern" => Some(
@@ -596,13 +596,12 @@ fn get_user_symbol_hover(doc: &Document, symbol: &str) -> Option<String> {
         if let Some(rest) = trimmed.strip_suffix(':') {
             let label_ident = rest
                 .strip_prefix("global ")
-                .or_else(|| rest.strip_prefix("export "))
                 .unwrap_or(rest)
                 .trim();
 
             if label_ident == symbol {
                 let doc_comment = collect_preceding_comments(&lines, i);
-                let is_global = trimmed.starts_with("global") || trimmed.starts_with("export");
+                let is_global = trimmed.starts_with("global");
                 let scope = if is_global { "Global Subroutine" } else { "Local / Code Label" };
 
                 let mut out = format!("### `{}` ({})\n- **Defined at**: Line {}\n", symbol, scope, i + 1);

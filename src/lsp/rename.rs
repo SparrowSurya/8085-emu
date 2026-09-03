@@ -190,7 +190,6 @@ fn is_parent_label_def(trimmed_line: &str) -> bool {
     if let Some(rest) = trimmed_line.strip_suffix(':') {
         let label = rest
             .strip_prefix("global ")
-            .or_else(|| rest.strip_prefix("export "))
             .unwrap_or(rest)
             .trim();
         !label.starts_with('.') && !label.is_empty()
@@ -218,7 +217,7 @@ fn is_reserved_keyword(word: &str) -> bool {
         "JC" | "JNC" | "JP" | "JM" | "JPE" | "JPO" | "CALL" | "CZ" | "CNZ" | "CC" |
         "CNC" | "CP" | "CM" | "CPE" | "CPO" | "RET" | "RZ" | "RNZ" | "RC" | "RNC" |
         "RP" | "RM" | "RPE" | "RPO" | "RST" | "BYTE" | "WORD" | "SEGMENT" | "GLOBAL" |
-        "EXPORT" | "EXTERN"
+        "EXTERN"
     )
 }
 

@@ -55,7 +55,7 @@ const RESERVED: &[&str] = &[
     "BYTE", "WORD", // registers
     "A", "B", "C", "D", "E", "H", "L", "M", "BC", "DE", "HL", "SP", "PSW",
     // segment & directive words
-    "SEGMENT", "DATA", "BSS", "TEXT", "DEFINE", "REPEAT", "LEN", "GLOBAL", "EXPORT", "EXTERN",
+    "SEGMENT", "DATA", "BSS", "TEXT", "DEFINE", "REPEAT", "LEN", "GLOBAL", "EXTERN",
     "INCLUDE", // data transfer
     "MOV", "MVI", "LXI", "LDA", "STA", "LDAX", "STAX", "LHLD", "SHLD", "XCHG", "XTHL", "SPHL",
     "PCHL", // arithmetic

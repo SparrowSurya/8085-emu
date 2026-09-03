@@ -179,7 +179,6 @@ fn extract_label_name(trimmed_line: &str) -> Option<&str> {
     if let Some(rest) = trimmed_line.strip_suffix(':') {
         let clean = rest
             .strip_prefix("global ")
-            .or_else(|| rest.strip_prefix("export "))
             .unwrap_or(rest)
             .trim();
         if !clean.is_empty() {
@@ -209,7 +208,7 @@ fn is_reserved_keyword(word: &str) -> bool {
         "JC" | "JNC" | "JP" | "JM" | "JPE" | "JPO" | "CALL" | "CZ" | "CNZ" | "CC" |
         "CNC" | "CP" | "CM" | "CPE" | "CPO" | "RET" | "RZ" | "RNZ" | "RC" | "RNC" |
         "RP" | "RM" | "RPE" | "RPO" | "RST" | "BYTE" | "WORD" | "SEGMENT" | "GLOBAL" |
-        "EXPORT" | "EXTERN"
+        "EXTERN"
     )
 }
 

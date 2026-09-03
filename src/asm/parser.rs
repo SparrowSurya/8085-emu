@@ -136,7 +136,7 @@ impl Parser {
                 let _ = span;
             } else if self.is_global_ahead() && !matches!(self.peek_at(2), TokenKind::Colon) {
                 let span = self.span();
-                self.bump(); // 'global' / 'export'
+                self.bump(); // 'global'
                 let (name, _) = self.ident()?;
                 self.expect_newline()?;
                 globals.push(name);
@@ -185,7 +185,7 @@ impl Parser {
     }
 
     fn is_global_ahead(&self) -> bool {
-        matches!(self.peek(), TokenKind::Ident(s) if s.eq_ignore_ascii_case("global") || s.eq_ignore_ascii_case("export"))
+        matches!(self.peek(), TokenKind::Ident(s) if s.eq_ignore_ascii_case("global"))
     }
 
     fn is_segment_ahead(&self) -> bool {
@@ -341,10 +341,10 @@ impl Parser {
                 continue;
             }
 
-            // 2. `global / export NAME:` (inline) or `global / export NAME` (standalone)
+            // 2. `global NAME:` (inline) or `global NAME` (standalone)
             if self.is_global_ahead() {
                 let span = self.span();
-                self.bump(); // 'global' / 'export'
+                self.bump(); // 'global'
                 let (name, _) = self.ident()?;
                 if matches!(self.peek(), TokenKind::Colon) {
                     self.bump(); // ':'

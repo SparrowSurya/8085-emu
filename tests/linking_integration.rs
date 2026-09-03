@@ -1,4 +1,4 @@
-//! Integration tests for modular assembly: global/export, extern, local labels, %include,
+//! Integration tests for modular assembly: global, extern, local labels, %include,
 //! and -l binary library linking.
 
 use std::collections::HashMap;
@@ -67,7 +67,7 @@ global helper:
     mvi A, 0x42
     ret
 
-export add_one:
+global add_one:
     inr A
     ret
 

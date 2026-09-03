@@ -115,11 +115,11 @@ pub struct BssDecl {
 pub enum TextItem {
     /// A label definition on its own line: `name:`
     Label(String, Span),
-    /// An inline global/exported label: `global name:` or `export name:`
+    /// An inline global label: `global name:`
     GlobalLabel(String, Span),
     /// A local label scoped to parent label: `.name:`
     LocalLabel(String, Span),
-    /// Standalone `global name` or `export name` declaration.
+    /// Standalone `global name` declaration.
     GlobalDecl(String, Span),
     /// Standalone `extern name` declaration.
     ExternDecl(String, Span),

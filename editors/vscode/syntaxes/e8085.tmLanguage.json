@@ -75,7 +75,7 @@
     "modular_keywords": {
       "patterns": [
         {
-          "match": "^\\s*((?i:global|export))\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*(:)",
+          "match": "^\\s*((?i:global))\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*(:)",
           "captures": {
             "1": { "name": "keyword.control.storage.modifier.e8085" },
             "2": { "name": "entity.name.function.label.global.e8085" },
@@ -83,7 +83,7 @@
           }
         },
         {
-          "match": "^\\s*((?i:global|export))\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+          "match": "^\\s*((?i:global))\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
           "captures": {
             "1": { "name": "keyword.control.storage.modifier.e8085" },
             "2": { "name": "entity.name.function.label.global.e8085" }
@@ -98,7 +98,7 @@
         },
         {
           "name": "keyword.control.storage.modifier.e8085",
-          "match": "(?i)\\b(global|export|extern)\\b"
+          "match": "(?i)\\b(global|extern)\\b"
         }
       ]
     },
@@ -131,14 +131,14 @@
     "var_declarations": {
       "patterns": [
         {
-          "match": "^\\s*(?!(?i:MOV|MVI|LXI|LDA|STA|LDAX|STAX|LHLD|SHLD|XCHG|XTHL|SPHL|PCHL|ADD|ADI|ADC|ACI|SUB|SUI|SBB|SBI|INR|DCR|INX|DCX|DAD|DAA|ANA|ANI|XRA|XRI|ORA|ORI|CMP|CPI|CMA|CMC|STC|RLC|RRC|RAL|RAR|PUSH|POP|IN|OUT|NOP|HLT|EI|DI|RIM|SIM|JMP|JZ|JNZ|JC|JNC|JP|JM|JPE|JPO|CALL|CZ|CNZ|CC|CNC|CP|CM|CPE|CPO|RET|RZ|RNZ|RC|RNC|RP|RM|RPE|RPO|RST|DB|DW|DS|GLOBAL|EXPORT|EXTERN)\\b)([a-zA-Z_][a-zA-Z0-9_]*)\\s+((?i:BYTE|WORD))\\b",
+          "match": "^\\s*(?!(?i:MOV|MVI|LXI|LDA|STA|LDAX|STAX|LHLD|SHLD|XCHG|XTHL|SPHL|PCHL|ADD|ADI|ADC|ACI|SUB|SUI|SBB|SBI|INR|DCR|INX|DCX|DAD|DAA|ANA|ANI|XRA|XRI|ORA|ORI|CMP|CPI|CMA|CMC|STC|RLC|RRC|RAL|RAR|PUSH|POP|IN|OUT|NOP|HLT|EI|DI|RIM|SIM|JMP|JZ|JNZ|JC|JNC|JP|JM|JPE|JPO|CALL|CZ|CNZ|CC|CNC|CP|CM|CPE|CPO|RET|RZ|RNZ|RC|RNC|RP|RM|RPE|RPO|RST|DB|DW|DS|GLOBAL|EXTERN)\\b)([a-zA-Z_][a-zA-Z0-9_]*)\\s+((?i:BYTE|WORD))\\b",
           "captures": {
             "1": { "name": "variable.other.declaration.e8085" },
             "2": { "name": "storage.type.e8085" }
           }
         },
         {
-          "match": "^\\s*(?!(?i:MOV|MVI|LXI|LDA|STA|LDAX|STAX|LHLD|SHLD|XCHG|XTHL|SPHL|PCHL|ADD|ADI|ADC|ACI|SUB|SUI|SBB|SBI|INR|DCR|INX|DCX|DAD|DAA|ANA|ANI|XRA|XRI|ORA|ORI|CMP|CPI|CMA|CMC|STC|RLC|RRC|RAL|RAR|PUSH|POP|IN|OUT|NOP|HLT|EI|DI|RIM|SIM|JMP|JZ|JNZ|JC|JNC|JP|JM|JPE|JPO|CALL|CZ|CNZ|CC|CNC|CP|CM|CPE|CPO|RET|RZ|RNZ|RC|RNC|RP|RM|RPE|RPO|RST|DB|DW|DS|GLOBAL|EXPORT|EXTERN)\\b)([a-zA-Z_][a-zA-Z0-9_]*)\\s+(?=\"[^\"]*\"|'[^']*'|0[xXbBoO]|%repeat|[0-9])",
+          "match": "^\\s*(?!(?i:MOV|MVI|LXI|LDA|STA|LDAX|STAX|LHLD|SHLD|XCHG|XTHL|SPHL|PCHL|ADD|ADI|ADC|ACI|SUB|SUI|SBB|SBI|INR|DCR|INX|DCX|DAD|DAA|ANA|ANI|XRA|XRI|ORA|ORI|CMP|CPI|CMA|CMC|STC|RLC|RRC|RAL|RAR|PUSH|POP|IN|OUT|NOP|HLT|EI|DI|RIM|SIM|JMP|JZ|JNZ|JC|JNC|JP|JM|JPE|JPO|CALL|CZ|CNZ|CC|CNC|CP|CM|CPE|CPO|RET|RZ|RNZ|RC|RNC|RP|RM|RPE|RPO|RST|DB|DW|DS|GLOBAL|EXTERN)\\b)([a-zA-Z_][a-zA-Z0-9_]*)\\s+(?=\"[^\"]*\"|'[^']*'|0[xXbBoO]|%repeat|[0-9])",
           "captures": {
             "1": { "name": "variable.other.declaration.e8085" }
           }
