@@ -1,0 +1,6 @@
+{
+  "editor.tabSize": 4,
+  "files.associations": {
+    "*.e8085": "e8085"
+  }
+}

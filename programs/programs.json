@@ -44,7 +44,7 @@
       "file": "triangle_pattern.e8085",
       "type": "terminal",
       "stdin": "5",
-      "expect_output": "Enter the size of triangle: *****\n****\n***\n**\n*\n"
+      "expect_output": "Enter size of triangle: *****\n****\n***\n**\n*\n\n"
     },
     {
       "name": "greet",

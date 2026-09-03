@@ -24,6 +24,7 @@
 //! `Result<T, EmuError>` for error handling.
 
 pub mod asm;
+pub mod lsp;
 
 pub mod bus;
 pub mod device;

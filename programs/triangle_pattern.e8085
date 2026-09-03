@@ -11,12 +11,6 @@ segment .bss
     size BYTE 1
 
 segment .text
-    extern print
-    extern input
-    extern putch
-    extern endl
-
-    extern to_uint8
 
 main:
     ; Write prompt

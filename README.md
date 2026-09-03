@@ -73,7 +73,21 @@ cargo run --bin e8085 -- inspect greet.8085.bin --strings
 cargo run --bin e8085 -- strings greet.8085.bin -n 4
 ```
 
-### 5. Running Rust API Programmatic Examples
+### 5. Running the Language Server Protocol (`lsp`)
+Launch the LSP 3.17 server for real-time editor integration (hover tooltips, Goto Definition, auto-completion, rename refactoring, live error squiggles, and cycle inlay hints):
+
+```bash
+# Run standalone LSP binary over stdio
+cargo run --bin e8085-lsp
+
+# Or via unified CLI subcommand
+cargo run --bin e8085 -- lsp
+
+# Launch VS Code with full LSP development extension
+./open.sh
+```
+
+### 6. Running Rust API Programmatic Examples
 Run any of the Rust API examples demonstrating direct hardware and emulator interaction:
 
 ```bash
@@ -87,7 +101,7 @@ cargo run --example usb_dma_transfer
 cargo run --example keyboard_input_interrupt
 ```
 
-### 6. Running the Test Suite
+### 7. Running the Test Suite
 ```bash
 # Run all unit tests, integration tests, and doc-tests
 cargo test --all-targets && cargo test --doc
@@ -128,9 +142,23 @@ emu8085/
 │   ├── system_control_pins.rs  # READY, HOLD/HLDA, RESET_IN
 │   └── usb_dma_transfer.rs     # Bus mastering & DMA transfer
 │
+├── editors/            # Editor extensions & client integrations
+│   └── vscode/                 # Official VS Code extension (e8085-assembly)
+│
 ├── src/                # Core library and binaries
 │   ├── bin/
-│   │   └── e8085.rs            # Unified CLI binary (run, compile, disassemble)
+│   │   ├── e8085.rs            # Unified CLI binary (run, compile, disassemble, lsp)
+│   │   └── e8085-lsp.rs        # Dedicated standalone Language Server binary
+│   ├── lsp/                    # Language Server Protocol (LSP 3.17) Engine
+│   │   ├── document.rs         # In-memory document store & VFS
+│   │   ├── server.rs           # tower_lsp LanguageServer protocol handler
+│   │   ├── hover.rs            # Instruction database & Markdown hover provider
+│   │   ├── definition.rs       # Goto Definition (labels, local labels, data, %include)
+│   │   ├── completion.rs       # Context-aware auto-completion engine
+│   │   ├── rename.rs           # Workspace symbol refactoring
+│   │   ├── diagnostics.rs      # Real-time syntax error squiggles
+│   │   ├── hints.rs            # T-state hardware cycle inlay hints
+│   │   └── code_actions.rs     # Quick fixes & linter optimizations
 │   ├── asm/                    # Two-pass 8085 Assembler & Static Linker toolchain
 │   │   ├── assemble.rs         # Layout, vector table, static linking, and image generation
 │   │   ├── include.rs          # Source preprocessor for %include resolution
@@ -171,7 +199,8 @@ emu8085/
 │
 └── doc/                # Detailed technical documentation
     ├── ASSEMBLER.md            # In-depth Assembler pipeline, container format & static linker
-    └── GRAMMAR.md              # Complete .e8085 language reference & syntax
+    ├── GRAMMAR.md              # Complete .e8085 language reference & syntax
+    └── LSP.md                  # Language Server Protocol capabilities, configuration & editor setup
 ```
 
 ---
@@ -191,6 +220,9 @@ emu8085/
   - Modular library export (`global` / `export`) with export symbol tables.
   - External referencing (`extern <symbol>`) with static binary linking (`-l <library.8085.bin>`) to produce standalone executables.
   - Entry-point verification: non-executable library binaries (without `main`) are rejected from execution.
+- **Language Server Protocol (`e8085-lsp`)**:
+  - Asynchronous LSP 3.17 server (`tower-lsp` + `tokio`).
+  - Rich hover documentation, Goto Definition across files, contextual auto-completion, workspace symbol renaming, live compiler diagnostics, hardware cycle inlay hints, and quick fixes.
 - **Rich Peripheral Set**:
   - `TerminalDevice`: Two-port virtual terminal supporting line-buffered input and output.
   - `PrinterDevice`: Character stream capture device with callbacks.
@@ -202,5 +234,6 @@ emu8085/
 ## Detailed Documentation
 
 For comprehensive technical documentation, refer to:
+- [**doc/LSP.md**](doc/LSP.md) — Comprehensive guide to the Language Server Protocol (`e8085-lsp`), feature capabilities, and editor integrations (VS Code, Neovim, Helix).
 - [**doc/ASSEMBLER.md**](doc/ASSEMBLER.md) — Detailed guide to the assembler pipeline, container layout, static linking, and symbol resolution.
 - [**doc/GRAMMAR.md**](doc/GRAMMAR.md) — Full language reference for `.e8085` assembly programs, syntax rules, directives, registers, and instructions.

@@ -107,9 +107,13 @@ enum Commands {
         #[arg(short = 'n', long = "min-len", default_value = "3")]
         min_len: usize,
     },
+
+    /// Start the e8085 Language Server Protocol (LSP) over standard input/output
+    Lsp,
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let cli = Cli::parse();
 
     match cli.command {
@@ -131,6 +135,9 @@ fn main() {
             min_len,
         } => inspect_file(&file, all, header, segments, symbols, strings, min_len),
         Commands::Strings { file, min_len } => strings_file(&file, min_len),
+        Commands::Lsp => {
+            emu8085::lsp::start_lsp_server().await;
+        }
     }
 }
 

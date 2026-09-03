@@ -9,6 +9,15 @@
   "categories": [
     "Programming Languages"
   ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onLanguage:e8085"
+  ],
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
   "contributes": {
     "languages": [
       {
@@ -29,6 +38,25 @@
         "scopeName": "source.e8085",
         "path": "./syntaxes/e8085.tmLanguage.json"
       }
-    ]
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "8085 Assembly",
+      "properties": {
+        "e8085.serverPath": {
+          "type": "string",
+          "default": "e8085-lsp",
+          "description": "Path to the e8085-lsp binary (defaults to 'e8085-lsp' on PATH or cargo target/debug/e8085-lsp)"
+        }
+      }
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.75.0",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
   }
 }
