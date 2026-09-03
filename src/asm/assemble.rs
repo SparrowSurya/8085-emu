@@ -904,9 +904,11 @@ impl<'a> Assembler<'a> {
         let mut count = 0usize;
         let mut addr = text_base;
         let mut current_parent_label: Option<String> = None;
+        let mut has_text_segment = false;
 
         for seg in &self.program.segments {
             if let Segment::Text(items) = seg {
+                has_text_segment = true;
                 for item in items {
                     match item {
                         TextItem::Label(name, span) => {
@@ -955,6 +957,9 @@ impl<'a> Assembler<'a> {
             }
         }
 
+        if !has_text_segment {
+            return Err(AsmError::new(Span::default(), AsmErrorKind::MissingTextSegment));
+        }
         if count == 0 {
             return Err(AsmError::new(Span::default(), AsmErrorKind::EmptyText));
         }

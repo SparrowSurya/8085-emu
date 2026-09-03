@@ -1264,7 +1264,7 @@ fn get_user_symbol_hover_in_single_doc(lines: &[&str], symbol: &str, position: O
 
             if label_ident == symbol {
                 let doc_comment = collect_preceding_comments(lines, i);
-                let mut out = format!("```\n{}:\n````", symbol);
+                let mut out = format!("```\n{}:\n```", symbol);
                 if !doc_comment.is_empty() {
                     out.push_str("\n\n");
                     out.push_str(&doc_comment);
@@ -1458,9 +1458,8 @@ fn collect_preceding_comments(lines: &[&str], target_line_idx: usize) -> String 
             if !clean.starts_with("====") && !clean.starts_with("----") {
                 comments.push(clean);
             }
-        } else if line.is_empty() {
-            continue;
         } else {
+            // Non-comment line or blank line terminates doc comment collection
             break;
         }
     }
@@ -1581,7 +1580,7 @@ func_a:
         // Hover over .loop
         let h_local = get_hover(&doc, &Position { line: 7, character: 9 }).unwrap();
         if let HoverContents::Markup(m) = h_local.contents {
-            assert!(m.value.contains("**Label** `.loop` (`func_a`)"));
+            assert!(m.value.contains("func_a.loop:"));
             assert!(m.value.contains("Loop counter doc"));
         } else {
             panic!("expected markup");
@@ -1590,7 +1589,7 @@ func_a:
         // Hover over print_str
         let h_ext = get_hover(&doc, &Position { line: 8, character: 11 }).unwrap();
         if let HoverContents::Markup(m) = h_ext.contents {
-            assert!(m.value.contains("**Extern** `print_str`"));
+            assert!(m.value.contains("extern print_str"));
         } else {
             panic!("expected markup");
         }
@@ -1614,8 +1613,8 @@ main:
 
         let h_sym = get_hover(&doc, &Position { line: 8, character: 11 }).unwrap();
         if let HoverContents::Markup(m) = h_sym.contents {
-            assert!(m.value.contains("**Label** `multiply`"));
-            assert!(m.value.contains("Multiplies two numbers"));
+            assert!(m.value.contains("multiply:"));
+            assert!(m.value.contains("Multiplies two numbers in B and C"));
             assert!(m.value.contains("Result returned in A"));
         } else {
             panic!("expected markup");
@@ -1688,7 +1687,7 @@ main:
         // Hover over greeting variable
         let h_greet = get_hover(&doc, &Position { line: 5, character: 2 }).unwrap();
         if let HoverContents::Markup(m) = h_greet.contents {
-            assert!(m.value.contains("**Variable** `greeting` string `\"Hello, World!\\n\"`"));
+            assert!(m.value.contains("greeting byte \"Hello, World!\\n\""));
             assert!(m.value.contains("User greeting string"));
         } else {
             panic!("expected markup");
@@ -1697,7 +1696,7 @@ main:
         // Hover over input_buf BSS variable
         let h_buf = get_hover(&doc, &Position { line: 10, character: 2 }).unwrap();
         if let HoverContents::Markup(m) = h_buf.contents {
-            assert!(m.value.contains("**Variable** `input_buf` BYTE 64"));
+            assert!(m.value.contains("input_buf BYTE 64"));
             assert!(m.value.contains("Storage for input line"));
         } else {
             panic!("expected markup");
@@ -1706,7 +1705,7 @@ main:
         // Hover over BUFFER_CAP constant
         let h_const = get_hover(&doc, &Position { line: 15, character: 14 }).unwrap();
         if let HoverContents::Markup(m) = h_const.contents {
-            assert!(m.value.contains("**Constant** `BUFFER_CAP` `64`"));
+            assert!(m.value.contains("%define BUFFER_CAP 64"));
         } else {
             panic!("expected markup");
         }
@@ -1732,7 +1731,7 @@ multiply_fast:
         // Hover over `multiply_fast` in main
         let h_sym = get_hover(&doc, &Position { line: 3, character: 12 }).unwrap();
         if let HoverContents::Markup(m) = h_sym.contents {
-            assert!(m.value.contains("**Label** `multiply_fast`"));
+            assert!(m.value.contains("multiply_fast:"));
             assert!(m.value.contains("Multiplies two 8-bit numbers in B and C"));
             assert!(m.value.contains("Returns product in HL"));
         } else {
@@ -1740,5 +1739,30 @@ multiply_fast:
         }
 
         let _ = std::fs::remove_file(helper_file);
+    }
+
+    #[test]
+    fn test_hover_non_contiguous_comment_not_docstring() {
+        let uri = Url::parse("file:///test.e8085").unwrap();
+        let text = r#"
+; This is an unrelated comment separated by an empty line
+
+%define LIMIT 42
+
+segment .text
+main:
+    mvi A, LIMIT
+    hlt
+"#.to_string();
+        let doc = Document::new(uri, 1, text);
+
+        // Hover over LIMIT constant
+        let h_const = get_hover(&doc, &Position { line: 3, character: 10 }).unwrap();
+        if let HoverContents::Markup(m) = h_const.contents {
+            assert_eq!(m.value, "```\n%define LIMIT 42\n```");
+            assert!(!m.value.contains("unrelated comment"));
+        } else {
+            panic!("expected markup");
+        }
     }
 }

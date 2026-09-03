@@ -129,4 +129,15 @@ mod tests {
         assert_eq!(diags.len(), 1);
         assert_eq!(diags[0].range.start.line, 2);
     }
+
+    #[test]
+    fn test_empty_document_produces_missing_text_segment_diagnostic() {
+        let uri = Url::parse("file:///empty.e8085").unwrap();
+        let text = "".to_string();
+        let doc = Document::new(uri, 1, text);
+
+        let diags = compute_diagnostics(&doc);
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("missing text segment"));
+    }
 }

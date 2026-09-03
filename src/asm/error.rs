@@ -122,6 +122,8 @@ pub enum AsmErrorKind {
     NotANumber(String),
     /// A `.text` segment with no instructions (nothing for the entry point to run).
     EmptyText,
+    /// Missing `.text` segment entirely (e.g. empty file or only data/bss).
+    MissingTextSegment,
     /// The assembled image would not fit in the 64 KiB address space.
     ImageOverflow,
     /// A local label (e.g. `.loop:`) appeared before any parent label.
@@ -178,6 +180,7 @@ impl fmt::Display for AsmErrorKind {
             StringInText(s) => write!(f, "string constant {s:?} cannot be used in .text"),
             NotANumber(s) => write!(f, "{s} must evaluate to a number"),
             EmptyText => write!(f, ".text has no instructions"),
+            MissingTextSegment => write!(f, "missing text segment"),
             ImageOverflow => write!(f, "program does not fit in 64 KiB"),
             LocalLabelWithoutParent(s) => {
                 write!(f, "local label .{s} has no preceding parent label")
