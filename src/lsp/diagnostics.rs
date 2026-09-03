@@ -62,7 +62,11 @@ pub fn compute_diagnostics(doc: &Document) -> Vec<Diagnostic> {
             col + 1
         };
 
-        let related_information = if let crate::asm::AsmErrorKind::DuplicateDefinition { ref name, first_defined } = err.kind {
+        let related_information = if let crate::asm::AsmErrorKind::DuplicateDefinition {
+            ref name,
+            first_defined,
+        } = err.kind
+        {
             let f_line = first_defined.line.saturating_sub(1);
             let f_col = first_defined.col.saturating_sub(1);
             Some(vec![tower_lsp::lsp_types::DiagnosticRelatedInformation {
@@ -294,7 +298,10 @@ fn check_unused_labels(_doc: &Document, program: &Program, diagnostics: &mut Vec
                                 for op in &ins.operands {
                                     match op {
                                         crate::asm::ast::POperand::Sym(s) => {
-                                            if s == &scoped_name || s == &display_name || s == local_suffix {
+                                            if s == &scoped_name
+                                                || s == &display_name
+                                                || s == local_suffix
+                                            {
                                                 is_referenced = true;
                                                 break;
                                             }
@@ -471,7 +478,9 @@ fn check_cfg_and_halt(doc: &Document, program: &Program, diagnostics: &mut Vec<D
                     // HLT terminates control flow
                 } else if m == "JMP" {
                     // Unconditional jump: target only
-                    if let Some(target_idx) = resolve_instr_target(ins, &text_items, idx, &label_to_idx) {
+                    if let Some(target_idx) =
+                        resolve_instr_target(ins, &text_items, idx, &label_to_idx)
+                    {
                         if target_idx == idx {
                             // Infinite loop (jmp self) is a valid halt equivalent
                             reaches_halt = true;
@@ -486,7 +495,9 @@ fn check_cfg_and_halt(doc: &Document, program: &Program, diagnostics: &mut Vec<D
                     if idx + 1 < text_items.len() {
                         queue.push_back(idx + 1);
                     }
-                    if let Some(target_idx) = resolve_instr_target(ins, &text_items, idx, &label_to_idx) {
+                    if let Some(target_idx) =
+                        resolve_instr_target(ins, &text_items, idx, &label_to_idx)
+                    {
                         queue.push_back(target_idx);
                     }
                 } else if is_call_instruction(&m) {
@@ -494,7 +505,9 @@ fn check_cfg_and_halt(doc: &Document, program: &Program, diagnostics: &mut Vec<D
                     if idx + 1 < text_items.len() {
                         queue.push_back(idx + 1);
                     }
-                    if let Some(target_idx) = resolve_instr_target(ins, &text_items, idx, &label_to_idx) {
+                    if let Some(target_idx) =
+                        resolve_instr_target(ins, &text_items, idx, &label_to_idx)
+                    {
                         queue.push_back(target_idx);
                     }
                 } else {
@@ -564,7 +577,8 @@ fn check_cfg_and_halt(doc: &Document, program: &Program, diagnostics: &mut Vec<D
             code: None,
             code_description: None,
             source: Some("e8085".to_string()),
-            message: "program entry point 'main' does not terminate with an 'hlt' instruction".to_string(),
+            message: "program entry point 'main' does not terminate with an 'hlt' instruction"
+                .to_string(),
             related_information: None,
             tags: None,
             data: None,
@@ -615,10 +629,7 @@ fn resolve_instr_target(
 }
 
 fn is_conditional_jump(m: &str) -> bool {
-    matches!(
-        m,
-        "JZ" | "JNZ" | "JC" | "JNC" | "JP" | "JM" | "JPE" | "JPO"
-    )
+    matches!(m, "JZ" | "JNZ" | "JC" | "JNC" | "JP" | "JM" | "JPE" | "JPO")
 }
 
 fn is_call_instruction(m: &str) -> bool {
@@ -693,17 +704,26 @@ mod tests {
         let doc = Document::new(uri, 1, text);
 
         let diags = compute_diagnostics(&doc);
-        assert!(diags.is_empty(), "clean doc should have no diagnostics: {:?}", diags);
+        assert!(
+            diags.is_empty(),
+            "clean doc should have no diagnostics: {:?}",
+            diags
+        );
     }
 
     #[test]
     fn test_extern_label_produces_no_diagnostic() {
         let uri = Url::parse("file:///test.e8085").unwrap();
-        let text = "extern my_label\nsegment .text\nmain:\n    call my_label\n    hlt\n".to_string();
+        let text =
+            "extern my_label\nsegment .text\nmain:\n    call my_label\n    hlt\n".to_string();
         let doc = Document::new(uri, 1, text);
 
         let diags = compute_diagnostics(&doc);
-        assert!(diags.is_empty(), "declared extern symbol should not produce diagnostic errors: {:?}", diags);
+        assert!(
+            diags.is_empty(),
+            "declared extern symbol should not produce diagnostic errors: {:?}",
+            diags
+        );
     }
 
     #[test]
@@ -756,7 +776,10 @@ mod tests {
         let doc = Document::new(uri, 1, text);
 
         let diags = compute_diagnostics(&doc);
-        assert!(diags.iter().any(|d| d.message.contains("does not terminate with an 'hlt' instruction")));
+        assert!(diags.iter().any(|d| {
+            d.message
+                .contains("does not terminate with an 'hlt' instruction")
+        }));
     }
 
     #[test]
@@ -776,7 +799,10 @@ mod tests {
         let doc = Document::new(uri, 1, text);
 
         let diags = compute_diagnostics(&doc);
-        assert!(diags.iter().any(|d| d.message.contains("variable 'unused_buf' is declared but never used")));
+        assert!(diags.iter().any(|d| {
+            d.message
+                .contains("variable 'unused_buf' is declared but never used")
+        }));
     }
 
     #[test]
@@ -786,18 +812,26 @@ mod tests {
         let doc = Document::new(uri, 1, text);
 
         let diags = compute_diagnostics(&doc);
-        assert!(diags.iter().any(|d| d.message.contains("label '.unused_loop' is defined but never used")));
+        assert!(diags.iter().any(|d| {
+            d.message
+                .contains("label '.unused_loop' is defined but never used")
+        }));
     }
 
     #[test]
     fn test_duplicate_definition_reports_first_defined_location() {
         let uri = Url::parse("file:///dup.e8085").unwrap();
-        let text = "segment .data\nmy_var BYTE 1\nmy_var BYTE 2\nsegment .text\nmain:\n    hlt\n".to_string();
+        let text = "segment .data\nmy_var BYTE 1\nmy_var BYTE 2\nsegment .text\nmain:\n    hlt\n"
+            .to_string();
         let doc = Document::new(uri, 1, text);
 
         let diags = compute_diagnostics(&doc);
         assert_eq!(diags.len(), 1);
-        assert!(diags[0].message.contains("duplicate definition of 'my_var' (first defined at 2:1)"));
+        assert!(
+            diags[0]
+                .message
+                .contains("duplicate definition of 'my_var' (first defined at 2:1)")
+        );
         assert!(diags[0].related_information.is_some());
         let rel = diags[0].related_information.as_ref().unwrap();
         assert_eq!(rel.len(), 1);

@@ -1,7 +1,5 @@
 use std::collections::HashMap;
-use tower_lsp::lsp_types::{
-    Position, PrepareRenameResponse, Range, TextEdit, WorkspaceEdit,
-};
+use tower_lsp::lsp_types::{Position, PrepareRenameResponse, Range, TextEdit, WorkspaceEdit};
 
 use super::document::Document;
 
@@ -33,7 +31,9 @@ pub fn rename(doc: &Document, position: &Position, new_name: &str) -> Option<Wor
 
     if old_name.starts_with('.') {
         // Scoped local label renaming
-        edits.extend(collect_local_label_edits(doc, position, &old_name, new_name));
+        edits.extend(collect_local_label_edits(
+            doc, position, &old_name, new_name,
+        ));
     } else {
         // Global / File-level symbol renaming
         edits.extend(collect_global_symbol_edits(doc, &old_name, new_name));
@@ -188,10 +188,7 @@ fn is_valid_identifier(name: &str) -> bool {
 
 fn is_parent_label_def(trimmed_line: &str) -> bool {
     if let Some(rest) = trimmed_line.strip_suffix(':') {
-        let label = rest
-            .strip_prefix("global ")
-            .unwrap_or(rest)
-            .trim();
+        let label = rest.strip_prefix("global ").unwrap_or(rest).trim();
         !label.starts_with('.') && !label.is_empty()
     } else {
         false
@@ -208,16 +205,91 @@ fn is_register(word: &str) -> bool {
 fn is_reserved_keyword(word: &str) -> bool {
     matches!(
         word.to_uppercase().as_str(),
-        "MOV" | "MVI" | "LXI" | "LDA" | "STA" | "LHLD" | "SHLD" | "LDAX" | "STAX" |
-        "XCHG" | "XTHL" | "SPHL" | "PCHL" | "ADD" | "ADI" | "ADC" | "ACI" | "SUB" |
-        "SUI" | "SBB" | "SBI" | "INR" | "DCR" | "INX" | "DCX" | "DAD" | "DAA" |
-        "ANA" | "ANI" | "XRA" | "XRI" | "ORA" | "ORI" | "CMP" | "CPI" | "CMA" |
-        "CMC" | "STC" | "RLC" | "RRC" | "RAL" | "RAR" | "PUSH" | "POP" | "IN" |
-        "OUT" | "NOP" | "HLT" | "EI" | "DI" | "RIM" | "SIM" | "JMP" | "JZ" | "JNZ" |
-        "JC" | "JNC" | "JP" | "JM" | "JPE" | "JPO" | "CALL" | "CZ" | "CNZ" | "CC" |
-        "CNC" | "CP" | "CM" | "CPE" | "CPO" | "RET" | "RZ" | "RNZ" | "RC" | "RNC" |
-        "RP" | "RM" | "RPE" | "RPO" | "RST" | "BYTE" | "WORD" | "SEGMENT" | "GLOBAL" |
-        "EXTERN"
+        "MOV"
+            | "MVI"
+            | "LXI"
+            | "LDA"
+            | "STA"
+            | "LHLD"
+            | "SHLD"
+            | "LDAX"
+            | "STAX"
+            | "XCHG"
+            | "XTHL"
+            | "SPHL"
+            | "PCHL"
+            | "ADD"
+            | "ADI"
+            | "ADC"
+            | "ACI"
+            | "SUB"
+            | "SUI"
+            | "SBB"
+            | "SBI"
+            | "INR"
+            | "DCR"
+            | "INX"
+            | "DCX"
+            | "DAD"
+            | "DAA"
+            | "ANA"
+            | "ANI"
+            | "XRA"
+            | "XRI"
+            | "ORA"
+            | "ORI"
+            | "CMP"
+            | "CPI"
+            | "CMA"
+            | "CMC"
+            | "STC"
+            | "RLC"
+            | "RRC"
+            | "RAL"
+            | "RAR"
+            | "PUSH"
+            | "POP"
+            | "IN"
+            | "OUT"
+            | "NOP"
+            | "HLT"
+            | "EI"
+            | "DI"
+            | "RIM"
+            | "SIM"
+            | "JMP"
+            | "JZ"
+            | "JNZ"
+            | "JC"
+            | "JNC"
+            | "JP"
+            | "JM"
+            | "JPE"
+            | "JPO"
+            | "CALL"
+            | "CZ"
+            | "CNZ"
+            | "CC"
+            | "CNC"
+            | "CP"
+            | "CM"
+            | "CPE"
+            | "CPO"
+            | "RET"
+            | "RZ"
+            | "RNZ"
+            | "RC"
+            | "RNC"
+            | "RP"
+            | "RM"
+            | "RPE"
+            | "RPO"
+            | "RST"
+            | "BYTE"
+            | "WORD"
+            | "SEGMENT"
+            | "GLOBAL"
+            | "EXTERN"
     )
 }
 
@@ -236,10 +308,19 @@ main:
 
 compute:
     ret
-".to_string();
+"
+        .to_string();
         let doc = Document::new(uri.clone(), 1, text);
 
-        let edit = rename(&doc, &Position { line: 1, character: 11 }, "calculate").unwrap();
+        let edit = rename(
+            &doc,
+            &Position {
+                line: 1,
+                character: 11,
+            },
+            "calculate",
+        )
+        .unwrap();
         let changes = edit.changes.unwrap();
         let file_edits = changes.get(&uri).unwrap();
 
@@ -263,11 +344,20 @@ func_b:
     dcr B
     jnz .loop
     ret
-".to_string();
+"
+        .to_string();
         let doc = Document::new(uri.clone(), 1, text);
 
         // Rename .loop in func_b (line 9: "    jnz .loop")
-        let edit = rename(&doc, &Position { line: 9, character: 9 }, ".repeat").unwrap();
+        let edit = rename(
+            &doc,
+            &Position {
+                line: 9,
+                character: 9,
+            },
+            ".repeat",
+        )
+        .unwrap();
         let changes = edit.changes.unwrap();
         let file_edits = changes.get(&uri).unwrap();
 

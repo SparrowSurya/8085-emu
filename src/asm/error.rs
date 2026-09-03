@@ -186,8 +186,14 @@ impl fmt::Display for AsmErrorKind {
             TooManyOperands => write!(f, "too many operands (instructions take at most two)"),
             UndefinedName(s) => write!(f, "undefined name {s:?}"),
             DuplicateName(s) => write!(f, "duplicate definition of {s:?}"),
-            DuplicateDefinition { name, first_defined } => {
-                write!(f, "duplicate definition of '{name}' (first defined at {first_defined})")
+            DuplicateDefinition {
+                name,
+                first_defined,
+            } => {
+                write!(
+                    f,
+                    "duplicate definition of '{name}' (first defined at {first_defined})"
+                )
             }
             StringInText(s) => write!(f, "string constant {s:?} cannot be used in .text"),
             NotANumber(s) => write!(f, "{s} must evaluate to a number"),

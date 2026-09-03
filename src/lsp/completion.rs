@@ -32,7 +32,9 @@ pub fn get_completions(doc: &Document, position: &Position) -> Option<Completion
     match active_segment {
         Some(SegmentKind::Text) => {
             // Check if cursor is inside an instruction operand context
-            if let Some(operand_items) = get_instruction_operand_completions(doc, position, line_prefix) {
+            if let Some(operand_items) =
+                get_instruction_operand_completions(doc, position, line_prefix)
+            {
                 items.extend(operand_items);
             } else {
                 // At instruction position (start of line / indentation)
@@ -144,9 +146,12 @@ fn get_active_segment(doc: &Document, line_num: usize) -> Option<SegmentKind> {
             let seg_name = code_line.strip_prefix("segment ").unwrap().trim();
             if seg_name.eq_ignore_ascii_case(".text") || seg_name.eq_ignore_ascii_case("text") {
                 current_segment = Some(SegmentKind::Text);
-            } else if seg_name.eq_ignore_ascii_case(".data") || seg_name.eq_ignore_ascii_case("data") {
+            } else if seg_name.eq_ignore_ascii_case(".data")
+                || seg_name.eq_ignore_ascii_case("data")
+            {
                 current_segment = Some(SegmentKind::Data);
-            } else if seg_name.eq_ignore_ascii_case(".bss") || seg_name.eq_ignore_ascii_case("bss") {
+            } else if seg_name.eq_ignore_ascii_case(".bss") || seg_name.eq_ignore_ascii_case("bss")
+            {
                 current_segment = Some(SegmentKind::Bss);
             }
         }
@@ -357,7 +362,13 @@ fn get_label_completions(doc: &Document, position: &Position) -> Vec<CompletionI
     for line in &raw_lines {
         let code_line = line.split(';').next().unwrap_or("").trim();
         if code_line.starts_with("%include") {
-            if let Some(quote_char) = if code_line.contains('"') { Some('"') } else if code_line.contains('\'') { Some('\'') } else { None } {
+            if let Some(quote_char) = if code_line.contains('"') {
+                Some('"')
+            } else if code_line.contains('\'') {
+                Some('\'')
+            } else {
+                None
+            } {
                 if let Some(start_q) = code_line.find(quote_char) {
                     if let Some(end_q) = code_line[start_q + 1..].find(quote_char) {
                         let rel_path = &code_line[start_q + 1..start_q + 1 + end_q];
@@ -366,7 +377,8 @@ fn get_label_completions(doc: &Document, position: &Position) -> Vec<CompletionI
                                 for inc_line in content.lines() {
                                     let inc_code = inc_line.split(';').next().unwrap_or("").trim();
                                     if let Some(rest) = inc_code.strip_suffix(':') {
-                                        let clean = rest.strip_prefix("global ").unwrap_or(rest).trim();
+                                        let clean =
+                                            rest.strip_prefix("global ").unwrap_or(rest).trim();
                                         if !clean.starts_with('.') && !clean.is_empty() {
                                             items.push(CompletionItem {
                                                 label: clean.to_string(),
@@ -442,7 +454,13 @@ fn get_memory_symbol_completions(doc: &Document) -> Vec<CompletionItem> {
     for line in doc.text.lines() {
         let code_line = line.split(';').next().unwrap_or("").trim();
         if code_line.starts_with("%include") {
-            if let Some(quote_char) = if code_line.contains('"') { Some('"') } else if code_line.contains('\'') { Some('\'') } else { None } {
+            if let Some(quote_char) = if code_line.contains('"') {
+                Some('"')
+            } else if code_line.contains('\'') {
+                Some('\'')
+            } else {
+                None
+            } {
                 if let Some(start_q) = code_line.find(quote_char) {
                     if let Some(end_q) = code_line[start_q + 1..].find(quote_char) {
                         let rel_path = &code_line[start_q + 1..start_q + 1 + end_q];
@@ -455,7 +473,9 @@ fn get_memory_symbol_completions(doc: &Document) -> Vec<CompletionItem> {
                                         && !is_reserved_keyword(parts[0])
                                         && !parts[0].starts_with('%')
                                         && !parts[0].ends_with(':')
-                                        && (inc_code.contains('"') || inc_code.contains("BYTE") || inc_code.contains("WORD"))
+                                        && (inc_code.contains('"')
+                                            || inc_code.contains("BYTE")
+                                            || inc_code.contains("WORD"))
                                     {
                                         items.push(CompletionItem {
                                             label: parts[0].to_string(),
@@ -571,11 +591,7 @@ fn get_text_directives() -> Vec<CompletionItem> {
             "segment .data\n$0",
             "Switch to data segment",
         ),
-        make_snippet_item(
-            "segment .bss",
-            "segment .bss\n$0",
-            "Switch to bss segment",
-        ),
+        make_snippet_item("segment .bss", "segment .bss\n$0", "Switch to bss segment"),
     ]
 }
 
@@ -616,11 +632,7 @@ fn get_data_segment_completions() -> Vec<CompletionItem> {
             "segment .text\n$0",
             "Switch to text segment",
         ),
-        make_snippet_item(
-            "segment .bss",
-            "segment .bss\n$0",
-            "Switch to bss segment",
-        ),
+        make_snippet_item("segment .bss", "segment .bss\n$0", "Switch to bss segment"),
     ]
 }
 
@@ -653,7 +665,11 @@ fn get_instruction_completions() -> Vec<CompletionItem> {
     vec![
         make_snippet_item("mov", "mov ${1:dest}, ${2:src}", "Copy register/memory"),
         make_snippet_item("mvi", "mvi ${1:dest}, ${2:byte}", "Move immediate byte"),
-        make_snippet_item("lxi", "lxi ${1:pair}, ${2:addr16}", "Load 16-bit register pair"),
+        make_snippet_item(
+            "lxi",
+            "lxi ${1:pair}, ${2:addr16}",
+            "Load 16-bit register pair",
+        ),
         make_snippet_item("lda", "lda ${1:addr16}", "Load Accumulator direct"),
         make_snippet_item("sta", "sta ${1:addr16}", "Store Accumulator direct"),
         make_snippet_item("lhld", "lhld ${1:addr16}", "Load HL direct"),
@@ -666,13 +682,25 @@ fn get_instruction_completions() -> Vec<CompletionItem> {
         make_snippet_item("adc", "adc ${1:reg}", "Add with Carry to Accumulator"),
         make_snippet_item("aci", "aci ${1:byte}", "Add immediate with Carry"),
         make_snippet_item("sub", "sub ${1:reg}", "Subtract from Accumulator"),
-        make_snippet_item("sui", "sui ${1:byte}", "Subtract immediate from Accumulator"),
+        make_snippet_item(
+            "sui",
+            "sui ${1:byte}",
+            "Subtract immediate from Accumulator",
+        ),
         make_snippet_item("sbb", "sbb ${1:reg}", "Subtract with Borrow"),
         make_snippet_item("sbi", "sbi ${1:byte}", "Subtract immediate with Borrow"),
         make_snippet_item("inr", "inr ${1:reg}", "Increment register"),
         make_snippet_item("dcr", "dcr ${1:reg}", "Decrement register"),
-        make_snippet_item("inx", "inx ${1|BC,DE,HL,SP|}", "Increment register pair (16-bit)"),
-        make_snippet_item("dcx", "dcx ${1|BC,DE,HL,SP|}", "Decrement register pair (16-bit)"),
+        make_snippet_item(
+            "inx",
+            "inx ${1|BC,DE,HL,SP|}",
+            "Increment register pair (16-bit)",
+        ),
+        make_snippet_item(
+            "dcx",
+            "dcx ${1|BC,DE,HL,SP|}",
+            "Decrement register pair (16-bit)",
+        ),
         make_snippet_item("dad", "dad ${1|BC,DE,HL,SP|}", "16-bit add to HL"),
         make_snippet_item("daa", "daa", "Decimal adjust Accumulator"),
         make_snippet_item("ana", "ana ${1:reg}", "Logical AND with Accumulator"),
@@ -717,7 +745,11 @@ fn get_instruction_completions() -> Vec<CompletionItem> {
         make_snippet_item("rm", "rm", "Return if Minus"),
         make_snippet_item("rpe", "rpe", "Return if Parity Even"),
         make_snippet_item("rpo", "rpo", "Return if Parity Odd"),
-        make_snippet_item("rst", "rst ${1|0,1,2,3,4,5,6,7|}", "Restart software interrupt"),
+        make_snippet_item(
+            "rst",
+            "rst ${1|0,1,2,3,4,5,6,7|}",
+            "Restart software interrupt",
+        ),
         make_snippet_item("push", "push ${1|BC,DE,HL,PSW|}", "Push pair onto stack"),
         make_snippet_item("pop", "pop ${1|BC,DE,HL,PSW|}", "Pop pair from stack"),
         make_snippet_item("in", "in ${1:port}", "Input from I/O port"),
@@ -748,16 +780,91 @@ fn make_snippet_item(label: &str, snippet: &str, doc: &str) -> CompletionItem {
 fn is_reserved_keyword(word: &str) -> bool {
     matches!(
         word.to_uppercase().as_str(),
-        "MOV" | "MVI" | "LXI" | "LDA" | "STA" | "LHLD" | "SHLD" | "LDAX" | "STAX" |
-        "XCHG" | "XTHL" | "SPHL" | "PCHL" | "ADD" | "ADI" | "ADC" | "ACI" | "SUB" |
-        "SUI" | "SBB" | "SBI" | "INR" | "DCR" | "INX" | "DCX" | "DAD" | "DAA" |
-        "ANA" | "ANI" | "XRA" | "XRI" | "ORA" | "ORI" | "CMP" | "CPI" | "CMA" |
-        "CMC" | "STC" | "RLC" | "RRC" | "RAL" | "RAR" | "PUSH" | "POP" | "IN" |
-        "OUT" | "NOP" | "HLT" | "EI" | "DI" | "RIM" | "SIM" | "JMP" | "JZ" | "JNZ" |
-        "JC" | "JNC" | "JP" | "JM" | "JPE" | "JPO" | "CALL" | "CZ" | "CNZ" | "CC" |
-        "CNC" | "CP" | "CM" | "CPE" | "CPO" | "RET" | "RZ" | "RNZ" | "RC" | "RNC" |
-        "RP" | "RM" | "RPE" | "RPO" | "RST" | "BYTE" | "WORD" | "SEGMENT" | "GLOBAL" |
-        "EXTERN"
+        "MOV"
+            | "MVI"
+            | "LXI"
+            | "LDA"
+            | "STA"
+            | "LHLD"
+            | "SHLD"
+            | "LDAX"
+            | "STAX"
+            | "XCHG"
+            | "XTHL"
+            | "SPHL"
+            | "PCHL"
+            | "ADD"
+            | "ADI"
+            | "ADC"
+            | "ACI"
+            | "SUB"
+            | "SUI"
+            | "SBB"
+            | "SBI"
+            | "INR"
+            | "DCR"
+            | "INX"
+            | "DCX"
+            | "DAD"
+            | "DAA"
+            | "ANA"
+            | "ANI"
+            | "XRA"
+            | "XRI"
+            | "ORA"
+            | "ORI"
+            | "CMP"
+            | "CPI"
+            | "CMA"
+            | "CMC"
+            | "STC"
+            | "RLC"
+            | "RRC"
+            | "RAL"
+            | "RAR"
+            | "PUSH"
+            | "POP"
+            | "IN"
+            | "OUT"
+            | "NOP"
+            | "HLT"
+            | "EI"
+            | "DI"
+            | "RIM"
+            | "SIM"
+            | "JMP"
+            | "JZ"
+            | "JNZ"
+            | "JC"
+            | "JNC"
+            | "JP"
+            | "JM"
+            | "JPE"
+            | "JPO"
+            | "CALL"
+            | "CZ"
+            | "CNZ"
+            | "CC"
+            | "CNC"
+            | "CP"
+            | "CM"
+            | "CPE"
+            | "CPO"
+            | "RET"
+            | "RZ"
+            | "RNZ"
+            | "RC"
+            | "RNC"
+            | "RP"
+            | "RM"
+            | "RPE"
+            | "RPO"
+            | "RST"
+            | "BYTE"
+            | "WORD"
+            | "SEGMENT"
+            | "GLOBAL"
+            | "EXTERN"
     )
 }
 
@@ -772,7 +879,14 @@ mod tests {
         let text = "segment .text\nmain:\n    ".to_string();
         let doc = Document::new(uri, 1, text);
 
-        let res = get_completions(&doc, &Position { line: 2, character: 4 }).unwrap();
+        let res = get_completions(
+            &doc,
+            &Position {
+                line: 2,
+                character: 4,
+            },
+        )
+        .unwrap();
         if let CompletionResponse::List(list) = res {
             assert!(list.items.iter().any(|item| item.label == "lxi"));
             assert!(list.items.iter().any(|item| item.label == "mov"));
@@ -788,7 +902,14 @@ mod tests {
         let text = "segment .data\n    ".to_string();
         let doc = Document::new(uri.clone(), 1, text);
 
-        let res = get_completions(&doc, &Position { line: 1, character: 4 }).unwrap();
+        let res = get_completions(
+            &doc,
+            &Position {
+                line: 1,
+                character: 4,
+            },
+        )
+        .unwrap();
         if let CompletionResponse::List(list) = res {
             assert!(!list.items.iter().any(|item| item.label == "mov"));
             assert!(!list.items.iter().any(|item| item.label == "lxi"));
@@ -799,7 +920,14 @@ mod tests {
 
         let bss_text = "segment .bss\n    ".to_string();
         let bss_doc = Document::new(uri, 1, bss_text);
-        let bss_res = get_completions(&bss_doc, &Position { line: 1, character: 4 }).unwrap();
+        let bss_res = get_completions(
+            &bss_doc,
+            &Position {
+                line: 1,
+                character: 4,
+            },
+        )
+        .unwrap();
         if let CompletionResponse::List(list) = bss_res {
             assert!(!list.items.iter().any(|item| item.label == "mov"));
             assert!(list.items.iter().any(|item| item.label == "BYTE buffer"));
@@ -823,10 +951,18 @@ func_a:
 
 main:
     call 
-"#.to_string();
+"#
+        .to_string();
         let doc = Document::new(uri, 1, text);
 
-        let res = get_completions(&doc, &Position { line: 11, character: 9 }).unwrap();
+        let res = get_completions(
+            &doc,
+            &Position {
+                line: 11,
+                character: 9,
+            },
+        )
+        .unwrap();
         if let CompletionResponse::List(list) = res {
             assert!(list.items.iter().any(|item| item.label == "print_str"));
             assert!(list.items.iter().any(|item| item.label == "func_a"));
@@ -845,7 +981,14 @@ main:
         let text = "segment .text\nmain:\n    lxi ".to_string();
         let doc = Document::new(uri, 1, text);
 
-        let res = get_completions(&doc, &Position { line: 2, character: 8 }).unwrap();
+        let res = get_completions(
+            &doc,
+            &Position {
+                line: 2,
+                character: 8,
+            },
+        )
+        .unwrap();
         if let CompletionResponse::List(list) = res {
             assert!(list.items.iter().any(|item| item.label == "HL"));
             assert!(list.items.iter().any(|item| item.label == "BC"));
@@ -875,22 +1018,42 @@ main:
     lda 
     lxi H, 
     hlt
-"#.to_string();
+"#
+        .to_string();
         let doc = Document::new(uri, 1, text);
 
         // 1. mvi A, <cursor> -> constants
-        let res_mvi = get_completions(&doc, &Position { line: 12, character: 11 }).unwrap();
+        let res_mvi = get_completions(
+            &doc,
+            &Position {
+                line: 12,
+                character: 11,
+            },
+        )
+        .unwrap();
         if let CompletionResponse::List(list) = res_mvi {
             assert!(list.items.iter().any(|item| item.label == "MAX_LIMIT"));
             assert!(list.items.iter().any(|item| item.label == "%len scores"));
             // Comments must NOT be suggested as variables
-            assert!(!list.items.iter().any(|item| item.label.contains("comment_var")));
+            assert!(
+                !list
+                    .items
+                    .iter()
+                    .any(|item| item.label.contains("comment_var"))
+            );
         } else {
             panic!("expected list");
         }
 
         // 2. adi <cursor> -> constants
-        let res_adi = get_completions(&doc, &Position { line: 13, character: 8 }).unwrap();
+        let res_adi = get_completions(
+            &doc,
+            &Position {
+                line: 13,
+                character: 8,
+            },
+        )
+        .unwrap();
         if let CompletionResponse::List(list) = res_adi {
             assert!(list.items.iter().any(|item| item.label == "MAX_LIMIT"));
         } else {
@@ -898,22 +1061,46 @@ main:
         }
 
         // 3. lda <cursor> -> variables
-        let res_lda = get_completions(&doc, &Position { line: 14, character: 8 }).unwrap();
+        let res_lda = get_completions(
+            &doc,
+            &Position {
+                line: 14,
+                character: 8,
+            },
+        )
+        .unwrap();
         if let CompletionResponse::List(list) = res_lda {
             assert!(list.items.iter().any(|item| item.label == "scores"));
             assert!(list.items.iter().any(|item| item.label == "buffer"));
             assert!(list.items.iter().any(|item| item.label == "MAX_LIMIT"));
-            assert!(!list.items.iter().any(|item| item.label.contains("comment_var")));
+            assert!(
+                !list
+                    .items
+                    .iter()
+                    .any(|item| item.label.contains("comment_var"))
+            );
         } else {
             panic!("expected list");
         }
 
         // 4. lxi H, <cursor> -> variables & constants
-        let res_lxi = get_completions(&doc, &Position { line: 15, character: 11 }).unwrap();
+        let res_lxi = get_completions(
+            &doc,
+            &Position {
+                line: 15,
+                character: 11,
+            },
+        )
+        .unwrap();
         if let CompletionResponse::List(list) = res_lxi {
             assert!(list.items.iter().any(|item| item.label == "scores"));
             assert!(list.items.iter().any(|item| item.label == "buffer"));
-            assert!(!list.items.iter().any(|item| item.label.contains("comment_var")));
+            assert!(
+                !list
+                    .items
+                    .iter()
+                    .any(|item| item.label.contains("comment_var"))
+            );
         } else {
             panic!("expected list");
         }
@@ -925,7 +1112,14 @@ main:
         let text = "segment .data\n    arr BYTE 10 ".to_string();
         let doc = Document::new(uri, 1, text);
 
-        let res = get_completions(&doc, &Position { line: 1, character: 17 }).unwrap();
+        let res = get_completions(
+            &doc,
+            &Position {
+                line: 1,
+                character: 17,
+            },
+        )
+        .unwrap();
         if let CompletionResponse::List(list) = res {
             assert!(list.items.iter().any(|item| item.label == "%repeat"));
             assert!(list.items.iter().any(|item| item.label == "%len"));

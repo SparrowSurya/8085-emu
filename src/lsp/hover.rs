@@ -97,13 +97,22 @@ fn parse_numeric_literal(word: &str) -> Option<u32> {
         }
     }
 
-    if let Some(hex) = clean.strip_prefix("0x").or_else(|| clean.strip_prefix("0X")) {
+    if let Some(hex) = clean
+        .strip_prefix("0x")
+        .or_else(|| clean.strip_prefix("0X"))
+    {
         return u32::from_str_radix(hex, 16).ok();
     }
-    if let Some(bin) = clean.strip_prefix("0b").or_else(|| clean.strip_prefix("0B")) {
+    if let Some(bin) = clean
+        .strip_prefix("0b")
+        .or_else(|| clean.strip_prefix("0B"))
+    {
         return u32::from_str_radix(bin, 2).ok();
     }
-    if let Some(oct) = clean.strip_prefix("0o").or_else(|| clean.strip_prefix("0O")) {
+    if let Some(oct) = clean
+        .strip_prefix("0o")
+        .or_else(|| clean.strip_prefix("0O"))
+    {
         return u32::from_str_radix(oct, 8).ok();
     }
     if clean.chars().all(|c| c.is_ascii_digit()) {
@@ -1210,7 +1219,11 @@ fn get_user_symbol_hover(doc: &Document, symbol: &str, position: &Position) -> O
     find_user_symbol_hover_in_included_files(doc, symbol, &mut visited)
 }
 
-fn get_user_symbol_hover_in_single_doc(lines: &[&str], symbol: &str, position: Option<&Position>) -> Option<String> {
+fn get_user_symbol_hover_in_single_doc(
+    lines: &[&str],
+    symbol: &str,
+    position: Option<&Position>,
+) -> Option<String> {
     // 1. Check extern declarations (e.g. `extern print`)
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
@@ -1278,10 +1291,7 @@ fn get_user_symbol_hover_in_single_doc(lines: &[&str], symbol: &str, position: O
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
         if let Some(rest) = trimmed.strip_suffix(':') {
-            let label_ident = rest
-                .strip_prefix("global ")
-                .unwrap_or(rest)
-                .trim();
+            let label_ident = rest.strip_prefix("global ").unwrap_or(rest).trim();
 
             if label_ident == symbol {
                 let doc_comment = collect_preceding_comments(lines, i);
@@ -1366,12 +1376,18 @@ fn find_user_symbol_hover_in_included_files(
                             if visited.insert(target_path.clone()) {
                                 if let Ok(content) = std::fs::read_to_string(&target_path) {
                                     let inc_lines: Vec<&str> = content.lines().collect();
-                                    if let Some(hover) = get_user_symbol_hover_in_single_doc(&inc_lines, symbol, None) {
+                                    if let Some(hover) = get_user_symbol_hover_in_single_doc(
+                                        &inc_lines, symbol, None,
+                                    ) {
                                         return Some(hover);
                                     }
                                     if let Ok(inc_uri) = Url::from_file_path(&target_path) {
                                         let inc_doc = Document::new(inc_uri, 1, content);
-                                        if let Some(hover) = find_user_symbol_hover_in_included_files(&inc_doc, symbol, visited) {
+                                        if let Some(hover) =
+                                            find_user_symbol_hover_in_included_files(
+                                                &inc_doc, symbol, visited,
+                                            )
+                                        {
                                             return Some(hover);
                                         }
                                     }
@@ -1506,7 +1522,14 @@ mod tests {
         let uri = Url::from_file_path(&source_file).unwrap();
         let doc = Document::new(uri, 1, text);
 
-        let h_inc = get_hover(&doc, &Position { line: 0, character: 12 }).unwrap();
+        let h_inc = get_hover(
+            &doc,
+            &Position {
+                line: 0,
+                character: 12,
+            },
+        )
+        .unwrap();
         if let HoverContents::Markup(m) = h_inc.contents {
             assert!(m.value.contains("Module providing TerminalDevice I/O"));
             assert!(m.value.contains("Supports print, input, and putch."));
@@ -1528,7 +1551,14 @@ mod tests {
         let doc = Document::new(uri, 1, text);
 
         // Hover over MVI
-        let h_mvi = get_hover(&doc, &Position { line: 1, character: 5 }).unwrap();
+        let h_mvi = get_hover(
+            &doc,
+            &Position {
+                line: 1,
+                character: 5,
+            },
+        )
+        .unwrap();
         if let HoverContents::Markup(m) = h_mvi.contents {
             assert!(m.value.contains("**Instruction** `MVI dest, data8`"));
             assert!(m.value.contains("7 T-states"));
@@ -1537,7 +1567,14 @@ mod tests {
         }
 
         // Hover over A
-        let h_a = get_hover(&doc, &Position { line: 1, character: 8 }).unwrap();
+        let h_a = get_hover(
+            &doc,
+            &Position {
+                line: 1,
+                character: 8,
+            },
+        )
+        .unwrap();
         if let HoverContents::Markup(m) = h_a.contents {
             assert!(m.value.contains("**Register** `A` (8-bit)"));
         } else {
@@ -1545,7 +1582,14 @@ mod tests {
         }
 
         // Hover over HL
-        let h_hl = get_hover(&doc, &Position { line: 2, character: 9 }).unwrap();
+        let h_hl = get_hover(
+            &doc,
+            &Position {
+                line: 2,
+                character: 9,
+            },
+        )
+        .unwrap();
         if let HoverContents::Markup(m) = h_hl.contents {
             assert!(m.value.contains("**Register** `HL` (16-bit pair)"));
         } else {
@@ -1560,7 +1604,14 @@ mod tests {
         let doc = Document::new(uri, 1, text);
 
         // Hover over 0x41 ('A' / 65)
-        let h_num = get_hover(&doc, &Position { line: 1, character: 12 }).unwrap();
+        let h_num = get_hover(
+            &doc,
+            &Position {
+                line: 1,
+                character: 12,
+            },
+        )
+        .unwrap();
         if let HoverContents::Markup(m) = h_num.contents {
             assert!(m.value.contains("decimal:"));
             assert!(m.value.contains("65"));
@@ -1571,7 +1622,14 @@ mod tests {
         }
 
         // Hover over 10 ('\n')
-        let h_num10 = get_hover(&doc, &Position { line: 2, character: 12 }).unwrap();
+        let h_num10 = get_hover(
+            &doc,
+            &Position {
+                line: 2,
+                character: 12,
+            },
+        )
+        .unwrap();
         if let HoverContents::Markup(m) = h_num10.contents {
             assert!(m.value.contains("decimal:"));
             assert!(m.value.contains("10"));
@@ -1595,11 +1653,19 @@ func_a:
     jnz .loop
     call print_str
     ret
-"#.to_string();
+"#
+        .to_string();
         let doc = Document::new(uri, 1, text);
 
         // Hover over .loop
-        let h_local = get_hover(&doc, &Position { line: 7, character: 9 }).unwrap();
+        let h_local = get_hover(
+            &doc,
+            &Position {
+                line: 7,
+                character: 9,
+            },
+        )
+        .unwrap();
         if let HoverContents::Markup(m) = h_local.contents {
             assert!(m.value.contains("func_a.loop:"));
             assert!(m.value.contains("Loop counter doc"));
@@ -1608,7 +1674,14 @@ func_a:
         }
 
         // Hover over print_str
-        let h_ext = get_hover(&doc, &Position { line: 8, character: 11 }).unwrap();
+        let h_ext = get_hover(
+            &doc,
+            &Position {
+                line: 8,
+                character: 11,
+            },
+        )
+        .unwrap();
         if let HoverContents::Markup(m) = h_ext.contents {
             assert!(m.value.contains("extern print_str"));
         } else {
@@ -1629,10 +1702,18 @@ multiply:
 main:
     call multiply
     hlt
-"#.to_string();
+"#
+        .to_string();
         let doc = Document::new(uri, 1, text);
 
-        let h_sym = get_hover(&doc, &Position { line: 8, character: 11 }).unwrap();
+        let h_sym = get_hover(
+            &doc,
+            &Position {
+                line: 8,
+                character: 11,
+            },
+        )
+        .unwrap();
         if let HoverContents::Markup(m) = h_sym.contents {
             assert!(m.value.contains("multiply:"));
             assert!(m.value.contains("Multiplies two numbers in B and C"));
@@ -1649,7 +1730,14 @@ main:
         let doc = Document::new(uri, 1, text);
 
         // Hover over `segment`
-        let h_seg = get_hover(&doc, &Position { line: 0, character: 2 }).unwrap();
+        let h_seg = get_hover(
+            &doc,
+            &Position {
+                line: 0,
+                character: 2,
+            },
+        )
+        .unwrap();
         if let HoverContents::Markup(m) = h_seg.contents {
             assert!(m.value.contains("**Keyword** `segment`"));
             assert!(m.value.contains("Text Segment"));
@@ -1658,7 +1746,14 @@ main:
         }
 
         // Hover over `.text`
-        let h_text = get_hover(&doc, &Position { line: 0, character: 10 }).unwrap();
+        let h_text = get_hover(
+            &doc,
+            &Position {
+                line: 0,
+                character: 10,
+            },
+        )
+        .unwrap();
         if let HoverContents::Markup(m) = h_text.contents {
             assert!(m.value.contains("**Segment** `.text`"));
         } else {
@@ -1666,7 +1761,14 @@ main:
         }
 
         // Hover over `%define`
-        let h_def = get_hover(&doc, &Position { line: 1, character: 2 }).unwrap();
+        let h_def = get_hover(
+            &doc,
+            &Position {
+                line: 1,
+                character: 2,
+            },
+        )
+        .unwrap();
         if let HoverContents::Markup(m) = h_def.contents {
             assert!(m.value.contains("**Directive** `%define NAME VALUE`"));
         } else {
@@ -1694,11 +1796,19 @@ main:
     mov A, M
     mvi B, BUFFER_CAP
     hlt
-"#.to_string();
+"#
+        .to_string();
         let doc = Document::new(uri, 1, text);
 
         // Hover over memory M
-        let h_m = get_hover(&doc, &Position { line: 14, character: 11 }).unwrap();
+        let h_m = get_hover(
+            &doc,
+            &Position {
+                line: 14,
+                character: 11,
+            },
+        )
+        .unwrap();
         if let HoverContents::Markup(m) = h_m.contents {
             assert!(m.value.contains("**Memory** `M` (8-bit pointer [HL])"));
         } else {
@@ -1706,7 +1816,14 @@ main:
         }
 
         // Hover over greeting variable
-        let h_greet = get_hover(&doc, &Position { line: 5, character: 2 }).unwrap();
+        let h_greet = get_hover(
+            &doc,
+            &Position {
+                line: 5,
+                character: 2,
+            },
+        )
+        .unwrap();
         if let HoverContents::Markup(m) = h_greet.contents {
             assert!(m.value.contains("greeting byte \"Hello, World!\\n\""));
             assert!(m.value.contains("User greeting string"));
@@ -1715,7 +1832,14 @@ main:
         }
 
         // Hover over input_buf BSS variable
-        let h_buf = get_hover(&doc, &Position { line: 10, character: 2 }).unwrap();
+        let h_buf = get_hover(
+            &doc,
+            &Position {
+                line: 10,
+                character: 2,
+            },
+        )
+        .unwrap();
         if let HoverContents::Markup(m) = h_buf.contents {
             assert!(m.value.contains("input_buf BYTE 64"));
             assert!(m.value.contains("Storage for input line"));
@@ -1724,7 +1848,14 @@ main:
         }
 
         // Hover over BUFFER_CAP constant
-        let h_const = get_hover(&doc, &Position { line: 15, character: 14 }).unwrap();
+        let h_const = get_hover(
+            &doc,
+            &Position {
+                line: 15,
+                character: 14,
+            },
+        )
+        .unwrap();
         if let HoverContents::Markup(m) = h_const.contents {
             assert!(m.value.contains("%define BUFFER_CAP 64"));
         } else {
@@ -1745,12 +1876,20 @@ multiply_fast:
         std::fs::write(&helper_file, helper_content).unwrap();
 
         let main_file = temp_dir.join("main_calc.e8085");
-        let text = "%include \"lib_math_helper.e8085\"\n\nmain:\n    call multiply_fast\n    hlt\n".to_string();
+        let text = "%include \"lib_math_helper.e8085\"\n\nmain:\n    call multiply_fast\n    hlt\n"
+            .to_string();
         let uri = Url::from_file_path(&main_file).unwrap();
         let doc = Document::new(uri, 1, text);
 
         // Hover over `multiply_fast` in main
-        let h_sym = get_hover(&doc, &Position { line: 3, character: 12 }).unwrap();
+        let h_sym = get_hover(
+            &doc,
+            &Position {
+                line: 3,
+                character: 12,
+            },
+        )
+        .unwrap();
         if let HoverContents::Markup(m) = h_sym.contents {
             assert!(m.value.contains("multiply_fast:"));
             assert!(m.value.contains("Multiplies two 8-bit numbers in B and C"));
@@ -1774,11 +1913,19 @@ segment .text
 main:
     mvi A, LIMIT
     hlt
-"#.to_string();
+"#
+        .to_string();
         let doc = Document::new(uri, 1, text);
 
         // Hover over LIMIT constant
-        let h_const = get_hover(&doc, &Position { line: 3, character: 10 }).unwrap();
+        let h_const = get_hover(
+            &doc,
+            &Position {
+                line: 3,
+                character: 10,
+            },
+        )
+        .unwrap();
         if let HoverContents::Markup(m) = h_const.contents {
             assert_eq!(m.value, "```\n%define LIMIT 42\n```");
             assert!(!m.value.contains("unrelated comment"));
@@ -1794,7 +1941,14 @@ main:
         let doc = Document::new(uri, 1, text);
 
         // Hover over 'A'
-        let h_a = get_hover(&doc, &Position { line: 2, character: 12 }).unwrap();
+        let h_a = get_hover(
+            &doc,
+            &Position {
+                line: 2,
+                character: 12,
+            },
+        )
+        .unwrap();
         if let HoverContents::Markup(m) = h_a.contents {
             assert!(m.value.contains("Decimal:     65"));
             assert!(m.value.contains("Hexadecimal: 0x41"));
@@ -1804,7 +1958,14 @@ main:
         }
 
         // Hover over '\n'
-        let h_nl = get_hover(&doc, &Position { line: 3, character: 10 }).unwrap();
+        let h_nl = get_hover(
+            &doc,
+            &Position {
+                line: 3,
+                character: 10,
+            },
+        )
+        .unwrap();
         if let HoverContents::Markup(m) = h_nl.contents {
             assert!(m.value.contains("Decimal:     10"));
             assert!(m.value.contains("Hexadecimal: 0xA"));

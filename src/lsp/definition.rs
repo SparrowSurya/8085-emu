@@ -65,8 +65,14 @@ fn get_include_definition(doc: &Document, position: &Position) -> Option<Locatio
         };
 
         let target_range = Range {
-            start: Position { line: 0, character: 0 },
-            end: Position { line: 0, character: 0 },
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 0,
+                character: 0,
+            },
         };
 
         return Some(LocationLink {
@@ -80,7 +86,11 @@ fn get_include_definition(doc: &Document, position: &Position) -> Option<Locatio
     None
 }
 
-fn find_local_label_definition(doc: &Document, position: &Position, local_label: &str) -> Option<Location> {
+fn find_local_label_definition(
+    doc: &Document,
+    position: &Position,
+    local_label: &str,
+) -> Option<Location> {
     let lines: Vec<&str> = doc.text.lines().collect();
     let current_line = position.line as usize;
 
@@ -113,8 +123,14 @@ fn find_local_label_definition(doc: &Document, position: &Position, local_label:
                 return Some(Location {
                     uri: doc.uri.clone(),
                     range: Range {
-                        start: Position { line: line_num as u32, character: char_offset },
-                        end: Position { line: line_num as u32, character: char_offset + ident.len() as u32 },
+                        start: Position {
+                            line: line_num as u32,
+                            character: char_offset,
+                        },
+                        end: Position {
+                            line: line_num as u32,
+                            character: char_offset + ident.len() as u32,
+                        },
                     },
                 });
             }
@@ -135,8 +151,14 @@ fn find_symbol_definition_in_doc(doc: &Document, symbol: &str) -> Option<Locatio
                 return Some(Location {
                     uri: doc.uri.clone(),
                     range: Range {
-                        start: Position { line: i as u32, character: char_offset },
-                        end: Position { line: i as u32, character: char_offset + label.len() as u32 },
+                        start: Position {
+                            line: i as u32,
+                            character: char_offset,
+                        },
+                        end: Position {
+                            line: i as u32,
+                            character: char_offset + label.len() as u32,
+                        },
                     },
                 });
             }
@@ -149,8 +171,14 @@ fn find_symbol_definition_in_doc(doc: &Document, symbol: &str) -> Option<Locatio
             return Some(Location {
                 uri: doc.uri.clone(),
                 range: Range {
-                    start: Position { line: i as u32, character: char_offset },
-                    end: Position { line: i as u32, character: char_offset + symbol.len() as u32 },
+                    start: Position {
+                        line: i as u32,
+                        character: char_offset,
+                    },
+                    end: Position {
+                        line: i as u32,
+                        character: char_offset + symbol.len() as u32,
+                    },
                 },
             });
         }
@@ -161,8 +189,14 @@ fn find_symbol_definition_in_doc(doc: &Document, symbol: &str) -> Option<Locatio
             return Some(Location {
                 uri: doc.uri.clone(),
                 range: Range {
-                    start: Position { line: i as u32, character: char_offset },
-                    end: Position { line: i as u32, character: char_offset + symbol.len() as u32 },
+                    start: Position {
+                        line: i as u32,
+                        character: char_offset,
+                    },
+                    end: Position {
+                        line: i as u32,
+                        character: char_offset + symbol.len() as u32,
+                    },
                 },
             });
         }
@@ -198,10 +232,7 @@ fn find_symbol_in_included_files(doc: &Document, symbol: &str) -> Option<Locatio
 
 fn extract_label_name(trimmed_line: &str) -> Option<&str> {
     if let Some(rest) = trimmed_line.strip_suffix(':') {
-        let clean = rest
-            .strip_prefix("global ")
-            .unwrap_or(rest)
-            .trim();
+        let clean = rest.strip_prefix("global ").unwrap_or(rest).trim();
         if !clean.is_empty() {
             return Some(clean);
         }
@@ -220,16 +251,91 @@ fn is_parent_label_def(trimmed_line: &str) -> bool {
 fn is_reserved_keyword(word: &str) -> bool {
     matches!(
         word.to_uppercase().as_str(),
-        "MOV" | "MVI" | "LXI" | "LDA" | "STA" | "LHLD" | "SHLD" | "LDAX" | "STAX" |
-        "XCHG" | "XTHL" | "SPHL" | "PCHL" | "ADD" | "ADI" | "ADC" | "ACI" | "SUB" |
-        "SUI" | "SBB" | "SBI" | "INR" | "DCR" | "INX" | "DCX" | "DAD" | "DAA" |
-        "ANA" | "ANI" | "XRA" | "XRI" | "ORA" | "ORI" | "CMP" | "CPI" | "CMA" |
-        "CMC" | "STC" | "RLC" | "RRC" | "RAL" | "RAR" | "PUSH" | "POP" | "IN" |
-        "OUT" | "NOP" | "HLT" | "EI" | "DI" | "RIM" | "SIM" | "JMP" | "JZ" | "JNZ" |
-        "JC" | "JNC" | "JP" | "JM" | "JPE" | "JPO" | "CALL" | "CZ" | "CNZ" | "CC" |
-        "CNC" | "CP" | "CM" | "CPE" | "CPO" | "RET" | "RZ" | "RNZ" | "RC" | "RNC" |
-        "RP" | "RM" | "RPE" | "RPO" | "RST" | "BYTE" | "WORD" | "SEGMENT" | "GLOBAL" |
-        "EXTERN"
+        "MOV"
+            | "MVI"
+            | "LXI"
+            | "LDA"
+            | "STA"
+            | "LHLD"
+            | "SHLD"
+            | "LDAX"
+            | "STAX"
+            | "XCHG"
+            | "XTHL"
+            | "SPHL"
+            | "PCHL"
+            | "ADD"
+            | "ADI"
+            | "ADC"
+            | "ACI"
+            | "SUB"
+            | "SUI"
+            | "SBB"
+            | "SBI"
+            | "INR"
+            | "DCR"
+            | "INX"
+            | "DCX"
+            | "DAD"
+            | "DAA"
+            | "ANA"
+            | "ANI"
+            | "XRA"
+            | "XRI"
+            | "ORA"
+            | "ORI"
+            | "CMP"
+            | "CPI"
+            | "CMA"
+            | "CMC"
+            | "STC"
+            | "RLC"
+            | "RRC"
+            | "RAL"
+            | "RAR"
+            | "PUSH"
+            | "POP"
+            | "IN"
+            | "OUT"
+            | "NOP"
+            | "HLT"
+            | "EI"
+            | "DI"
+            | "RIM"
+            | "SIM"
+            | "JMP"
+            | "JZ"
+            | "JNZ"
+            | "JC"
+            | "JNC"
+            | "JP"
+            | "JM"
+            | "JPE"
+            | "JPO"
+            | "CALL"
+            | "CZ"
+            | "CNZ"
+            | "CC"
+            | "CNC"
+            | "CP"
+            | "CM"
+            | "CPE"
+            | "CPO"
+            | "RET"
+            | "RZ"
+            | "RNZ"
+            | "RC"
+            | "RNC"
+            | "RP"
+            | "RM"
+            | "RPE"
+            | "RPO"
+            | "RST"
+            | "BYTE"
+            | "WORD"
+            | "SEGMENT"
+            | "GLOBAL"
+            | "EXTERN"
     )
 }
 
@@ -248,13 +354,20 @@ mod tests {
         let uri = Url::from_file_path(&source_file).unwrap();
         let doc = Document::new(uri, 1, text);
 
-        let def_res = get_definition(&doc, &Position { line: 0, character: 12 }).unwrap();
+        let def_res = get_definition(
+            &doc,
+            &Position {
+                line: 0,
+                character: 12,
+            },
+        )
+        .unwrap();
         if let GotoDefinitionResponse::Link(links) = def_res {
             assert_eq!(links.len(), 1);
             let link = &links[0];
             let origin = link.origin_selection_range.as_ref().unwrap();
-            assert_eq!(origin.start.character, 9);  // Opening quote "
-            assert_eq!(origin.end.character, 27);    // Closing quote "
+            assert_eq!(origin.start.character, 9); // Opening quote "
+            assert_eq!(origin.end.character, 27); // Closing quote "
         } else {
             panic!("expected Link with origin_selection_range");
         }
@@ -277,11 +390,19 @@ main:
 
 helper:
     ret
-".to_string();
+"
+        .to_string();
         let doc = Document::new(uri.clone(), 1, text);
 
         // Jump to 'helper' from line 6 ("    call helper")
-        let def_helper = get_definition(&doc, &Position { line: 6, character: 10 }).unwrap();
+        let def_helper = get_definition(
+            &doc,
+            &Position {
+                line: 6,
+                character: 10,
+            },
+        )
+        .unwrap();
         if let GotoDefinitionResponse::Scalar(loc) = def_helper {
             assert_eq!(loc.range.start.line, 9);
         } else {
@@ -289,7 +410,14 @@ helper:
         }
 
         // Jump to 'greeting' from line 5 ("    lxi HL, greeting")
-        let def_var = get_definition(&doc, &Position { line: 5, character: 13 }).unwrap();
+        let def_var = get_definition(
+            &doc,
+            &Position {
+                line: 5,
+                character: 13,
+            },
+        )
+        .unwrap();
         if let GotoDefinitionResponse::Scalar(loc) = def_var {
             assert_eq!(loc.range.start.line, 1);
         } else {
@@ -312,11 +440,19 @@ func_b:
     dcr B
     jnz .loop
     ret
-".to_string();
+"
+        .to_string();
         let doc = Document::new(uri, 1, text);
 
         // Jump to .loop inside func_b (line 9: "    jnz .loop") -> should jump to line 7 (".loop:"), NOT line 1
-        let def_local = get_definition(&doc, &Position { line: 9, character: 9 }).unwrap();
+        let def_local = get_definition(
+            &doc,
+            &Position {
+                line: 9,
+                character: 9,
+            },
+        )
+        .unwrap();
         if let GotoDefinitionResponse::Scalar(loc) = def_local {
             assert_eq!(loc.range.start.line, 7);
         } else {

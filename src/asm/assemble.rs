@@ -431,7 +431,12 @@ impl<'a> Assembler<'a> {
             entry,
         ) = if !self.linked_containers.is_empty() {
             let main_text_base = linked_text_end;
-            let raw_entry = self.layout_text(main_text_base, &mut symtab, &mut sym_spans, &mut export_names)?;
+            let raw_entry = self.layout_text(
+                main_text_base,
+                &mut symtab,
+                &mut sym_spans,
+                &mut export_names,
+            )?;
 
             let mut taddr = main_text_base;
             let mut current_parent_label: Option<String> = None;
@@ -509,7 +514,12 @@ impl<'a> Assembler<'a> {
                 addr += v.size;
             }
 
-            let raw_entry = self.layout_text(text_base as u16, &mut symtab, &mut sym_spans, &mut export_names)?;
+            let raw_entry = self.layout_text(
+                text_base as u16,
+                &mut symtab,
+                &mut sym_spans,
+                &mut export_names,
+            )?;
 
             let mut taddr = text_base as u16;
             let mut current_parent_label: Option<String> = None;
@@ -972,7 +982,10 @@ impl<'a> Assembler<'a> {
         }
 
         if !has_text_segment {
-            return Err(AsmError::new(Span::default(), AsmErrorKind::MissingTextSegment));
+            return Err(AsmError::new(
+                Span::default(),
+                AsmErrorKind::MissingTextSegment,
+            ));
         }
         if count == 0 {
             return Err(AsmError::new(Span::default(), AsmErrorKind::EmptyText));
@@ -1333,7 +1346,9 @@ mod tests {
             AsmErrorKind::GlobalMainForbidden
         ));
         // An extern declaration satisfied by a local definition is valid
-        assert!(assemble("extern func\nsegment .text\nfunc:\nhlt\nmain:\ncall func\nhlt\n").is_ok());
+        assert!(
+            assemble("extern func\nsegment .text\nfunc:\nhlt\nmain:\ncall func\nhlt\n").is_ok()
+        );
         assert!(matches!(
             assemble("%define BIG 0x100\nsegment .text\nmain:\nhlt\n")
                 .unwrap_err()
@@ -1361,7 +1376,10 @@ mod tests {
         // cpi ' ' = FE 20
         // hlt = 76
         // msg at 0x0040: 'H'(0x48), 'e'(0x65), 'l'(0x6C), 'l'(0x6C), 'o'(0x6F), '\n'(0x0A), '\0'(0x00) -> len 7
-        assert_eq!(&img.bytes[0x40..0x47], &[0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x0A, 0x00]);
+        assert_eq!(
+            &img.bytes[0x40..0x47],
+            &[0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x0A, 0x00]
+        );
         // ch at 0x0047: 'A'(0x41)
         assert_eq!(img.bytes[0x47], 0x41);
     }

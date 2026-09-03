@@ -14,7 +14,11 @@ pub fn get_inlay_hints(doc: &Document, range: &Range) -> Vec<InlayHint> {
         }
 
         let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with(';') || trimmed.starts_with('%') || trimmed.starts_with("segment") {
+        if trimmed.is_empty()
+            || trimmed.starts_with(';')
+            || trimmed.starts_with('%')
+            || trimmed.starts_with("segment")
+        {
             continue;
         }
 
@@ -40,9 +44,10 @@ pub fn get_inlay_hints(doc: &Document, range: &Range) -> Vec<InlayHint> {
                 label: InlayHintLabel::String(format!(" [{}T]", t_states)),
                 kind: Some(InlayHintKind::TYPE),
                 text_edits: None,
-                tooltip: Some(tower_lsp::lsp_types::InlayHintTooltip::String(
-                    format!("Hardware execution timing: {} T-states", t_states),
-                )),
+                tooltip: Some(tower_lsp::lsp_types::InlayHintTooltip::String(format!(
+                    "Hardware execution timing: {} T-states",
+                    t_states
+                ))),
                 padding_left: Some(true),
                 padding_right: None,
                 data: None,
@@ -55,13 +60,14 @@ pub fn get_inlay_hints(doc: &Document, range: &Range) -> Vec<InlayHint> {
 
 fn get_opcode_cycles(mnemonic: &str) -> Option<u8> {
     match mnemonic.to_uppercase().as_str() {
-        "NOP" | "MOV" | "ADD" | "ADC" | "SUB" | "SBB" | "INR" | "DCR" | "ANA" | "XRA"
-        | "ORA" | "CMP" | "RLC" | "RRC" | "RAL" | "RAR" | "CMA" | "CMC" | "STC" | "DAA"
-        | "EI" | "DI" | "RIM" | "SIM" | "XCHG" => Some(4),
+        "NOP" | "MOV" | "ADD" | "ADC" | "SUB" | "SBB" | "INR" | "DCR" | "ANA" | "XRA" | "ORA"
+        | "CMP" | "RLC" | "RRC" | "RAL" | "RAR" | "CMA" | "CMC" | "STC" | "DAA" | "EI" | "DI"
+        | "RIM" | "SIM" | "XCHG" => Some(4),
         "HLT" => Some(5),
         "INX" | "DCX" | "PCHL" | "SPHL" => Some(6),
-        "MVI" | "ADI" | "ACI" | "SUI" | "SBI" | "ANI" | "XRI" | "ORI" | "CPI" | "LDAX"
-        | "STAX" => Some(7),
+        "MVI" | "ADI" | "ACI" | "SUI" | "SBI" | "ANI" | "XRI" | "ORI" | "CPI" | "LDAX" | "STAX" => {
+            Some(7)
+        }
         "JMP" | "JZ" | "JNZ" | "JC" | "JNC" | "JP" | "JM" | "JPE" | "JPO" | "IN" | "OUT"
         | "DAD" | "POP" | "RET" => Some(10),
         "PUSH" | "RST" => Some(12),
@@ -84,8 +90,14 @@ mod tests {
         let doc = Document::new(uri, 1, text);
 
         let range = Range {
-            start: Position { line: 0, character: 0 },
-            end: Position { line: 4, character: 0 },
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 4,
+                character: 0,
+            },
         };
 
         let hints = get_inlay_hints(&doc, &range);

@@ -40,7 +40,10 @@ fn check_mvi_zero_optimization(
     trimmed: &str,
 ) -> Option<CodeAction> {
     let lower = trimmed.to_lowercase();
-    if lower.starts_with("mvi a, 0") || lower.starts_with("mvi a, 0x00") || lower.starts_with("mvi a, 00h") {
+    if lower.starts_with("mvi a, 0")
+        || lower.starts_with("mvi a, 0x00")
+        || lower.starts_with("mvi a, 00h")
+    {
         let col_start = line.find(trimmed).unwrap_or(0);
         let col_end = col_start + trimmed.len();
 
@@ -93,7 +96,10 @@ fn check_mnemonic_casing(
     }
 
     let first = tokens[0].trim_end_matches(':');
-    if is_known_mnemonic(first) && first.chars().any(|c| c.is_ascii_uppercase()) && first.chars().any(|c| c.is_ascii_lowercase()) {
+    if is_known_mnemonic(first)
+        && first.chars().any(|c| c.is_ascii_uppercase())
+        && first.chars().any(|c| c.is_ascii_lowercase())
+    {
         // Mixed casing like `Mvi` or `lXi` -> convert to lowercase
         let col_start = line.find(first).unwrap_or(0);
         let col_end = col_start + first.len();
@@ -138,15 +144,86 @@ fn check_mnemonic_casing(
 fn is_known_mnemonic(m: &str) -> bool {
     matches!(
         m.to_uppercase().as_str(),
-        "MOV" | "MVI" | "LXI" | "LDA" | "STA" | "LHLD" | "SHLD" | "LDAX" | "STAX" |
-        "XCHG" | "XTHL" | "SPHL" | "PCHL" | "ADD" | "ADI" | "ADC" | "ACI" | "SUB" |
-        "SUI" | "SBB" | "SBI" | "INR" | "DCR" | "INX" | "DCX" | "DAD" | "DAA" |
-        "ANA" | "ANI" | "XRA" | "XRI" | "ORA" | "ORI" | "CMP" | "CPI" | "CMA" |
-        "CMC" | "STC" | "RLC" | "RRC" | "RAL" | "RAR" | "PUSH" | "POP" | "IN" |
-        "OUT" | "NOP" | "HLT" | "EI" | "DI" | "RIM" | "SIM" | "JMP" | "JZ" | "JNZ" |
-        "JC" | "JNC" | "JP" | "JM" | "JPE" | "JPO" | "CALL" | "CZ" | "CNZ" | "CC" |
-        "CNC" | "CP" | "CM" | "CPE" | "CPO" | "RET" | "RZ" | "RNZ" | "RC" | "RNC" |
-        "RP" | "RM" | "RPE" | "RPO" | "RST"
+        "MOV"
+            | "MVI"
+            | "LXI"
+            | "LDA"
+            | "STA"
+            | "LHLD"
+            | "SHLD"
+            | "LDAX"
+            | "STAX"
+            | "XCHG"
+            | "XTHL"
+            | "SPHL"
+            | "PCHL"
+            | "ADD"
+            | "ADI"
+            | "ADC"
+            | "ACI"
+            | "SUB"
+            | "SUI"
+            | "SBB"
+            | "SBI"
+            | "INR"
+            | "DCR"
+            | "INX"
+            | "DCX"
+            | "DAD"
+            | "DAA"
+            | "ANA"
+            | "ANI"
+            | "XRA"
+            | "XRI"
+            | "ORA"
+            | "ORI"
+            | "CMP"
+            | "CPI"
+            | "CMA"
+            | "CMC"
+            | "STC"
+            | "RLC"
+            | "RRC"
+            | "RAL"
+            | "RAR"
+            | "PUSH"
+            | "POP"
+            | "IN"
+            | "OUT"
+            | "NOP"
+            | "HLT"
+            | "EI"
+            | "DI"
+            | "RIM"
+            | "SIM"
+            | "JMP"
+            | "JZ"
+            | "JNZ"
+            | "JC"
+            | "JNC"
+            | "JP"
+            | "JM"
+            | "JPE"
+            | "JPO"
+            | "CALL"
+            | "CZ"
+            | "CNZ"
+            | "CC"
+            | "CNC"
+            | "CP"
+            | "CM"
+            | "CPE"
+            | "CPO"
+            | "RET"
+            | "RZ"
+            | "RNZ"
+            | "RC"
+            | "RNC"
+            | "RP"
+            | "RM"
+            | "RPE"
+            | "RPO"
+            | "RST"
     )
 }
 
@@ -164,8 +241,14 @@ mod tests {
         let params = CodeActionParams {
             text_document: TextDocumentIdentifier { uri: uri.clone() },
             range: Range {
-                start: Position { line: 1, character: 4 },
-                end: Position { line: 1, character: 12 },
+                start: Position {
+                    line: 1,
+                    character: 4,
+                },
+                end: Position {
+                    line: 1,
+                    character: 12,
+                },
             },
             context: CodeActionContext::default(),
             work_done_progress_params: Default::default(),

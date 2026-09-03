@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use dashmap::DashMap;
+use std::sync::Arc;
 use tower_lsp::lsp_types::{Position, Range, Url};
 
 /// Represents an in-memory tracked document in the LSP workspace.
@@ -182,14 +182,16 @@ impl DocumentStore {
     }
 
     pub fn insert(&self, uri: Url, version: i32, text: String) {
-        self.docs.insert(uri.clone(), Document::new(uri, version, text));
+        self.docs
+            .insert(uri.clone(), Document::new(uri, version, text));
     }
 
     pub fn update(&self, uri: &Url, version: i32, text: String) {
         if let Some(mut doc) = self.docs.get_mut(uri) {
             doc.update(version, text);
         } else {
-            self.docs.insert(uri.clone(), Document::new(uri.clone(), version, text));
+            self.docs
+                .insert(uri.clone(), Document::new(uri.clone(), version, text));
         }
     }
 
@@ -292,4 +294,3 @@ mod tests {
         assert!(store.get(&uri).is_none());
     }
 }
-
