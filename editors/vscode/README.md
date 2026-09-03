@@ -59,6 +59,11 @@ This extension provides rich syntax highlighting, language configuration, and se
 - **Strings with Escapes**: `"Hello, World!\n\0"`
 - **Comments**: Semicolon comments (`; ...`) extending to the end of the line.
 
+### 10. Markdown Code Blocks & Preview Integration
+Full syntax highlighting support inside Markdown files (`.md`) and the VS Code **Markdown Preview**:
+- **Editor Fenced Blocks**: Embedded `source.e8085` syntax highlighting in `.md` files for ```` ```e8085 ```` code fences.
+- **Markdown Preview Webview**: Built-in `markdown-it` plugin and theme-adaptive preview stylesheet (`markdown.previewStyles`) ensuring rich 8085 color styling in both light and dark preview modes.
+
 ---
 
 ## How to Use & Open in VS Code

@@ -11,7 +11,8 @@
   ],
   "main": "./out/extension.js",
   "activationEvents": [
-    "onLanguage:e8085"
+    "onLanguage:e8085",
+    "onLanguage:markdown"
   ],
   "scripts": {
     "vscode:prepublish": "npm run compile",
@@ -19,6 +20,10 @@
     "watch": "tsc -watch -p ./"
   },
   "contributes": {
+    "markdown.markdownItPlugins": true,
+    "markdown.previewStyles": [
+      "./media/markdown-preview.css"
+    ],
     "languages": [
       {
         "id": "e8085",

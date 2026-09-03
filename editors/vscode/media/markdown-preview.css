@@ -1,0 +1,46 @@
+/* 8085 Assembly Syntax Highlighting for Markdown Preview */
+.vscode-dark pre.hljs code.language-e8085,
+.vscode-dark pre.hljs code.language-8085,
+.vscode-dark pre.hljs code.language-assembly,
+.vscode-dark pre.hljs code.language-asm,
+.vscode-dark pre.hljs code.language-asm8085,
+.vscode-dark pre.hljs code.language-8085asm,
+.vscode-dark pre.hljs code.language-e8085-asm {
+    color: #d4d4d4;
+    font-family: var(--vscode-editor-font-family, Menlo, Monaco, 'Courier New', monospace);
+}
+
+.vscode-dark .hljs-keyword { color: #c586c0; font-weight: 500; }
+.vscode-dark .hljs-meta { color: #569cd6; font-weight: 500; }
+.vscode-dark .hljs-comment { color: #6a9955; font-style: italic; }
+.vscode-dark .hljs-string { color: #ce9178; }
+.vscode-dark .hljs-literal { color: #4ec9b0; }
+.vscode-dark .hljs-number { color: #b5cea8; }
+.vscode-dark .hljs-built_in { color: #dcdcaa; }
+.vscode-dark .hljs-title { color: #dcdcaa; font-weight: 600; }
+.vscode-dark .hljs-symbol { color: #4fc1ff; }
+.vscode-dark .hljs-type { color: #4ec9b0; }
+.vscode-dark .hljs-variable { color: #9cdcfe; }
+
+.vscode-light pre.hljs code.language-e8085,
+.vscode-light pre.hljs code.language-8085,
+.vscode-light pre.hljs code.language-assembly,
+.vscode-light pre.hljs code.language-asm,
+.vscode-light pre.hljs code.language-asm8085,
+.vscode-light pre.hljs code.language-8085asm,
+.vscode-light pre.hljs code.language-e8085-asm {
+    color: #000000;
+    font-family: var(--vscode-editor-font-family, Menlo, Monaco, 'Courier New', monospace);
+}
+
+.vscode-light .hljs-keyword { color: #af00db; font-weight: 500; }
+.vscode-light .hljs-meta { color: #0000ff; font-weight: 500; }
+.vscode-light .hljs-comment { color: #008000; font-style: italic; }
+.vscode-light .hljs-string { color: #a31515; }
+.vscode-light .hljs-literal { color: #267f99; }
+.vscode-light .hljs-number { color: #098658; }
+.vscode-light .hljs-built_in { color: #795e26; }
+.vscode-light .hljs-title { color: #795e26; font-weight: 600; }
+.vscode-light .hljs-symbol { color: #0070c1; }
+.vscode-light .hljs-type { color: #267f99; }
+.vscode-light .hljs-variable { color: #001080; }
