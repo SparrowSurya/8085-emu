@@ -40,6 +40,13 @@
       "expect_output": "Hello World!\n"
     },
     {
+      "name": "right sided triangle",
+      "file": "triangle_pattern.e8085",
+      "type": "terminal",
+      "stdin": "5",
+      "expect_output": "Enter the size of triangle: *****\n****\n***\n**\n*\n"
+    },
+    {
       "name": "greet",
       "file": "greet.e8085",
       "type": "terminal",

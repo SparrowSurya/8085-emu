@@ -1,0 +1,68 @@
+%include "devices/terminal.e8085"
+%include "lib/math.e8085"
+%include "lib/conv.e8085"
+
+segment .data
+    askSize "Enter size of triangle: "
+
+segment .bss
+    buffer BYTE 32
+    length BYTE 1
+    size BYTE 1
+
+segment .text
+    extern print
+    extern input
+    extern putch
+    extern endl
+
+    extern to_uint8
+
+main:
+    ; Write prompt
+    lxi HL, askSize
+    mvi B, %Len askSize
+    call print
+
+    ; Read input number
+    lxi HL, buffer
+    mvi B, %len buffer
+    call input
+
+    ; Store length of input
+    lxi HL, length
+    mov M, A
+    mov B, A
+
+    ; Convert number to int
+    lxi HL, buffer
+    call to_uint8
+
+    ; Store the number
+    lxi HL, size
+    mov M, A
+
+    ; Draw pattern
+    call draw
+
+    call endl
+    hlt
+
+draw:
+    cpi 0
+    jz .exit
+    mov B, A
+.loop1:
+    mov C, B
+.loop2:
+    mvi A, '*'
+    push BC
+    call putch
+    pop BC
+    dcr C
+    jnz .loop2
+    call endl
+    dcr B
+    jnz .loop1
+.exit:
+    ret
