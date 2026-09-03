@@ -283,7 +283,7 @@ The assembler supports modular development across multiple files and subroutines
 
 ### 1. `global` Keyword
 Marks a label or variable as accessible from other modules and records it in the `.8085.bin` Export Symbol Table:
-```assembly
+```e8085
 segment .text
 
 ; Inline global declaration
@@ -301,7 +301,7 @@ helper:
 
 ### 2. `extern` Keyword
 Declares external symbols that will be resolved at link time (via `%include`, linked source files, or precompiled `.8085.bin` libraries):
-```assembly
+```e8085
 segment .text
 
 extern print
@@ -314,7 +314,7 @@ main:
 
 ### 3. Local Labels (`.name:`, `jz .name`)
 Subroutine-scoped local labels prefixed with `.` prevent naming collisions between helper routines:
-```assembly
+```e8085
 segment .text
 
 strlen:
@@ -341,7 +341,7 @@ strcpy:
 
 ### 4. `%include` Directive
 Imports `%define` constants, `global` routines, and data declarations from external files:
-```assembly
+```e8085
 %include "terminal.e8085"
 
 segment .data

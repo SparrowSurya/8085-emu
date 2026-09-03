@@ -20,7 +20,7 @@ This document defines the formal grammar, syntax rules, directives, memory segme
 
 An assembly program is organized into three optional segments that may appear in any order:
 
-```assembly
+```e8085
 segment .data
   ; Initialized constants, strings, and byte tables
 
@@ -37,7 +37,7 @@ Declares named initialized memory variables.
 - Supports `BYTE` and `WORD` declarations.
 - Elements are whitespace-separated (no commas between values).
 
-```assembly
+```e8085
 segment .data
   counter BYTE 0x00
   primes  BYTE 2 3 5 7 11 13
@@ -49,7 +49,7 @@ segment .data
 Reserves uninitialized, zero-filled RAM space immediately following `.data`.
 - Size indicates the number of units to reserve.
 
-```assembly
+```e8085
 segment .bss
   input_buf  BYTE 64    ; Reserves 64 bytes
   word_stack WORD 16    ; Reserves 16 words (32 bytes)
@@ -59,7 +59,7 @@ segment .bss
 Contains instructions, labels, subroutines, and interrupt handlers.
 - Code execution begins at `main:` (hooked to the `0x0000` reset vector).
 
-```assembly
+```e8085
 segment .text
 main:
   lxi SP, 0xF000
@@ -76,7 +76,7 @@ Defines named 1-byte numeric constants, character literals (`'x'`), or 1-byte st
 
 > **Note**: `%define` values are strictly restricted to 1 byte ($\le \text{0xFF}$). Multi-byte values or multi-character strings are rejected.
 
-```assembly
+```e8085
 %define PORT_DATA   0x01
 %define PORT_CMD    0x02
 %define DEFAULT_VAL 42
@@ -93,7 +93,7 @@ main:
 ### `%repeat` (Data Duplication)
 Repeats an expression or string a specified number of times within `segment .data`. Can appear anywhere in data definitions.
 
-```assembly
+```e8085
 %define FILL_COUNT 16
 
 segment .data
@@ -105,7 +105,7 @@ segment .data
 ### `%len` (Size Evaluation)
 Evaluates to the exact byte size of a previously defined `.data` array or `.bss` reservation. Uses space-separated syntax (no parentheses).
 
-```assembly
+```e8085
 segment .data
   prompt BYTE "Enter name:\n\0"
 
@@ -119,7 +119,7 @@ main:
 ### `%include` (File Inclusion)
 Imports definitions, global labels, and constants from an external source file. File paths must be enclosed **strictly in double quotes**:
 
-```assembly
+```e8085
 %include "devices/terminal.e8085"
 %include "lib/math.e8085"
 ```
@@ -133,7 +133,7 @@ Exports a label or subroutine globally so it can be referenced across modules an
 
 > **Note**: Declaring `global main:` or `global main` is forbidden, as `main` is reserved as the program entry point and automatically mapped to the reset vector.
 
-```assembly
+```e8085
 segment .text
 
 ; Inline global declaration
@@ -151,7 +151,7 @@ helper:
 ### `extern`
 Declares a symbol that will be resolved externally at link time (via linked `.8085.bin` container or `%include`). If the symbol is defined locally in the compilation unit (e.g. from an included module), the local definition satisfies the declaration cleanly without error.
 
-```assembly
+```e8085
 segment .text
 
 extern print
@@ -178,7 +178,7 @@ Character literals `'x'` are treated as 1-byte constant numeric literals and can
 ### Local Labels (`.name:`, `jz .name`)
 Scoped directly to the preceding parent (non-local) label. Prevents name collisions across separate subroutines:
 
-```assembly
+```e8085
 segment .text
 
 func_a:

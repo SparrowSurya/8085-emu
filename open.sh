@@ -5,10 +5,10 @@ set -e
 cargo build --bin e8085-lsp
 
 # 2. Ensure extension dependencies are installed and compiled
-if [ ! -d "editors/vscode/node_modules" ] || [ ! -f "editors/vscode/out/extension.js" ]; then
-    echo "Compiling VS Code extension..."
-    (cd editors/vscode && npm install && npm run compile)
+if [ ! -d "editors/vscode/node_modules" ]; then
+    (cd editors/vscode && npm install)
 fi
+(cd editors/vscode && npm run compile)
 
 # 3. Launch VS Code in extension development mode
 code --extensionDevelopmentPath="$(pwd)/editors/vscode" "$(pwd)"

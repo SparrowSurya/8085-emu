@@ -23,7 +23,6 @@
       {
         "id": "e8085",
         "aliases": [
-          "8085 Assembly",
           "e8085"
         ],
         "extensions": [
@@ -37,6 +36,16 @@
         "language": "e8085",
         "scopeName": "source.e8085",
         "path": "./syntaxes/e8085.tmLanguage.json"
+      },
+      {
+        "scopeName": "markdown.e8085.codeblock",
+        "path": "./syntaxes/e8085.markdown.tmLanguage.json",
+        "injectTo": [
+          "text.html.markdown"
+        ],
+        "embeddedLanguages": {
+          "meta.embedded.block.e8085": "e8085"
+        }
       }
     ],
     "configuration": {
