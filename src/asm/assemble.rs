@@ -263,13 +263,26 @@ pub fn assemble_with_options(
     base_dir: Option<&std::path::Path>,
     external_symbols: &HashMap<String, u16>,
 ) -> Result<LoadImage, AsmError> {
+    assemble_with_full_context(src, None, base_dir, None, external_symbols)
+}
+
+/// Assemble source text with explicit main file, base directory, and project root context.
+pub fn assemble_with_full_context(
+    src: &str,
+    main_file: Option<&std::path::Path>,
+    base_dir: Option<&std::path::Path>,
+    project_root: Option<&std::path::Path>,
+    external_symbols: &HashMap<String, u16>,
+) -> Result<LoadImage, AsmError> {
     let raw_program = parse(lex(src)?)?;
-    let program = if let Some(dir) = base_dir {
-        super::include::resolve_includes(dir, &raw_program)?
-    } else {
-        let cur_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        super::include::resolve_includes(&cur_dir, &raw_program)?
-    };
+    let cur_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let b_dir = base_dir.unwrap_or(&cur_dir);
+    let program = super::include::resolve_includes_with_main_and_root(
+        main_file,
+        b_dir,
+        project_root,
+        &raw_program,
+    )?;
 
     let (image, _symbols, _listing) =
         Assembler::new(&program, src, external_symbols.clone(), Vec::new()).run()?;
@@ -282,13 +295,26 @@ pub fn assemble_and_link(
     base_dir: Option<&std::path::Path>,
     linked_containers: &[BinaryContainer],
 ) -> Result<LoadImage, AsmError> {
+    assemble_and_link_with_file(None, src, base_dir, None, linked_containers)
+}
+
+/// Assemble source text and statically link precompiled `.8085.bin` libraries with explicit main file and project root context.
+pub fn assemble_and_link_with_file(
+    main_file: Option<&std::path::Path>,
+    src: &str,
+    base_dir: Option<&std::path::Path>,
+    project_root: Option<&std::path::Path>,
+    linked_containers: &[BinaryContainer],
+) -> Result<LoadImage, AsmError> {
     let raw_program = parse(lex(src)?)?;
-    let program = if let Some(dir) = base_dir {
-        super::include::resolve_includes(dir, &raw_program)?
-    } else {
-        let cur_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        super::include::resolve_includes(&cur_dir, &raw_program)?
-    };
+    let cur_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let b_dir = base_dir.unwrap_or(&cur_dir);
+    let program = super::include::resolve_includes_with_main_and_root(
+        main_file,
+        b_dir,
+        project_root,
+        &raw_program,
+    )?;
 
     let (image, _symbols, _listing) =
         Assembler::new(&program, src, HashMap::new(), linked_containers.to_vec()).run()?;

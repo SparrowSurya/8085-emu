@@ -5,7 +5,7 @@ use std::path::Path;
 use std::sync::mpsc::channel;
 
 use clap::{Parser, Subcommand};
-use emu8085::asm::assemble_and_link;
+use emu8085::asm::assemble_and_link_with_file;
 use emu8085::asm::container::{BinaryContainer, CONTAINER_MAGIC};
 use emu8085::asm::load;
 use emu8085::{Addr, DisassembleOptions, InspectOptions, Machine, TerminalDevice};
@@ -381,7 +381,8 @@ fn run_file(path: &str, link: &[String]) {
 
         let link_containers = load_external_symbols(link);
         let base_dir = Path::new(path).parent();
-        let image = match assemble_and_link(&src, base_dir, &link_containers) {
+        let main_file = Path::new(path);
+        let image = match assemble_and_link_with_file(Some(main_file), &src, base_dir, None, &link_containers) {
             Ok(img) => img,
             Err(e) => {
                 eprintln!("{path}:{}: error: {}", e.span, e.kind);
@@ -443,8 +444,9 @@ fn compile_file(input_path: &str, link: &[String], output_path: Option<&str>) {
 
     let link_containers = load_external_symbols(link);
     let base_dir = Path::new(input_path).parent();
+    let main_file = Path::new(input_path);
 
-    let image = match assemble_and_link(&src, base_dir, &link_containers) {
+    let image = match assemble_and_link_with_file(Some(main_file), &src, base_dir, None, &link_containers) {
         Ok(img) => img,
         Err(e) => {
             eprintln!("{input_path}:{}: error: {}", e.span, e.kind);

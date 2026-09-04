@@ -4,7 +4,7 @@ use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, DiagnosticTag, Positi
 
 use super::document::Document;
 use crate::asm::ast::{Program, Segment, TextItem};
-use crate::asm::{assemble_with_options, parse};
+use crate::asm::parse;
 
 /// Analyzes an `.e8085` source document and returns compiler error and static analysis diagnostics.
 pub fn compute_diagnostics(doc: &Document) -> Vec<Diagnostic> {
@@ -18,13 +18,13 @@ pub fn compute_diagnostics_with_externs(
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
-    let base_dir = if let Ok(path) = doc.uri.to_file_path() {
-        path.parent().map(|p| p.to_path_buf())
-    } else {
-        None
-    };
-
+    let main_file = doc.uri.to_file_path().ok();
+    let base_dir = main_file.as_ref().and_then(|p| p.parent().map(|d| d.to_path_buf()));
     let base_ref = base_dir.as_deref().unwrap_or_else(|| Path::new("."));
+    let project_root = main_file
+        .as_ref()
+        .map(|p| crate::asm::include::find_project_root(p))
+        .unwrap_or_else(|| crate::asm::include::find_project_root(base_ref));
 
     // Collect all declared `extern <name>` symbols so references to external functions do not produce false errors
     let mut extern_symbols = extra_externs.clone();
@@ -44,6 +44,19 @@ pub fn compute_diagnostics_with_externs(
                     }
                 }
             }
+
+            // Validate top-level includes immediately (self-include, duplicate-include, outside root)
+            if validate_top_level_includes(
+                doc,
+                &program,
+                main_file.as_deref(),
+                base_ref,
+                &project_root,
+                &mut diagnostics,
+            ) {
+                return diagnostics;
+            }
+
             parsed_program = Some(program);
         }
     }
@@ -60,7 +73,13 @@ pub fn compute_diagnostics_with_externs(
     }
 
     // 1. Run assembler front-end in analysis mode with declared extern symbols
-    if let Err(err) = assemble_with_options(&doc.text, Some(base_ref), &extern_symbols) {
+    if let Err(err) = crate::asm::assemble_with_full_context(
+        &doc.text,
+        main_file.as_deref(),
+        Some(base_ref),
+        Some(&project_root),
+        &extern_symbols,
+    ) {
         let line = err.span.line.saturating_sub(1);
         let col = err.span.col.saturating_sub(1);
 
@@ -128,6 +147,118 @@ pub fn compute_diagnostics_with_externs(
     }
 
     diagnostics
+}
+
+fn validate_top_level_includes(
+    doc: &Document,
+    program: &Program,
+    main_file: Option<&Path>,
+    base_dir: &Path,
+    project_root: &Path,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> bool {
+    let mut has_error = false;
+    let mut seen_includes: HashSet<std::path::PathBuf> = HashSet::new();
+    let canon_main = main_file.map(crate::asm::include::canonicalize_or_norm);
+
+    for inc in &program.includes {
+        let inc_path = base_dir.join(&inc.path);
+
+        // 1. Outside project root
+        if crate::asm::include::is_outside_root(&inc_path, project_root) {
+            diagnostics.push(make_include_diagnostic(
+                doc,
+                inc.span,
+                format!("cannot include '{}': path is outside project root", inc.path),
+            ));
+            has_error = true;
+            continue;
+        }
+
+        // 2. Existence and canonicalization
+        let canon_inc = match inc_path.canonicalize() {
+            Ok(p) => p,
+            Err(e) => {
+                diagnostics.push(make_include_diagnostic(
+                    doc,
+                    inc.span,
+                    format!("cannot read '{}': {e}", inc.path),
+                ));
+                has_error = true;
+                continue;
+            }
+        };
+
+        // Re-check canonicalized path against root
+        if crate::asm::include::is_outside_root(&canon_inc, project_root) {
+            diagnostics.push(make_include_diagnostic(
+                doc,
+                inc.span,
+                format!("cannot include '{}': path is outside project root", inc.path),
+            ));
+            has_error = true;
+            continue;
+        }
+
+        // 3. Self-inclusion
+        if let Some(ref main) = canon_main {
+            if &canon_inc == main {
+                diagnostics.push(make_include_diagnostic(
+                    doc,
+                    inc.span,
+                    format!("file cannot include itself: '{}'", inc.path),
+                ));
+                has_error = true;
+                continue;
+            }
+        }
+
+        // 4. Duplicate include
+        if seen_includes.contains(&canon_inc) {
+            diagnostics.push(make_include_diagnostic(
+                doc,
+                inc.span,
+                format!("duplicate include: file '{}' has already been included", inc.path),
+            ));
+            has_error = true;
+            continue;
+        }
+
+        seen_includes.insert(canon_inc);
+    }
+
+    has_error
+}
+
+fn make_include_diagnostic(doc: &Document, span: crate::asm::Span, message: String) -> Diagnostic {
+    let line = span.line.saturating_sub(1);
+    let col = span.col.saturating_sub(1);
+    let end_col = if let Some(doc_line) = doc.text.lines().nth(line as usize) {
+        (col + 1).max(doc_line.len() as u32)
+    } else {
+        col + 1
+    };
+
+    Diagnostic {
+        range: Range {
+            start: Position {
+                line,
+                character: col,
+            },
+            end: Position {
+                line,
+                character: end_col,
+            },
+        },
+        severity: Some(DiagnosticSeverity::ERROR),
+        code: None,
+        code_description: None,
+        source: Some("e8085".to_string()),
+        message: format!("include error: {message}"),
+        related_information: None,
+        tags: None,
+        data: None,
+    }
 }
 
 fn run_static_analysis(doc: &Document, program: &Program, diagnostics: &mut Vec<Diagnostic>) {
@@ -856,5 +987,79 @@ mod tests {
             let diags = compute_diagnostics(&doc);
             assert_eq!(diags, vec![], "unexpected diagnostics: {diags:?}");
         }
+    }
+
+    #[test]
+    fn test_lsp_self_include_diagnostic() {
+        let temp_dir = std::env::temp_dir().join("emu8085_lsp_self_inc");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let main_file = temp_dir.join("main.e8085");
+        let text = "%include \"main.e8085\"\nsegment .text\nmain:\n    hlt\n".to_string();
+        std::fs::write(&main_file, &text).unwrap();
+
+        let uri = Url::from_file_path(&main_file).unwrap();
+        let doc = Document::new(uri, 1, text);
+        let diags = compute_diagnostics(&doc);
+
+        assert_eq!(diags.len(), 1);
+        assert!(
+            diags[0].message.contains("file cannot include itself"),
+            "unexpected diag message: {}",
+            diags[0].message
+        );
+        assert_eq!(diags[0].range.start.line, 0);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_lsp_duplicate_include_diagnostic() {
+        let temp_dir = std::env::temp_dir().join("emu8085_lsp_dup_inc");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let sub_file = temp_dir.join("sub.e8085");
+        std::fs::write(&sub_file, "segment .text\nsub_fn:\n    ret\n").unwrap();
+
+        let main_file = temp_dir.join("main.e8085");
+        let text = "%include \"sub.e8085\"\n%include \"sub.e8085\"\nsegment .text\nmain:\n    call sub_fn\n    hlt\n".to_string();
+        std::fs::write(&main_file, &text).unwrap();
+
+        let uri = Url::from_file_path(&main_file).unwrap();
+        let doc = Document::new(uri, 1, text);
+        let diags = compute_diagnostics(&doc);
+
+        assert_eq!(diags.len(), 1);
+        assert!(
+            diags[0].message.contains("duplicate include"),
+            "unexpected diag message: {}",
+            diags[0].message
+        );
+        assert_eq!(diags[0].range.start.line, 1);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_lsp_outside_project_root_diagnostic() {
+        let temp_root = std::env::temp_dir().join("emu8085_lsp_proj_root");
+        let proj_dir = temp_root.join("proj");
+        std::fs::create_dir_all(&proj_dir).unwrap();
+
+        let main_file = proj_dir.join("main.e8085");
+        let text = "%include \"../outside.e8085\"\nsegment .text\nmain:\n    hlt\n".to_string();
+        std::fs::write(&main_file, &text).unwrap();
+
+        let uri = Url::from_file_path(&main_file).unwrap();
+        let doc = Document::new(uri, 1, text);
+        let diags = compute_diagnostics(&doc);
+
+        assert_eq!(diags.len(), 1);
+        assert!(
+            diags[0].message.contains("path is outside project root"),
+            "unexpected diag message: {}",
+            diags[0].message
+        );
+        assert_eq!(diags[0].range.start.line, 0);
+
+        let _ = std::fs::remove_dir_all(&temp_root);
     }
 }
