@@ -1,14 +1,19 @@
 ; %define + %repeat + %len + .bss addressing.
+
+
 %define N 4
 
 segment .data
-    pattern BYTE %repeat N 0xAA     ; four 0xAA bytes
+
+    pattern BYTE %repeat N 0xAA   ; four 0xAA bytes
 
 segment .bss
-    scratch BYTE 8                  ; reserve 8 bytes (zero-filled)
+
+    scratch BYTE 8   ; reserve 8 bytes (zero-filled)
 
 segment .text
+
 main:
-    mvi A, %len pattern             ; A = 4
-    lxi HL, scratch                 ; HL -> scratch's address
+    mvi A, %len pattern   ; A = 4
+    lxi HL, scratch       ; HL -> scratch's address
     hlt

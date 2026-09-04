@@ -9,14 +9,17 @@
 ; The assembler automatically populates the vector table (0x0000 - 0x003F) with
 ; jumps to any defined `isr_rst<n>` labels.
 
+
 %define PRINTER_PORT 0x02
 
 segment .data
+
     counter BYTE 0x00
 
 segment .text
+
 main:
-    lxi SP, 0xF000      ; Initialize stack pointer
+    lxi SP, 0xF000   ; Initialize stack pointer
 
     ; Invoke Software Interrupt 1
     rst 1
@@ -26,24 +29,25 @@ main:
 
     ; Load resulting counter value (should be 1 + 5 = 6)
     lda counter
-    adi 0x30            ; Convert 6 to ASCII '6'
-    out PRINTER_PORT    ; Print '6'
+    adi 0x30           ; Convert 6 to ASCII '6'
+    out PRINTER_PORT   ; Print '6'
     hlt
+
 
 ; ==========================================
 ; ISR Subroutines
 ; ==========================================
-
 ; --- ISR for RST 1 (Vector 0x0008) ---
 isr_rst1:
     lda counter
     inr A
     sta counter
-    ret                 ; Return to caller
+    ret           ; Return to caller
+
 
 ; --- ISR for RST 2 (Vector 0x0010) ---
 isr_rst2:
     lda counter
     adi 5
     sta counter
-    ret                 ; Return to caller
+    ret           ; Return to caller

@@ -42,7 +42,7 @@ pub use asm::{
     BinaryContainer, ContainerHeader, ExtractedString, InspectOptions, ListingRow, LoadImage,
     SegmentRecord, assemble, assemble_and_link, assemble_full, assemble_listing,
     assemble_with_options, assemble_with_symbols, extract_strings, format_header, format_segments,
-    format_strings, format_symbols, get_segments, inspect_container, load,
+    format_source, format_strings, format_symbols, get_segments, inspect_container, load,
 };
 pub use bus::{ControlLines, SystemBus};
 pub use cpu::flags::Flags;

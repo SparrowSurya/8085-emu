@@ -26,6 +26,24 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Format .e8085 assembly source files (similar to cargo fmt)
+    Fmt {
+        /// Source files or directories to format (defaults to current directory if omitted)
+        files: Vec<String>,
+
+        /// Run in 'check' mode. Exits with 0 if formatted, 1 if unformatted files are found
+        #[arg(long = "check")]
+        check: bool,
+
+        /// Output formatted code to stdout instead of overwriting files in-place
+        #[arg(short = 's', long = "stdout")]
+        stdout: bool,
+
+        /// Verbose output (list all processed files)
+        #[arg(short = 'v', long = "verbose")]
+        verbose: bool,
+    },
+
     /// Check and lint a .e8085 assembly source file (similar to cargo check)
     Check {
         /// Input assembly file (.e8085 or .asm) to check
@@ -130,6 +148,12 @@ async fn main() {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Fmt {
+            files,
+            check,
+            stdout,
+            verbose,
+        } => fmt_files(&files, check, stdout, verbose),
         Commands::Check { file, link } => check_file(&file, &link),
         Commands::Run { file, link } => run_file(&file, &link),
         Commands::Compile { file, link, output } => compile_file(&file, &link, output.as_deref()),
@@ -647,3 +671,123 @@ fn check_file(input_path: &str, link: &[String]) {
         );
     }
 }
+
+fn collect_source_files(inputs: &[String]) -> Vec<std::path::PathBuf> {
+    let mut files = Vec::new();
+    if inputs.is_empty() {
+        find_assembly_files_in_dir(Path::new("."), &mut files);
+    } else {
+        for input in inputs {
+            let p = Path::new(input);
+            if p.is_dir() {
+                find_assembly_files_in_dir(p, &mut files);
+            } else if p.is_file() {
+                files.push(p.to_path_buf());
+            } else {
+                eprintln!("error: file or directory not found: '{input}'");
+                std::process::exit(2);
+            }
+        }
+    }
+    files.sort();
+    files
+}
+
+fn find_assembly_files_in_dir(dir: &Path, acc: &mut Vec<std::path::PathBuf>) {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let file_name = entry.file_name();
+        let name_str = file_name.to_string_lossy();
+        if name_str.starts_with('.') || name_str == "target" || name_str == "node_modules" {
+            continue;
+        }
+        if path.is_dir() {
+            find_assembly_files_in_dir(&path, acc);
+        } else if path.is_file() {
+            if let Some(ext) = path.extension() {
+                if ext == "e8085" || ext == "asm" {
+                    acc.push(path);
+                }
+            }
+        }
+    }
+}
+
+fn fmt_files(file_args: &[String], check: bool, stdout: bool, verbose: bool) {
+    let target_files = collect_source_files(file_args);
+
+    if target_files.is_empty() {
+        if !file_args.is_empty() {
+            eprintln!("No .e8085 or .asm files found matching the given paths.");
+        } else {
+            eprintln!("No .e8085 or .asm files found in current directory.");
+        }
+        return;
+    }
+
+    let mut unformatted_count = 0;
+    let mut formatted_count = 0;
+    let total_count = target_files.len();
+
+    for path in &target_files {
+        let path_str = path.display().to_string();
+        let src = match std::fs::read_to_string(path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: cannot read '{path_str}': {e}");
+                std::process::exit(2);
+            }
+        };
+
+        let formatted = emu8085::asm::format_source(&src);
+
+        if stdout {
+            print!("{formatted}");
+            continue;
+        }
+
+        if src != formatted {
+            unformatted_count += 1;
+            if check {
+                eprintln!("Diff in \x1b[1;33m{path_str}\x1b[0m: file requires formatting");
+            } else {
+                if let Err(e) = std::fs::write(path, &formatted) {
+                    eprintln!("error: cannot write to '{path_str}': {e}");
+                    std::process::exit(2);
+                }
+                formatted_count += 1;
+                if verbose {
+                    println!("    \x1b[1;32mFormatted\x1b[0m {path_str}");
+                }
+            }
+        } else if verbose && !check {
+            println!("    \x1b[1;34mUnchanged\x1b[0m {path_str}");
+        }
+    }
+
+    if stdout {
+        return;
+    }
+
+    if check {
+        if unformatted_count > 0 {
+            let file_word = if unformatted_count == 1 { "file" } else { "files" };
+            eprintln!(
+                "\x1b[1;31merror\x1b[0m: {unformatted_count} {file_word} left unformatted (run `e8085 fmt` to fix)"
+            );
+            std::process::exit(1);
+        } else {
+            eprintln!("    \x1b[1;32mFinished\x1b[0m format check [clean: {total_count} file(s)]");
+        }
+    } else if formatted_count > 0 {
+        let file_word = if formatted_count == 1 { "file" } else { "files" };
+        println!("    \x1b[1;32mFormatted\x1b[0m {formatted_count} {file_word} (out of {total_count})");
+    } else if verbose || file_args.len() == 1 {
+        println!("    \x1b[1;32mFinished\x1b[0m formatting (all {total_count} file(s) already clean)");
+    }
+}
+

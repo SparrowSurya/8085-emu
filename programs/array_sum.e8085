@@ -1,14 +1,20 @@
 ; Sum the bytes [1,2,3,4] in .data -> A = 10. Exercises M, ADD M, INX HL, loop.
+
+
 segment .data
+
     arr BYTE 1 2 3 4
 
 segment .text
+
 main:
     lxi HL, arr
-    mvi C, 4             ; element count
-    mvi A, 0             ; running sum
+    mvi C, 4      ; element count
+    mvi A, 0      ; running sum
+
+
 loop:
-    add M                ; A += [HL]
+    add M      ; A += [HL]
     inx HL
     dcr C
     jnz loop

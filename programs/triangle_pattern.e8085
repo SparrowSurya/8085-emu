@@ -3,9 +3,11 @@
 %include "lib/conv.e8085"
 
 segment .data
+
     askSize "Enter size of triangle: "
 
 segment .bss
+
     buffer BYTE 32
     length BYTE 1
     size BYTE 1
@@ -15,7 +17,7 @@ segment .text
 main:
     ; Write prompt
     lxi HL, askSize
-    mvi B, %Len askSize
+    mvi B, %len askSize
     call print
 
     ; Read input number
@@ -42,12 +44,15 @@ main:
     call endl
     hlt
 
+
 draw:
     cpi 0
     jz .exit
     mov B, A
+
 .loop1:
     mov C, B
+
 .loop2:
     mvi A, '*'
     push BC
@@ -58,5 +63,6 @@ draw:
     call endl
     dcr B
     jnz .loop1
+
 .exit:
     ret

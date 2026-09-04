@@ -3,11 +3,14 @@
 ; Includes: Division, Multiplication, Modulo, and Power
 ; =================================================================
 
+
 segment .text
+
     global divide
     global multiply
     global modulo
     global power
+
 
 ; -----------------------------------------------------------------
 ; SUBROUTINE: divide
@@ -17,31 +20,32 @@ segment .text
 ; Registers:   Alters A, B, C, D, E
 ; -----------------------------------------------------------------
 divide:
-    mov  C, A       ; Move divisor to C to clear accumulator
-    mvi  D, 0x00    ; Clear D (running remainder accumulator)
-    mvi  E, 0x08    ; Set loop counter E = 8 bits
+    mov C, A      ; Move divisor to C to clear accumulator
+    mvi D, 0x00   ; Clear D (running remainder accumulator)
+    mvi E, 0x08   ; Set loop counter E = 8 bits
 
 .div_loop:
-    mov  A, B       ; Shift dividend (B) left by 1 bit
-    add  A          ; Fast shift left (MSB goes into carry flag)
-    mov  B, A       ; Save shifted dividend back to B
+    mov A, B   ; Shift dividend (B) left by 1 bit
+    add A      ; Fast shift left (MSB goes into carry flag)
+    mov B, A   ; Save shifted dividend back to B
 
-    mov  A, D       ; Shift running remainder (D) left
-    ral             ; Rotate left through carry (catches bit from B)
+    mov A, D   ; Shift running remainder (D) left
+    ral        ; Rotate left through carry (catches bit from B)
 
-    cmp  C          ; Compare running remainder with divisor (C)
-    jc   .skip_sub  ; If remainder < divisor, skip subtraction
+    cmp C          ; Compare running remainder with divisor (C)
+    jc .skip_sub   ; If remainder < divisor, skip subtraction
 
-    sub  C          ; Subtract divisor from remainder
-    inr  B          ; Flip the lowest bit of B to 1 (quotient bit)
+    sub C   ; Subtract divisor from remainder
+    inr B   ; Flip the lowest bit of B to 1 (quotient bit)
 
 .skip_sub:
-    mov  D, A       ; Save updated remainder back to D
-    dcr  E          ; Decrement bit loop counter
-    jnz  .div_loop  ; Repeat for all 8 bits
+    mov D, A        ; Save updated remainder back to D
+    dcr E           ; Decrement bit loop counter
+    jnz .div_loop   ; Repeat for all 8 bits
 
-    mov  C, B       ; Align output: copy final quotient from B to C
+    mov C, B   ; Align output: copy final quotient from B to C
     ret
+
 
 ; -----------------------------------------------------------------
 ; SUBROUTINE: multiply
@@ -51,32 +55,33 @@ divide:
 ; Registers:   Alters A, B, C, D, E, H
 ; -----------------------------------------------------------------
 multiply:
-    mov  E, A       ; E = Multiplier
-    mvi  C, 0x00    ; Clear lower byte of product
-    mvi  D, 0x00    ; Clear upper byte of product
-    mvi  H, 0x08    ; Loop counter = 8 bits
+    mov E, A      ; E = Multiplier
+    mvi C, 0x00   ; Clear lower byte of product
+    mvi D, 0x00   ; Clear upper byte of product
+    mvi H, 0x08   ; Loop counter = 8 bits
 
 .mult_loop:
-    mov  A, E       ; Get multiplier
+    mov A, E        ; Get multiplier
     rar             ; Shift right, moving LSB to carry
-    mov  E, A       ; Save multiplier back
-    jnc  .skip_add  ; If carry = 0, skip the addition step
+    mov E, A        ; Save multiplier back
+    jnc .skip_add   ; If carry = 0, skip the addition step
 
-    mov  A, C       ; Add Multiplicand (B) to Product lower byte (C)
-    add  B
-    mov  C, A
-    mov  A, D       ; Add running carry to Product upper byte (D)
-    aci  0x00
-    mov  D, A
+    mov A, C   ; Add Multiplicand (B) to Product lower byte (C)
+    add B
+    mov C, A
+    mov A, D   ; Add running carry to Product upper byte (D)
+    aci 0x00
+    mov D, A
 
 .skip_add:
-    mov  A, B       ; Shift Multiplicand (B) left for next iteration
-    add  A          ; B = B * 2
-    mov  B, A
+    mov A, B   ; Shift Multiplicand (B) left for next iteration
+    add A      ; B = B * 2
+    mov B, A
 
-    dcr  H          ; Decrement bit loop counter
-    jnz  .mult_loop ; Repeat for all 8 bits
+    dcr H            ; Decrement bit loop counter
+    jnz .mult_loop   ; Repeat for all 8 bits
     ret
+
 
 ; -----------------------------------------------------------------
 ; SUBROUTINE: modulo
@@ -86,29 +91,30 @@ multiply:
 ; Registers:   Alters A, B, C, D, E
 ; -----------------------------------------------------------------
 modulo:
-    mov  C, A       ; C = Divisor
-    mvi  D, 0x00    ; D = Running remainder accumulator
-    mvi  E, 0x08    ; Loop counter = 8 bits
+    mov C, A      ; C = Divisor
+    mvi D, 0x00   ; D = Running remainder accumulator
+    mvi E, 0x08   ; Loop counter = 8 bits
 
 .mod_loop:
-    mov  A, B       ; Shift dividend left
-    add  A
-    mov  B, A
+    mov A, B   ; Shift dividend left
+    add A
+    mov B, A
 
-    mov  A, D       ; Shift remainder left, catching carry from dividend
+    mov A, D   ; Shift remainder left, catching carry from dividend
     ral
 
-    cmp  C          ; Compare remainder with divisor
-    jc   .skip_mod
-    sub  C          ; Subtract if remainder >= divisor
+    cmp C          ; Compare remainder with divisor
+    jc .skip_mod
+    sub C          ; Subtract if remainder >= divisor
 
 .skip_mod:
-    mov  D, A       ; Save remainder
-    dcr  E          ; Decrement loop counter
-    jnz  .mod_loop
+    mov D, A        ; Save remainder
+    dcr E           ; Decrement loop counter
+    jnz .mod_loop
 
-    mov  C, D       ; Move final remainder to output register C
+    mov C, D   ; Move final remainder to output register C
     ret
+
 
 ; -----------------------------------------------------------------
 ; SUBROUTINE: power
@@ -118,24 +124,24 @@ modulo:
 ; Registers:   Alters A, B, C, D, E, H (Preserves base across loops)
 ; -----------------------------------------------------------------
 power:
-    cpi  0x00       ; Check if exponent (A) is 0
-    jnz  .pow_start
-    mvi  C, 0x01    ; Any base to the power of 0 is 1
+    cpi 0x00         ; Check if exponent (A) is 0
+    jnz .pow_start
+    mvi C, 0x01      ; Any base to the power of 0 is 1
     ret
 
 .pow_start:
-    mov  E, A       ; E = Loop counter (Exponent value)
-    mvi  C, 0x01    ; Initialize running product result = 1
+    mov E, A      ; E = Loop counter (Exponent value)
+    mvi C, 0x01   ; Initialize running product result = 1
 
 .pow_loop:
     push BC         ; Save original base register pair (B-C)
-    mov  A, C       ; Move current product to multiplier parameter (A)
-                    ; Register B remains the base (multiplicand parameter)
+    mov A, C        ; Move current product to multiplier parameter (A)
+    ; Register B remains the base (multiplicand parameter)
     call multiply   ; Execute (Current Product * Base)
-    mov  H, C       ; Temporarily cache lower product byte in H
-    pop  BC         ; Restore original Base back into register B (restores register C too)
-    mov  C, H       ; Transfer cached product byte back to result register C
+    mov H, C        ; Temporarily cache lower product byte in H
+    pop BC          ; Restore original Base back into register B (restores register C too)
+    mov C, H        ; Transfer cached product byte back to result register C
 
-    dcr  E          ; Decrement exponent counter
-    jnz  .pow_loop  ; Repeat until exponent count reaches 0
+    dcr E           ; Decrement exponent counter
+    jnz .pow_loop   ; Repeat until exponent count reaches 0
     ret

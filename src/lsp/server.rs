@@ -48,6 +48,7 @@ impl LanguageServer for E8085LanguageServer {
                     work_done_progress_options: WorkDoneProgressOptions::default(),
                 })),
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
+                document_formatting_provider: Some(OneOf::Left(true)),
                 inlay_hint_provider: None,
                 ..ServerCapabilities::default()
             },
@@ -181,6 +182,33 @@ impl LanguageServer for E8085LanguageServer {
 
         if let Some(doc) = self.documents.get(uri) {
             Ok(Some(super::code_actions::get_code_actions(&doc, &params)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn formatting(
+        &self,
+        params: DocumentFormattingParams,
+    ) -> Result<Option<Vec<TextEdit>>> {
+        let uri = &params.text_document.uri;
+
+        if let Some(doc) = self.documents.get(uri) {
+            let formatted = crate::asm::format_source(&doc.text);
+            if formatted == doc.text {
+                return Ok(Some(vec![]));
+            }
+            let full_range = Range {
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: doc.offset_to_position(doc.text.len()),
+            };
+            Ok(Some(vec![TextEdit {
+                range: full_range,
+                new_text: formatted,
+            }]))
         } else {
             Ok(None)
         }

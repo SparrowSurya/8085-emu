@@ -1,8 +1,13 @@
 ; Print '*' five times to the printer on port 0x02.
+
+
 segment .text
+
 main:
     mvi C, 5
-    mvi A, 0x2A          ; '*'
+    mvi A, 0x2A   ; '*'
+
+
 loop:
     out 0x02
     dcr C

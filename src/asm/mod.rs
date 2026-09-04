@@ -11,6 +11,7 @@ pub mod ast;
 pub mod container;
 pub mod encode;
 pub mod error;
+pub mod fmt;
 pub mod include;
 pub mod inspect;
 pub mod keyword;
@@ -26,6 +27,7 @@ pub use ast::{BssDecl, DataDef, Define, Instr, POperand, Program, Segment, Size,
 pub use container::{BinaryContainer, ContainerHeader};
 pub use encode::{AReg8, AReg16, Operand, encode};
 pub use error::{AsmError, AsmErrorKind, Span};
+pub use fmt::format_source;
 pub use inspect::{
     ExtractedString, InspectOptions, SegmentRecord, extract_strings, format_header,
     format_segments, format_strings, format_symbols, get_segments, inspect_container,
@@ -33,3 +35,4 @@ pub use inspect::{
 pub use lexer::lex;
 pub use parser::parse;
 pub use token::{Token, TokenKind};
+

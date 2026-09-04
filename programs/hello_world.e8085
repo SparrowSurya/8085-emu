@@ -5,6 +5,7 @@
 %define TERM_CMD_PORT    0x02
 
 segment .data
+
     msg BYTE "Hello World!" 0xa
 
 segment .text
@@ -22,7 +23,8 @@ main:
     lxi HL, msg
     mvi B, %len msg
 
-    ; Send message bytes to terminal device
+
+; Send message bytes to terminal device
 send:
     mov A, M
     out TERM_DATA_PORT

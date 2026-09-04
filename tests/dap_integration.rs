@@ -281,9 +281,9 @@ async fn test_multifile_terminal_bridge_and_halt_termination() {
     let top_frame = &stack_body.stack_frames[0];
     let top_path = top_frame.source.as_ref().unwrap().path.as_ref().unwrap();
     assert!(top_path.ends_with("triangle_pattern.e8085"));
-    assert_eq!(top_frame.line, 17); // lxi HL, askSize
+    assert_eq!(top_frame.line, 19); // lxi HL, askSize
 
-    // 5. Step over until line 19: call print
+    // 5. Step over until line 21: call print
     client.send_request("next", Some(serde_json::json!({ "threadId": 1 }))).await;
     let (step_resp, _) = client.send_request("next", Some(serde_json::json!({ "threadId": 1 }))).await;
     assert!(step_resp.success);
@@ -297,14 +297,14 @@ async fn test_multifile_terminal_bridge_and_halt_termination() {
     let stepped_path = stack_body.stack_frames[0].source.as_ref().unwrap().path.as_ref().unwrap();
     assert!(stepped_path.ends_with("terminal.e8085"), "Expected path to end with terminal.e8085, got: {stepped_path}");
 
-    // 7. Set breakpoint at line 40 of triangle_pattern.e8085 (call draw)
+    // 7. Set breakpoint at line 42 of triangle_pattern.e8085 (call draw)
     let (bp_resp, _) = client.send_request("setBreakpoints", Some(serde_json::json!({
         "source": { "path": triangle_path.to_string_lossy().to_string() },
-        "breakpoints": [{ "line": 40 }]
+        "breakpoints": [{ "line": 42 }]
     }))).await;
     assert!(bp_resp.success);
 
-    // 8. Continue to breakpoint at line 40 (which executes print and input using user-supplied terminal input "3\n")
+    // 8. Continue to breakpoint at line 42 (which executes print and input using user-supplied terminal input "3\n")
     let (cont_resp, cont_events) = client.send_request("continue", Some(serde_json::json!({ "threadId": 1 }))).await;
     assert!(cont_resp.success);
     assert!(cont_events.iter().any(|e| e.event == "stopped"));
@@ -316,10 +316,10 @@ async fn test_multifile_terminal_bridge_and_halt_termination() {
         assert!(s.contains("Enter size of triangle: "), "Expected prompt on terminal, got: {s}");
     }
 
-    // 10. Verify we are stopped at line 40
+    // 10. Verify we are stopped at line 42
     let (stack_resp, _) = client.send_request("stackTrace", Some(serde_json::json!({ "threadId": 1 }))).await;
     let stack_body: StackTraceResponseBody = serde_json::from_value(stack_resp.body.unwrap()).unwrap();
-    assert_eq!(stack_body.stack_frames[0].line, 40);
+    assert_eq!(stack_body.stack_frames[0].line, 42);
 
     // 11. Continue past `draw` to HLT -> Debugger automatically stops and terminates on HLT
     let (cont_hlt_resp, hlt_events) = client.send_request("continue", Some(serde_json::json!({ "threadId": 1 }))).await;

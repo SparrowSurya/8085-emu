@@ -1,5 +1,6 @@
 ; THis program provides useful function to interact with the `TerminalDevice`
 
+
 %define TERM_CMD_WRITE   0x00
 %define TERM_CMD_DISPLAY 0x01
 %define TERM_CMD_READ    0x02
@@ -20,6 +21,7 @@ global print:
     ; Send the length of message to write
     mov A, B
     out TERM_DATA_PORT
+
 .send:
     mov A, M
     out TERM_DATA_PORT
