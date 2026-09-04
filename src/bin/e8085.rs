@@ -26,6 +26,16 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Check and lint a .e8085 assembly source file (similar to cargo check)
+    Check {
+        /// Input assembly file (.e8085 or .asm) to check
+        file: String,
+
+        /// Additional library containers (.8085.bin) to link
+        #[arg(short = 'l', long = "link")]
+        link: Vec<String>,
+    },
+
     /// Run a .e8085 assembly source file or .8085.bin binary image
     Run {
         /// Input file to execute (.e8085 or .8085.bin)
@@ -120,6 +130,7 @@ async fn main() {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Check { file, link } => check_file(&file, &link),
         Commands::Run { file, link } => run_file(&file, &link),
         Commands::Compile { file, link, output } => compile_file(&file, &link, output.as_deref()),
         Commands::Disassemble {
@@ -454,4 +465,185 @@ fn compile_file(input_path: &str, link: &[String], output_path: Option<&str>) {
         container.header.data_size,
         container.export_symbols.len()
     );
+}
+
+fn check_file(input_path: &str, link: &[String]) {
+    let src = std::fs::read_to_string(input_path).unwrap_or_else(|e| {
+        eprintln!("error: cannot read assembly file '{input_path}': {e}");
+        std::process::exit(2);
+    });
+
+    let link_containers = load_external_symbols(link);
+    let mut extra_externs = std::collections::HashMap::new();
+    for c in &link_containers {
+        for (sym, addr) in &c.export_symbols {
+            extra_externs.insert(sym.clone(), *addr);
+        }
+    }
+
+    let abs_path = std::fs::canonicalize(input_path)
+        .unwrap_or_else(|_| std::path::PathBuf::from(input_path));
+    let uri = tower_lsp::lsp_types::Url::from_file_path(&abs_path).unwrap_or_else(|_| {
+        tower_lsp::lsp_types::Url::parse(&format!("file://{}", abs_path.to_string_lossy())).unwrap()
+    });
+
+    let doc = emu8085::lsp::document::Document::new(uri.clone(), 1, src.clone());
+    let diagnostics = emu8085::lsp::diagnostics::compute_diagnostics_with_externs(&doc, &extra_externs);
+
+    let start_time = std::time::Instant::now();
+    let lines: Vec<&str> = src.lines().collect();
+
+    let mut error_count = 0;
+    let mut warning_count = 0;
+
+    for diag in &diagnostics {
+        let severity = diag.severity.unwrap_or(tower_lsp::lsp_types::DiagnosticSeverity::ERROR);
+        let (sev_str, sev_color) = match severity {
+            tower_lsp::lsp_types::DiagnosticSeverity::ERROR => {
+                error_count += 1;
+                ("error", "\x1b[1;31m")
+            }
+            tower_lsp::lsp_types::DiagnosticSeverity::WARNING => {
+                warning_count += 1;
+                ("warning", "\x1b[1;33m")
+            }
+            _ => ("info", "\x1b[1;36m"),
+        };
+
+        let start_line = diag.range.start.line as usize;
+        let start_col = diag.range.start.character as usize;
+        let end_col = diag.range.end.character as usize;
+
+        // Header: error: <message> / warning: <message>
+        eprintln!("{}{}\x1b[0m: {}", sev_color, sev_str, diag.message);
+
+        // Location:  --> path:line:col
+        eprintln!(
+            "  \x1b[1;34m-->\x1b[0m {}:{}:{}",
+            input_path,
+            start_line + 1,
+            start_col + 1
+        );
+
+        // Line snippet
+        eprintln!("   \x1b[1;34m|\x1b[0m");
+        if start_line < lines.len() {
+            let line_content = lines[start_line];
+            eprintln!(
+                "{:3}\x1b[1;34m|\x1b[0m {}",
+                start_line + 1,
+                line_content
+            );
+
+            let underline_len = if end_col > start_col {
+                (end_col - start_col).max(1)
+            } else {
+                1
+            };
+            let spaces = " ".repeat(start_col);
+            let carets = "^".repeat(underline_len);
+            eprintln!(
+                "   \x1b[1;34m|\x1b[0m {}{}{}\x1b[0m",
+                spaces, sev_color, carets
+            );
+        }
+        eprintln!("   \x1b[1;34m|\x1b[0m");
+
+        // Related information / notes
+        if let Some(ref related) = diag.related_information {
+            for rel in related {
+                eprintln!("   \x1b[1;36m= note:\x1b[0m {}", rel.message);
+            }
+        }
+        eprintln!();
+    }
+
+    // Code action suggestions
+    let code_actions = emu8085::lsp::code_actions::get_code_actions(
+        &doc,
+        &tower_lsp::lsp_types::CodeActionParams {
+            text_document: tower_lsp::lsp_types::TextDocumentIdentifier { uri },
+            range: tower_lsp::lsp_types::Range {
+                start: tower_lsp::lsp_types::Position { line: 0, character: 0 },
+                end: tower_lsp::lsp_types::Position {
+                    line: lines.len() as u32,
+                    character: 0,
+                },
+            },
+            context: tower_lsp::lsp_types::CodeActionContext::default(),
+            work_done_progress_params: tower_lsp::lsp_types::WorkDoneProgressParams::default(),
+            partial_result_params: tower_lsp::lsp_types::PartialResultParams::default(),
+        },
+    );
+
+    let mut suggestion_count = 0;
+    for action_or_cmd in code_actions {
+        if let tower_lsp::lsp_types::CodeActionOrCommand::CodeAction(action) = action_or_cmd {
+            if let Some(edit) = action.edit {
+                if let Some(changes) = edit.changes {
+                    for (_uri, text_edits) in changes {
+                        for te in text_edits {
+                            suggestion_count += 1;
+                            let s_line = te.range.start.line as usize;
+                            let s_col = te.range.start.character as usize;
+                            let e_col = te.range.end.character as usize;
+
+                            eprintln!("\x1b[1;32mhelp\x1b[0m: {}", action.title);
+                            eprintln!(
+                                "  \x1b[1;34m-->\x1b[0m {}:{}:{}",
+                                input_path,
+                                s_line + 1,
+                                s_col + 1
+                            );
+                            eprintln!("   \x1b[1;34m|\x1b[0m");
+                            if s_line < lines.len() {
+                                eprintln!(
+                                    "{:3}\x1b[1;34m|\x1b[0m {}",
+                                    s_line + 1,
+                                    lines[s_line]
+                                );
+                                let spaces = " ".repeat(s_col);
+                                let tildes = "~".repeat((e_col.saturating_sub(s_col)).max(1));
+                                eprintln!(
+                                    "   \x1b[1;34m|\x1b[0m {}\x1b[1;32m{}\x1b[0m",
+                                    spaces, tildes
+                                );
+                            }
+                            eprintln!("   \x1b[1;34m|\x1b[0m");
+                            eprintln!("   \x1b[1;32m= suggestion:\x1b[0m replace with `{}`", te.new_text);
+                            eprintln!();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let elapsed = start_time.elapsed();
+
+    if error_count > 0 {
+        let err_word = if error_count == 1 { "error" } else { "errors" };
+        let warn_word = if warning_count == 1 { "1 warning" } else { "warnings" };
+        let warn_suffix = if warning_count > 0 {
+            format!("; {warning_count} {warn_word} emitted")
+        } else {
+            "".to_string()
+        };
+        eprintln!(
+            "\x1b[1;31merror\x1b[0m: could not check `{input_path}` due to {error_count} previous {err_word}{warn_suffix}"
+        );
+        std::process::exit(1);
+    } else if warning_count > 0 || suggestion_count > 0 {
+        let warn_word = if warning_count == 1 { "1 warning" } else { "warnings" };
+        eprintln!(
+            "    \x1b[1;33mFinished\x1b[0m `check` profile with {warning_count} {warn_word}{} in {:.2?}",
+            if suggestion_count > 0 { format!(" and {suggestion_count} suggestion(s)") } else { "".to_string() },
+            elapsed
+        );
+    } else {
+        eprintln!(
+            "    \x1b[1;32mFinished\x1b[0m `check` profile [clean] in {:.2?}",
+            elapsed
+        );
+    }
 }

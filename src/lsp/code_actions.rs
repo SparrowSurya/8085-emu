@@ -40,12 +40,21 @@ fn check_mvi_zero_optimization(
     trimmed: &str,
 ) -> Option<CodeAction> {
     let lower = trimmed.to_lowercase();
-    if lower.starts_with("mvi a, 0")
-        || lower.starts_with("mvi a, 0x00")
-        || lower.starts_with("mvi a, 00h")
-    {
+    let is_zero = if let Some(rest) = lower.strip_prefix("mvi a,") {
+        let op = rest.split(';').next().unwrap_or(rest).trim();
+        op == "0" || op == "0x00" || op == "00h" || op == "0x0" || op == "00"
+    } else {
+        false
+    };
+
+    if is_zero {
         let col_start = line.find(trimmed).unwrap_or(0);
-        let col_end = col_start + trimmed.len();
+        let matched_len = if let Some(idx) = trimmed.find(';') {
+            trimmed[..idx].trim_end().len()
+        } else {
+            trimmed.len()
+        };
+        let col_end = col_start + matched_len;
 
         let mut changes = HashMap::new();
         changes.insert(

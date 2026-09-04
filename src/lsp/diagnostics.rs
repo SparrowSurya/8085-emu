@@ -8,6 +8,14 @@ use crate::asm::{assemble_with_options, parse};
 
 /// Analyzes an `.e8085` source document and returns compiler error and static analysis diagnostics.
 pub fn compute_diagnostics(doc: &Document) -> Vec<Diagnostic> {
+    compute_diagnostics_with_externs(doc, &HashMap::new())
+}
+
+/// Analyzes an `.e8085` source document with optional extra external symbols (e.g. from linked containers).
+pub fn compute_diagnostics_with_externs(
+    doc: &Document,
+    extra_externs: &HashMap<String, u16>,
+) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
     let base_dir = if let Ok(path) = doc.uri.to_file_path() {
@@ -19,7 +27,7 @@ pub fn compute_diagnostics(doc: &Document) -> Vec<Diagnostic> {
     let base_ref = base_dir.as_deref().unwrap_or_else(|| Path::new("."));
 
     // Collect all declared `extern <name>` symbols so references to external functions do not produce false errors
-    let mut extern_symbols = HashMap::new();
+    let mut extern_symbols = extra_externs.clone();
     let mut parsed_program: Option<Program> = None;
 
     if let Ok(tokens) = crate::asm::lex(&doc.text) {
