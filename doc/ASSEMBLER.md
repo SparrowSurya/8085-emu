@@ -342,7 +342,7 @@ strcpy:
 ### 4. `%include` Directive
 Imports `%define` constants, `global` routines, and data declarations from external files:
 ```e8085
-%include "terminal.e8085"
+%include "devices/text_io.e8085"
 
 segment .data
     greeting "Hello, " 0x0A
@@ -365,17 +365,17 @@ main:
 The linker (`-l / --link`) strictly accepts compiled `*.8085.bin` binary libraries to statically bundle them into a standalone executable:
 
 ```bash
-# 1. Compile reusable subroutine library (terminal helper)
-cargo run --bin e8085 -- compile programs/terminal.e8085 -o terminal.8085.bin
+# 1. Compile reusable subroutine library (TextIO helper)
+cargo run --bin e8085 -- compile programs/devices/text_io.e8085 -o text_io.8085.bin
 
 # 2. Compile main program linking with precompiled library (statically bundles library code)
-cargo run --bin e8085 -- compile programs/greet.e8085 -l terminal.8085.bin -o greet.8085.bin
+cargo run --bin e8085 -- compile programs/greet.e8085 -l text_io.8085.bin -o greet.8085.bin
 
 # 3. Run the standalone binary executable directly (no runtime -l needed!)
 cargo run --bin e8085 -- run greet.8085.bin
 
 # 4. Or run the source file directly with on-the-fly linking
-cargo run --bin e8085 -- run programs/greet.e8085 -l terminal.8085.bin
+cargo run --bin e8085 -- run programs/greet.e8085 -l text_io.8085.bin
 ```
 
-> **Note on Entry Points**: Pure subroutine libraries (without a `main:` label) have `entry_pc = 0x0000`. Attempting to run a library binary directly (`e8085 run terminal.8085.bin`) will be rejected with `error: no entry point specified (main label missing in binary)`.
+> **Note on Entry Points**: Pure subroutine libraries (without a `main:` label) have `entry_pc = 0x0000`. Attempting to run a library binary directly (`e8085 run text_io.8085.bin`) will be rejected with `error: no entry point specified (main label missing in binary)`.

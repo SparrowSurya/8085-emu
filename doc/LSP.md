@@ -30,7 +30,7 @@ Pressing `F12` or `Ctrl+Click` on an identifier navigates directly to its defini
 - **Scoped Local Labels**: `jnz .loop` $\rightarrow$ jumps to `.loop:` within the enclosing parent subroutine without name collisions.
 - **Variables**: `lxi HL, prompt` $\rightarrow$ jumps to `prompt "..."` in `segment .data` or `prompt BYTE 32` in `.bss`.
 - **Constants**: `mvi A, MAX_LIMIT` $\rightarrow$ jumps to `%define MAX_LIMIT 100`.
-- **Include Files**: Clicking on `%include "devices/terminal.e8085"` opens the referenced `.e8085` file.
+- **Include Files**: Clicking on `%include "devices/text_io.e8085"` opens the referenced `.e8085` file.
 - **Cross-File Symbols**: Symbols defined in an included file jump directly into the source location within the included file.
 
 ### 1.3 Auto-Completion (`textDocument/completion`)

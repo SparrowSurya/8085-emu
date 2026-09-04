@@ -17,11 +17,11 @@ segment .bss
 segment .text
 
 main:
-    ; Enter write mode on the terminal command port
+    ; Enter write mode on the TextIO command port
     mvi A, CMD_WRITE
     out CMD_PORT
 
-    ; Write the length of the prompt to the terminal data port
+    ; Write the length of the prompt to the TextIO data port
     mvi A, %len prompt
     out DATA_PORT
 
@@ -41,7 +41,7 @@ send_prompt:
     mvi A, CMD_DISPLAY
     out CMD_PORT
 
-    ; Trigger capture from the terminal to read name
+    ; Trigger capture from the TextIO device to read name
     mvi A, CMD_READ
     out CMD_PORT
 
@@ -74,11 +74,11 @@ capture_done:
     mvi A, 0x0A
     mov M, A
 
-    ; Enter write mode on the terminal command port
+    ; Enter write mode on the TextIO command port
     mvi A, CMD_WRITE
     out CMD_PORT
 
-    ; Calculate total length (C + 5) and write it to terminal data port
+    ; Calculate total length (C + 5) and write it to TextIO data port
     mov A, C
     adi 5
     out DATA_PORT

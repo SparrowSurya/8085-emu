@@ -295,7 +295,7 @@ async fn test_multifile_terminal_bridge_and_halt_termination() {
     let (stack_resp, _) = client.send_request("stackTrace", Some(serde_json::json!({ "threadId": 1 }))).await;
     let stack_body: StackTraceResponseBody = serde_json::from_value(stack_resp.body.unwrap()).unwrap();
     let stepped_path = stack_body.stack_frames[0].source.as_ref().unwrap().path.as_ref().unwrap();
-    assert!(stepped_path.ends_with("terminal.e8085"), "Expected path to end with terminal.e8085, got: {stepped_path}");
+    assert!(stepped_path.ends_with("text_io.e8085"), "Expected path to end with text_io.e8085, got: {stepped_path}");
 
     // 7. Set breakpoint at line 42 of triangle_pattern.e8085 (call draw)
     let (bp_resp, _) = client.send_request("setBreakpoints", Some(serde_json::json!({

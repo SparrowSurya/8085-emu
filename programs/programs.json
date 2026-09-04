@@ -36,21 +36,21 @@
     {
       "name": "hello_world",
       "file": "hello_world.e8085",
-      "type": "terminal",
+      "type": "text_io",
       "expect_output": "Hello World!\n"
     },
     {
       "name": "right sided triangle",
       "file": "triangle_pattern.e8085",
-      "type": "terminal",
+      "type": "text_io",
       "stdin": "5",
       "expect_output": "Enter size of triangle: *****\n****\n***\n**\n*\n\n"
     },
     {
       "name": "greet",
       "file": "greet.e8085",
-      "type": "terminal",
-      "link_libs": ["devices/terminal.e8085"],
+      "type": "text_io",
+      "link_libs": ["devices/text_io.e8085"],
       "stdin": "Sparrow",
       "expect_output": "What is your name? Hello, Sparrow\n"
     }

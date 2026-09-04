@@ -209,7 +209,7 @@ impl DebugSession {
         // Attach standard devices with stdout capturing and TCP terminal bridge
         let out_sink_term = self.output_queue.clone();
         let tcp_writer_term = term_tcp_writer.clone();
-        let term = crate::device::TerminalDevice::with_io(
+        let term = crate::device::TextIODevice::with_io(
             0x01, // data_port
             0x02, // cmd_port
             term_rx,
@@ -393,7 +393,7 @@ impl DebugSession {
     }
 
     pub fn feed_terminal_input(&mut self, text: &str) {
-        if let Some(term) = self.machine.devices.find_device_mut::<crate::device::TerminalDevice>() {
+        if let Some(term) = self.machine.devices.find_device_mut::<crate::device::TextIODevice>() {
             term.feed_line(text);
         }
     }

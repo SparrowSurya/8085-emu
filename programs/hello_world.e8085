@@ -1,8 +1,8 @@
-%define TERM_CMD_WRITE   0x00
-%define TERM_CMD_DISPLAY 0x01
-%define TERM_CMD_READ    0x02
-%define TERM_DATA_PORT   0x01
-%define TERM_CMD_PORT    0x02
+%define TEXTIO_CMD_WRITE   0x00
+%define TEXTIO_CMD_DISPLAY 0x01
+%define TEXTIO_CMD_READ    0x02
+%define TEXTIO_DATA_PORT   0x01
+%define TEXTIO_CMD_PORT    0x02
 
 segment .data
 
@@ -11,29 +11,29 @@ segment .data
 segment .text
 
 main:
-    ; Enter write mode on terminal device
-    mvi A, TERM_CMD_WRITE
-    out TERM_CMD_PORT
+    ; Enter write mode on TextIO device
+    mvi A, TEXTIO_CMD_WRITE
+    out TEXTIO_CMD_PORT
 
     ; Send the length of message to write
     mvi A, %len msg
-    out TERM_DATA_PORT
+    out TEXTIO_DATA_PORT
 
     ; Point to message and set loop counter
     lxi HL, msg
     mvi B, %len msg
 
 
-; Send message bytes to terminal device
+; Send message bytes to TextIO device
 send:
     mov A, M
-    out TERM_DATA_PORT
+    out TEXTIO_DATA_PORT
     inx HL
     dcr B
     jnz send
 
     ; Display the message stored in the buffer
-    mvi A, TERM_CMD_DISPLAY
-    out TERM_CMD_PORT
+    mvi A, TEXTIO_CMD_DISPLAY
+    out TEXTIO_CMD_PORT
 
     hlt

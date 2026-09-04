@@ -8,13 +8,13 @@ use clap::{Parser, Subcommand};
 use emu8085::asm::assemble_and_link_with_file;
 use emu8085::asm::container::{BinaryContainer, CONTAINER_MAGIC};
 use emu8085::asm::load;
-use emu8085::{Addr, DisassembleOptions, InspectOptions, Machine, TerminalDevice};
+use emu8085::{Addr, DisassembleOptions, InspectOptions, Machine, TextIODevice};
 
 /// Maximum 8085 RAM capacity (64 KB).
 const MAX_RAM_SIZE: usize = 65536;
 
-const TERM_DATA_PORT: u8 = 0x01;
-const TERM_CMD_PORT: u8 = 0x02;
+const TEXTIO_DATA_PORT: u8 = 0x01;
+const TEXTIO_CMD_PORT: u8 = 0x02;
 
 #[derive(Parser)]
 #[command(name = "e8085")]
@@ -422,12 +422,12 @@ fn run_file(path: &str, link: &[String]) {
         }
     });
 
-    let terminal = TerminalDevice::with_io(TERM_DATA_PORT, TERM_CMD_PORT, rx, |b| {
+    let text_io = TextIODevice::with_io(TEXTIO_DATA_PORT, TEXTIO_CMD_PORT, rx, |b| {
         print!("{}", b as char);
         let _ = std::io::stdout().flush();
     });
 
-    machine.attach_device(Box::new(terminal), &[TERM_DATA_PORT, TERM_CMD_PORT]);
+    machine.attach_device(Box::new(text_io), &[TEXTIO_DATA_PORT, TEXTIO_CMD_PORT]);
     machine.run();
 
     if let Some(fault) = &machine.cpu.fault {

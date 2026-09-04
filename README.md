@@ -22,18 +22,18 @@ cargo run --bin e8085 -- run programs/hello_world.e8085
 cargo run --bin e8085 -- run greet.8085.bin
 
 # Run assembly file with external library linking on-the-fly
-cargo run --bin e8085 -- run programs/greet.e8085 -l terminal.8085.bin
+cargo run --bin e8085 -- run programs/greet.e8085 -l text_io.8085.bin
 ```
 
 ### 2. Compiling Programs & Linking Libraries (`compile`)
 Compile `.e8085` source into a self-contained `.8085.bin` binary image:
 
 ```bash
-# 1. Compile reusable subroutine library (terminal helper)
-cargo run --bin e8085 -- compile programs/terminal.e8085 -o terminal.8085.bin
+# 1. Compile reusable subroutine library (TextIO helper)
+cargo run --bin e8085 -- compile programs/devices/text_io.e8085 -o text_io.8085.bin
 
 # 2. Statically link library into a standalone executable binary
-cargo run --bin e8085 -- compile programs/greet.e8085 -l terminal.8085.bin -o greet.8085.bin
+cargo run --bin e8085 -- compile programs/greet.e8085 -l text_io.8085.bin -o greet.8085.bin
 
 # 3. Run the standalone binary directly
 cargo run --bin e8085 -- run greet.8085.bin
@@ -125,10 +125,10 @@ cargo test --all-targets && cargo test --doc
 ```text
 emu8085/
 ├── programs/           # 8085 user assembly programs (.e8085)
-│   ├── demo.e8085              # Interactive terminal I/O demo
-│   ├── terminal.e8085          # Terminal I/O subroutine library (print, input, putch, endl)
+│   ├── demo.e8085              # Interactive TextIO I/O demo
+│   ├── devices/text_io.e8085   # TextIO subroutine library (print, input, putch, endl)
 │   ├── greet.e8085             # Interactive greeting using extern subroutine linking
-│   ├── hello_world.e8085       # Terminal device string display
+│   ├── hello_world.e8085       # TextIO device string display
 │   ├── array_sum.e8085         # Array traversal & summation (ADD M)
 │   ├── directives.e8085        # %define, %repeat, %len, and .bss
 │   ├── hardware_trap.e8085     # Hardware TRAP exception handling
@@ -253,7 +253,7 @@ emu8085/
   - Live register and memory mutation (`setVariable`).
   - Interactive `"8085 Terminal"` tab backed by a bidirectional TCP socket bridge for terminal and printer peripherals.
 - **Rich Peripheral Set**:
-  - `TerminalDevice`: Two-port virtual terminal supporting line-buffered input and output.
+  - `TextIODevice`: Two-port virtual text I/O controller supporting packet-buffered input and output.
   - `PrinterDevice`: Character stream capture device with callbacks.
   - `KeyboardDevice`: FIFO-buffered keyboard input device with INTR/INTA interrupt vectoring.
   - `USBDevice`: DMA-capable high-speed transfer controller.

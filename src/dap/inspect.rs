@@ -299,13 +299,13 @@ pub fn get_variables(
         }
         SCOPE_PERIPHERALS => {
             let mut list = Vec::new();
-            // Terminal
-            if let Some(term) = machine.devices.find_device::<crate::device::TerminalDevice>() {
+            // TextIO
+            if let Some(term) = machine.devices.find_device::<crate::device::TextIODevice>() {
                 let out_text = term.output_string();
                 list.push(Variable {
-                    name: "Terminal Output".to_string(),
+                    name: "TextIO Output".to_string(),
                     value: if out_text.is_empty() { "\"(empty)\"".to_string() } else { format!("\"{out_text}\"") },
-                    r#type: Some("TerminalDevice".to_string()),
+                    r#type: Some("TextIODevice".to_string()),
                     variables_reference: 0,
                     evaluate_name: None,
                     memory_reference: None,

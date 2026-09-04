@@ -1,8 +1,8 @@
 use std::sync::mpsc::channel;
 
 use emu8085::{
-    Addr, Instruction, Machine, Opcode, Operand, Program, TerminalDevice,
-    device::terminal::{CMD_DISPLAY, CMD_READ, CMD_WRITE},
+    Addr, Instruction, Machine, Opcode, Operand, Program, TextIODevice,
+    device::text_io::{CMD_DISPLAY, CMD_READ, CMD_WRITE},
 };
 
 fn main() {
@@ -20,13 +20,13 @@ fn main() {
 
     let mut machine = Machine::default();
 
-    let term_data_port: u8 = 0x01;
-    let term_cmd_port: u8 = 0x02;
-    let terminal = TerminalDevice::with_io(term_data_port, term_cmd_port, rx, |b| {
+    let text_io_data_port: u8 = 0x01;
+    let text_io_cmd_port: u8 = 0x02;
+    let text_io = TextIODevice::with_io(text_io_data_port, text_io_cmd_port, rx, |b| {
         print!("{}", b as char);
     });
 
-    machine.attach_device(Box::new(terminal), &[term_data_port, term_cmd_port]);
+    machine.attach_device(Box::new(text_io), &[text_io_data_port, text_io_cmd_port]);
 
     let prompt = "What is your name? \n";
     let prompt_addr = Addr::from_le(0x00, 0x00);
@@ -53,30 +53,30 @@ fn main() {
     }
 
     let program = Program::new(vec![
-        // Enter write mode on the terminal command port
+        // Enter write mode on the text I/O command port
         Instruction::with(Opcode::MVI_A, Operand::Byte(CMD_WRITE)),
-        Instruction::with(Opcode::OUT, Operand::Byte(term_cmd_port)),
-        // Write the length of the prompt to the terminal data port
+        Instruction::with(Opcode::OUT, Operand::Byte(text_io_cmd_port)),
+        // Write the length of the prompt to the text I/O data port
         Instruction::with(Opcode::MVI_A, Operand::Byte(prompt.len() as u8)),
-        Instruction::with(Opcode::OUT, Operand::Byte(term_data_port)),
+        Instruction::with(Opcode::OUT, Operand::Byte(text_io_data_port)),
         // Point HL to the prompt in RAM
         Instruction::with(Opcode::MVI_HL, Operand::Word(prompt_addr.0)),
         // Setup loop counter in B register
         Instruction::with(Opcode::MVI_B, Operand::Byte(prompt.len() as u8)),
         // Loop: write prompt characters
         Instruction::new(Opcode::MOV_AM).labeled("send_prompt"),
-        Instruction::with(Opcode::OUT, Operand::Byte(term_data_port)),
+        Instruction::with(Opcode::OUT, Operand::Byte(text_io_data_port)),
         Instruction::new(Opcode::INX_HL),
         Instruction::new(Opcode::DCR_B),
         Instruction::with(Opcode::JNZ, Operand::Label(String::from("send_prompt"))),
         // Display buffer (print prompt)
         Instruction::with(Opcode::MVI_A, Operand::Byte(CMD_DISPLAY)),
-        Instruction::with(Opcode::OUT, Operand::Byte(term_cmd_port)),
-        // Trigger capture from the terminal to read name
+        Instruction::with(Opcode::OUT, Operand::Byte(text_io_cmd_port)),
+        // Trigger capture from the text I/O device to read name
         Instruction::with(Opcode::MVI_A, Operand::Byte(CMD_READ)),
-        Instruction::with(Opcode::OUT, Operand::Byte(term_cmd_port)),
+        Instruction::with(Opcode::OUT, Operand::Byte(text_io_cmd_port)),
         // Read the length byte of the captured input
-        Instruction::with(Opcode::IN, Operand::Byte(term_data_port)),
+        Instruction::with(Opcode::IN, Operand::Byte(text_io_data_port)),
         // Store length in B (loop counter) and C (preserved length)
         Instruction::new(Opcode::MOV_BA),
         Instruction::new(Opcode::MOV_CA),
@@ -87,7 +87,7 @@ fn main() {
         Instruction::with(Opcode::CPI, Operand::Byte(0x00)),
         Instruction::with(Opcode::JZ, Operand::Label(String::from("capture_done"))),
         // Loop: read input characters and store them in name_addr
-        Instruction::with(Opcode::IN, Operand::Byte(term_data_port)).labeled("read_char"),
+        Instruction::with(Opcode::IN, Operand::Byte(text_io_data_port)).labeled("read_char"),
         Instruction::new(Opcode::MOV_MA),
         Instruction::new(Opcode::INX_HL),
         Instruction::new(Opcode::DCR_B),
@@ -96,18 +96,18 @@ fn main() {
         Instruction::with(Opcode::MVI_A, Operand::Byte(0x0A)).labeled("capture_done"),
         Instruction::new(Opcode::MOV_MA),
         // Now print "Hi {name}!\n"
-        // Enter write mode on the terminal command port
+        // Enter write mode on the text I/O command port
         Instruction::with(Opcode::MVI_A, Operand::Byte(CMD_WRITE)),
-        Instruction::with(Opcode::OUT, Operand::Byte(term_cmd_port)),
-        // Calculate total length (C + 5) and write it to terminal data port
+        Instruction::with(Opcode::OUT, Operand::Byte(text_io_cmd_port)),
+        // Calculate total length (C + 5) and write it to text I/O data port
         Instruction::new(Opcode::MOV_AC),
         Instruction::with(Opcode::ADI, Operand::Byte(5)),
-        Instruction::with(Opcode::OUT, Operand::Byte(term_data_port)),
+        Instruction::with(Opcode::OUT, Operand::Byte(text_io_data_port)),
         // Write "Hi " prefix
         Instruction::with(Opcode::MVI_HL, Operand::Word(hello_addr.0)),
         Instruction::with(Opcode::MVI_B, Operand::Byte(3)),
         Instruction::new(Opcode::MOV_AM).labeled("send_hello"),
-        Instruction::with(Opcode::OUT, Operand::Byte(term_data_port)),
+        Instruction::with(Opcode::OUT, Operand::Byte(text_io_data_port)),
         Instruction::new(Opcode::INX_HL),
         Instruction::new(Opcode::DCR_B),
         Instruction::with(Opcode::JNZ, Operand::Label(String::from("send_hello"))),
@@ -118,7 +118,7 @@ fn main() {
         Instruction::with(Opcode::CPI, Operand::Byte(0x00)),
         Instruction::with(Opcode::JZ, Operand::Label(String::from("send_name_done"))),
         Instruction::new(Opcode::MOV_AM).labeled("send_name"),
-        Instruction::with(Opcode::OUT, Operand::Byte(term_data_port)),
+        Instruction::with(Opcode::OUT, Operand::Byte(text_io_data_port)),
         Instruction::new(Opcode::INX_HL),
         Instruction::new(Opcode::DCR_B),
         Instruction::with(Opcode::JNZ, Operand::Label(String::from("send_name"))),
@@ -126,13 +126,13 @@ fn main() {
         Instruction::with(Opcode::MVI_HL, Operand::Word(excl_addr.0)).labeled("send_name_done"),
         Instruction::with(Opcode::MVI_B, Operand::Byte(2)),
         Instruction::new(Opcode::MOV_AM).labeled("send_excl"),
-        Instruction::with(Opcode::OUT, Operand::Byte(term_data_port)),
+        Instruction::with(Opcode::OUT, Operand::Byte(text_io_data_port)),
         Instruction::new(Opcode::INX_HL),
         Instruction::new(Opcode::DCR_B),
         Instruction::with(Opcode::JNZ, Operand::Label(String::from("send_excl"))),
         // Display buffer
         Instruction::with(Opcode::MVI_A, Operand::Byte(CMD_DISPLAY)),
-        Instruction::with(Opcode::OUT, Operand::Byte(term_cmd_port)),
+        Instruction::with(Opcode::OUT, Operand::Byte(text_io_cmd_port)),
         Instruction::new(Opcode::HLT),
     ]);
 

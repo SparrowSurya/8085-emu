@@ -15,7 +15,7 @@
 //! - [`bus`]: Shared 16-bit address and 8-bit data bus with control strobes and handshakes ([`SystemBus`], [`ControlLines`]).
 //! - [`memory`]: Byte-addressable RAM with bus-driven access and illegal address fault detection ([`Memory`]).
 //! - [`device`]: Peripheral device management ([`Device`], [`DeviceManager`]) with built-in
-//!   devices like [`TerminalDevice`], [`PrinterDevice`], [`KeyboardDevice`], and [`USBDevice`].
+//!   devices like [`TextIODevice`], [`PrinterDevice`], [`KeyboardDevice`], and [`USBDevice`].
 //! - [`machine`]: Top-level system facade ([`Machine`]) clocking all subsystems together.
 //! - [`instruction`]: Opcode enumerations ([`Opcode`]) and instruction representations ([`Instruction`]).
 //!
@@ -50,7 +50,7 @@ pub use cpu::flags::Flags;
 pub use cpu::interrupts::{VEC_RST_5_5, VEC_RST_6_5, VEC_RST_7_5, VEC_TRAP};
 pub use cpu::registers::{Reg8, Reg16};
 pub use cpu::{Cpu, MachineCycle};
-pub use device::{Device, DeviceManager, KeyboardDevice, PrinterDevice, TerminalDevice, USBDevice};
+pub use device::{Device, DeviceManager, KeyboardDevice, PrinterDevice, TextIODevice, USBDevice};
 pub use error::EmuError;
 pub use instruction::opcode::Opcode;
 pub use instruction::{

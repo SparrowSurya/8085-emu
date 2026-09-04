@@ -1,4 +1,4 @@
-//! A terminal peripheral driven by a length-prefixed buffer and a command register.
+//! A text I/O peripheral driven by a length-prefixed buffer and a command register.
 //!
 //! It exposes two I/O ports — a *command* port and a *data* port — and owns a 256-byte
 //! buffer whose first byte is the payload length: `buffer[0] = len`, `buffer[1..=len]`
@@ -46,8 +46,8 @@ enum Mode {
     Reading,
 }
 
-/// A console mapped to a command port and a data port, backed by a length-prefixed buffer.
-pub struct TerminalDevice {
+/// A text I/O device mapped to a command port and a data port, backed by a length-prefixed buffer.
+pub struct TextIODevice {
     cmd_port: u8,
     data_port: u8,
     buffer: [u8; BUFFER_LEN],
@@ -59,10 +59,10 @@ pub struct TerminalDevice {
     callback: Option<Box<dyn FnMut(u8) + Send + 'static>>,
 }
 
-impl TerminalDevice {
-    /// A terminal on the given command and data ports.
+impl TextIODevice {
+    /// A text I/O device on the given command and data ports.
     pub fn new(cmd_port: u8, data_port: u8) -> Self {
-        TerminalDevice {
+        TextIODevice {
             cmd_port,
             data_port,
             buffer: [0; BUFFER_LEN],
@@ -75,12 +75,12 @@ impl TerminalDevice {
         }
     }
 
-    /// Creates a terminal with input receiver and output callback.
+    /// Creates a text I/O device with input receiver and output callback.
     pub fn with_io<F>(data_port: u8, cmd_port: u8, rx: Receiver<u8>, on_display: F) -> Self
     where
         F: FnMut(u8) + Send + 'static,
     {
-        TerminalDevice {
+        TextIODevice {
             cmd_port,
             data_port,
             buffer: [0; BUFFER_LEN],
@@ -176,19 +176,19 @@ impl TerminalDevice {
         self.mode = Mode::Reading;
     }
 
-    /// Returns a read-only view of the terminal's internal buffer.
+    /// Returns a read-only view of the text I/O device's internal buffer.
     ///
     /// The returned slice borrows the buffer and does not copy its contents.
-    /// Any modifications to the buffer must be performed through the terminal's
+    /// Any modifications to the buffer must be performed through the device's
     /// other APIs.
     pub fn buffer(&self) -> &[u8] {
         &self.buffer
     }
 }
 
-impl Device for TerminalDevice {
+impl Device for TextIODevice {
     fn name(&self) -> &str {
-        "TerminalDevice"
+        "TextIODevice"
     }
 
     fn port_write(&mut self, port: u8, data: u8) {
@@ -257,7 +257,7 @@ mod tests {
 
     #[test]
     fn write_then_display_round_trips() {
-        let mut t = TerminalDevice::new(CMD, DATA);
+        let mut t = TextIODevice::new(CMD, DATA);
         t.port_write(CMD, CMD_WRITE);
         t.port_write(DATA, 2); // length
         t.port_write(DATA, b'H');
@@ -268,7 +268,7 @@ mod tests {
 
     #[test]
     fn write_auto_completes_at_length_and_ignores_extra() {
-        let mut t = TerminalDevice::new(CMD, DATA);
+        let mut t = TextIODevice::new(CMD, DATA);
         t.port_write(CMD, CMD_WRITE);
         t.port_write(DATA, 1); // length 1
         t.port_write(DATA, b'X'); // payload -> transfer complete
@@ -279,7 +279,7 @@ mod tests {
 
     #[test]
     fn empty_payload_displays_nothing() {
-        let mut t = TerminalDevice::new(CMD, DATA);
+        let mut t = TextIODevice::new(CMD, DATA);
         t.port_write(CMD, CMD_WRITE);
         t.port_write(DATA, 0); // length 0 -> immediately complete
         t.port_write(CMD, CMD_DISPLAY);
@@ -288,7 +288,7 @@ mod tests {
 
     #[test]
     fn payload_is_binary_safe_including_nul() {
-        let mut t = TerminalDevice::new(CMD, DATA);
+        let mut t = TextIODevice::new(CMD, DATA);
         t.port_write(CMD, CMD_WRITE);
         for b in [3u8, 0x00, 0xFF, 0x01] {
             t.port_write(DATA, b);
@@ -299,7 +299,7 @@ mod tests {
 
     #[test]
     fn read_fills_buffer_and_data_reads_length_then_payload() {
-        let mut t = TerminalDevice::new(CMD, DATA);
+        let mut t = TextIODevice::new(CMD, DATA);
         t.feed_line("OK");
         t.port_write(CMD, CMD_READ);
         assert_eq!(t.payload_len(), 2);
@@ -312,7 +312,7 @@ mod tests {
     #[test]
     fn read_then_display_echoes_without_touching_data_port() {
         // Because READ leaves the line in the buffer, DISPLAY alone echoes it.
-        let mut t = TerminalDevice::new(CMD, DATA);
+        let mut t = TextIODevice::new(CMD, DATA);
         t.feed_line("echo me");
         t.port_write(CMD, CMD_READ);
         t.port_write(CMD, CMD_DISPLAY);

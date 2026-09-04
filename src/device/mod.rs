@@ -7,12 +7,12 @@
 
 pub mod keyboard;
 pub mod printer;
-pub mod terminal;
+pub mod text_io;
 pub mod usb;
 
 pub use keyboard::KeyboardDevice;
 pub use printer::PrinterDevice;
-pub use terminal::TerminalDevice;
+pub use text_io::TextIODevice;
 pub use usb::USBDevice;
 
 use crate::bus::SystemBus;

@@ -45,7 +45,7 @@ flowchart TB
 
 ### Communication Channels:
 1. **DAP Protocol Channel (`stdio`)**: Standard input/output carries JSON-RPC DAP requests, responses, and notifications (e.g. `launch`, `stackTrace`, `variables`, `stopped`, `terminated`).
-2. **Terminal Bridge Channel (`TCP 127.0.0.1:8085`)**: A dedicated localhost TCP stream bridges bidirectional I/O between the virtual peripheral devices (`TerminalDevice`, `PrinterDevice`) and the VS Code `"8085 Terminal"` tab.
+2. **Terminal Bridge Channel (`TCP 127.0.0.1:8085`)**: A dedicated localhost TCP stream bridges bidirectional I/O between the virtual peripheral devices (`TextIODevice`, `PrinterDevice`) and the VS Code `"8085 Terminal"` tab.
 
 ---
 
@@ -73,7 +73,7 @@ The Variables panel exposes seven specialized scopes:
 | **Data Segment** | Variables declared in `segment .data` formatted as `variable_name 0xADDR (size type) "value"` with non-printable bytes escaped as `\x00` / `\xHH`. |
 | **BSS Segment** | Variables declared in `segment .bss` formatted as `variable_name 0xADDR (size type) "value"` with non-printable bytes escaped as `\x00` / `\xHH`. |
 | **Stack Memory** | Active stack word rows from current `SP` up to top of stack memory, showing 16-bit word addresses, hex values, ASCII strings, and label/marker annotations `(SP, label.local)`. |
-| **Peripherals & Diagnostics** | Status of attached hardware peripherals (`TerminalDevice`, `PrinterDevice`, `KeyboardDevice`) and real-time VM statistics (elapsed T-states, instructions executed, machine cycles). |
+| **Peripherals & Diagnostics** | Status of attached hardware peripherals (`TextIODevice`, `PrinterDevice`, `KeyboardDevice`) and real-time VM statistics (elapsed T-states, instructions executed, machine cycles). |
 
 ### 2.4 Custom Debug Views (`Data Segment`, `BSS Segment`, and `8085 Stack`)
 In addition to the standard DAP variables tree, the VS Code extension contributes three dedicated custom tree views in the Debug Viewlet (`views.debug`), visible whenever an active 8085 debug session is running (`debugType == 'e8085'`):
@@ -152,7 +152,7 @@ Use the Debug Console or hover over variables in the editor to evaluate expressi
 
 ## 3. Interactive Virtual Terminal Architecture
 
-The 8085 platform includes a length-prefixed two-port virtual terminal (`TerminalDevice`):
+The 8085 platform includes a length-prefixed two-port virtual text I/O controller (`TextIODevice`):
 - **Command Port (`0x02`)**:
   - `CMD_WRITE (0x00)`: Enters write mode.
   - `CMD_DISPLAY (0x01)`: Emits the buffered text to the terminal output.
@@ -166,7 +166,7 @@ sequenceDiagram
     participant Term as VS Code "8085 Terminal"
     participant TCP as TCP Bridge (127.0.0.1:8085)
     participant DAP as e8085-dap
-    participant CPU as 8085 CPU & TerminalDevice
+    participant CPU as 8085 CPU & TextIODevice
 
     Note over CPU: call print
     CPU->>DAP: CMD_DISPLAY on port 0x02
@@ -258,7 +258,7 @@ cargo run --bin e8085 -- dap
 Let's walk through debugging [`programs/triangle_pattern.e8085`](../programs/triangle_pattern.e8085):
 
 ```e8085
-%include "devices/terminal.e8085"
+%include "devices/text_io.e8085"
 %include "lib/math.e8085"
 %include "lib/conv.e8085"
 

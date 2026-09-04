@@ -1100,7 +1100,7 @@ fn get_directive_hover(directive: &str) -> Option<&'static str> {
              Textually embeds and compiles the referenced assembly source file.\n\n\
              **Example:**\n\
              ```e8085\n\
-             %include \"devices/terminal.e8085\"\n\
+             %include \"devices/text_io.e8085\"\n\
              ```",
         ),
         "%repeat" => Some(
@@ -1513,12 +1513,12 @@ mod tests {
     #[test]
     fn test_hover_include_module_doc() {
         let temp_dir = std::env::temp_dir();
-        let target_file = temp_dir.join("test_terminal_doc.e8085");
-        let target_content = "; Module providing TerminalDevice I/O subroutines.\n; Supports print, input, and putch.\n\nsegment .text\nprint:\n    ret\n";
+        let target_file = temp_dir.join("test_text_io_doc.e8085");
+        let target_content = "; Module providing TextIODevice I/O subroutines.\n; Supports print, input, and putch.\n\nsegment .text\nprint:\n    ret\n";
         std::fs::write(&target_file, target_content).unwrap();
 
         let source_file = temp_dir.join("main_hover.e8085");
-        let text = "%include \"test_terminal_doc.e8085\"\nmain:\n    hlt\n".to_string();
+        let text = "%include \"test_text_io_doc.e8085\"\nmain:\n    hlt\n".to_string();
         let uri = Url::from_file_path(&source_file).unwrap();
         let doc = Document::new(uri, 1, text);
 
@@ -1531,7 +1531,7 @@ mod tests {
         )
         .unwrap();
         if let HoverContents::Markup(m) = h_inc.contents {
-            assert!(m.value.contains("Module providing TerminalDevice I/O"));
+            assert!(m.value.contains("Module providing TextIODevice I/O"));
             assert!(m.value.contains("Supports print, input, and putch."));
         } else {
             panic!("expected markup");
@@ -1539,7 +1539,7 @@ mod tests {
 
         let range = h_inc.range.unwrap();
         assert_eq!(range.start.character, 9);
-        assert_eq!(range.end.character, 34);
+        assert_eq!(range.end.character, 33);
 
         let _ = std::fs::remove_file(target_file);
     }

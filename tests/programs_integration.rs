@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 
 use emu8085::asm::container::BinaryContainer;
 use emu8085::asm::{assemble, assemble_and_link, load};
-use emu8085::{Machine, PrinterDevice, TerminalDevice};
+use emu8085::{Machine, PrinterDevice, TextIODevice};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -149,19 +149,19 @@ fn test_programs_manifest_suite() {
                     );
                 }
             }
-            "terminal" => {
+            "text_io" | "terminal" => {
                 let output = Arc::new(Mutex::new(Vec::new()));
                 let output_clone = output.clone();
                 let (_tx, rx) = channel();
-                let mut terminal = TerminalDevice::with_io(0x01, 0x02, rx, move |b| {
+                let mut text_io = TextIODevice::with_io(0x01, 0x02, rx, move |b| {
                     output_clone.lock().unwrap().push(b);
                 });
 
                 if let Some(input_text) = &prog.stdin {
-                    terminal.feed_line(input_text);
+                    text_io.feed_line(input_text);
                 }
 
-                machine.attach_device(Box::new(terminal), &[0x01, 0x02]);
+                machine.attach_device(Box::new(text_io), &[0x01, 0x02]);
                 load(&mut machine, &image)
                     .unwrap_or_else(|e| panic!("failed to load '{}': {e}", prog.name));
                 machine.run();
@@ -171,7 +171,7 @@ fn test_programs_manifest_suite() {
                     let out_str = String::from_utf8_lossy(&output.lock().unwrap()).to_string();
                     assert_eq!(
                         out_str, *expected,
-                        "program '{}' terminal output mismatch",
+                        "program '{}' text_io output mismatch",
                         prog.name
                     );
                 }

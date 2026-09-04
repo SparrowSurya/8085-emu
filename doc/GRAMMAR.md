@@ -120,7 +120,7 @@ main:
 Imports definitions, global labels, and constants from an external source file. File paths must be enclosed **strictly in double quotes**:
 
 ```e8085
-%include "devices/terminal.e8085"
+%include "devices/text_io.e8085"
 %include "lib/math.e8085"
 ```
 
@@ -367,10 +367,10 @@ isr_rst55:
 ; Example .e8085 Program: String Echo with Software ISR
 ; ==========================================================
 
-%define TERM_DATA_PORT 0x01
-%define TERM_CMD_PORT  0x02
-%define CMD_WRITE      0x00
-%define CMD_DISPLAY    0x01
+%define TEXTIO_DATA_PORT 0x01
+%define TEXTIO_CMD_PORT  0x02
+%define CMD_WRITE        0x00
+%define CMD_DISPLAY      0x01
 
 segment .data
   greeting BYTE "8085 Online!" 0x0A
@@ -386,24 +386,24 @@ main:
   ; Invoke custom Software Interrupt 1
   rst 1
 
-  ; Write greeting to terminal device
+  ; Write greeting to TextIO device
   mvi A, CMD_WRITE
-  out TERM_CMD_PORT
+  out TEXTIO_CMD_PORT
   mvi A, %len greeting
-  out TERM_DATA_PORT
+  out TEXTIO_DATA_PORT
 
   lxi HL, greeting
   mvi B, %len greeting
 send_loop:
   mov A, M
-  out TERM_DATA_PORT
+  out TEXTIO_DATA_PORT
   inx HL
   dcr B
   jnz send_loop
 
   ; Display the buffered message
   mvi A, CMD_DISPLAY
-  out TERM_CMD_PORT
+  out TEXTIO_CMD_PORT
   hlt
 
 ; --- Custom ISR for RST 1 (Vector 0x0008) ---

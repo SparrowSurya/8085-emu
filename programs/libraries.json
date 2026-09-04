@@ -1,9 +1,9 @@
 {
   "libraries": [
     {
-      "name": "terminal",
+      "name": "text_io",
       "dir": "devices",
-      "file": "devices/terminal.e8085",
+      "file": "devices/text_io.e8085",
       "expected_symbols": ["print", "input", "putch", "endl"]
     },
     {

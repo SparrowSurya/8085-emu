@@ -258,7 +258,7 @@ fn handle_repl_command(
             })
         }
         "help" => Ok(EvalResult {
-            display: "8085 Debugger Commands:\n  <expr>             - Evaluate register, variable, or memory (*0x2000)\n  :mem <addr> [len]  - Dump memory slice\n  :regs              - Display all registers and flags\n  :in <text>         - Feed input string to Terminal device\n  :key <char>        - Press key on Keyboard device\n  :help              - Show this help summary".to_string(),
+            display: "8085 Debugger Commands:\n  <expr>             - Evaluate register, variable, or memory (*0x2000)\n  :mem <addr> [len]  - Dump memory slice\n  :regs              - Display all registers and flags\n  :in <text>         - Feed input string to TextIO device\n  :key <char>        - Press key on Keyboard device\n  :help              - Show this help summary".to_string(),
             r#type: "help".to_string(),
             raw_value: None,
         }),

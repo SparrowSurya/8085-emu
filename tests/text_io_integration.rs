@@ -1,10 +1,10 @@
-//! Drives the buffered TerminalDevice through the full CPU + RAM + DeviceManager loop
+//! Drives the buffered TextIODevice through the full CPU + RAM + DeviceManager loop
 //! with monitor-style programs, exercising WRITE/DISPLAY and READ over the real bus.
 
-use emu8085::device::terminal::{CMD_DISPLAY, CMD_READ, CMD_WRITE};
+use emu8085::device::text_io::{CMD_DISPLAY, CMD_READ, CMD_WRITE};
 use emu8085::instruction::Opcode::*;
 use emu8085::{
-    Addr, Cpu, DeviceManager, Instruction as I, Memory, Operand, Program, SystemBus, TerminalDevice,
+    Addr, Cpu, DeviceManager, Instruction as I, Memory, Operand, Program, SystemBus, TextIODevice,
 };
 
 const PORT_CMD: u8 = 0x08;
@@ -47,13 +47,13 @@ fn program_writes_and_displays_hi() {
 
     let mut dm = DeviceManager::new();
     dm.attach(
-        Box::new(TerminalDevice::new(PORT_CMD, PORT_DATA)),
+        Box::new(TextIODevice::new(PORT_CMD, PORT_DATA)),
         &[PORT_CMD, PORT_DATA],
     );
     run(Program::new(insts), &mut dm);
 
-    let term = dm.device_ref::<TerminalDevice>(0).unwrap();
-    assert_eq!(term.output_string(), "HI");
+    let text_io = dm.device_ref::<TextIODevice>(0).unwrap();
+    assert_eq!(text_io.output_string(), "HI");
 }
 
 #[test]
@@ -69,10 +69,10 @@ fn program_reads_a_line_length_then_bytes() {
     insts.push(I::new(MOV_DA)); // D = second byte
     insts.push(I::new(HLT));
 
-    let mut term = TerminalDevice::new(PORT_CMD, PORT_DATA);
-    term.feed_line("AB"); // host supplies a line of input
+    let mut text_io = TextIODevice::new(PORT_CMD, PORT_DATA);
+    text_io.feed_line("AB"); // host supplies a line of input
     let mut dm = DeviceManager::new();
-    dm.attach(Box::new(term), &[PORT_CMD, PORT_DATA]);
+    dm.attach(Box::new(text_io), &[PORT_CMD, PORT_DATA]);
 
     let cpu = run(Program::new(insts), &mut dm);
     assert_eq!(cpu.regs.b, 2); // length byte
@@ -88,14 +88,14 @@ fn read_then_display_echoes_a_line() {
     insts.extend(out(PORT_CMD, CMD_DISPLAY));
     insts.push(I::new(HLT));
 
-    let mut term = TerminalDevice::new(PORT_CMD, PORT_DATA);
-    term.feed_line("hello 8085");
+    let mut text_io = TextIODevice::new(PORT_CMD, PORT_DATA);
+    text_io.feed_line("hello 8085");
     let mut dm = DeviceManager::new();
-    dm.attach(Box::new(term), &[PORT_CMD, PORT_DATA]);
+    dm.attach(Box::new(text_io), &[PORT_CMD, PORT_DATA]);
     run(Program::new(insts), &mut dm);
 
     assert_eq!(
-        dm.device_ref::<TerminalDevice>(0).unwrap().output_string(),
+        dm.device_ref::<TextIODevice>(0).unwrap().output_string(),
         "hello 8085"
     );
 }

@@ -862,19 +862,19 @@ main:
     #[test]
     fn test_tabular_define_directives() {
         let input = r#"
-%define TERM_CMD_WRITE 0x00 ; Write mode
-%define TERM_CMD_DISPLAY 0x01
-%define TERM_CMD_READ 0x02 ; Read mode
-%define TERM_DATA_PORT 0x01
-%define TERM_CMD_PORT 0x02 ; Command port
+%define TEXTIO_CMD_WRITE 0x00 ; Write mode
+%define TEXTIO_CMD_DISPLAY 0x01
+%define TEXTIO_CMD_READ 0x02 ; Read mode
+%define TEXTIO_DATA_PORT 0x01
+%define TEXTIO_CMD_PORT 0x02 ; Command port
 "#;
 
         let formatted = format_source(input);
-        let expected = r#"%define TERM_CMD_WRITE   0x00   ; Write mode
-%define TERM_CMD_DISPLAY 0x01
-%define TERM_CMD_READ    0x02   ; Read mode
-%define TERM_DATA_PORT   0x01
-%define TERM_CMD_PORT    0x02   ; Command port
+        let expected = r#"%define TEXTIO_CMD_WRITE   0x00   ; Write mode
+%define TEXTIO_CMD_DISPLAY 0x01
+%define TEXTIO_CMD_READ    0x02   ; Read mode
+%define TEXTIO_DATA_PORT   0x01
+%define TEXTIO_CMD_PORT    0x02   ; Command port
 "#;
 
         assert_eq!(formatted, expected);
