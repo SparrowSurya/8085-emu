@@ -12,6 +12,7 @@ import {
     E8085DebugConfigurationProvider,
     E8085TerminalManager
 } from './debugAdapterFactory';
+import { E8085CustomDebugViewProvider } from './debugCustomViews';
 
 let client: LanguageClient | undefined;
 
@@ -197,11 +198,29 @@ export function activate(context: vscode.ExtensionContext) {
     // Register 8085 Debug Adapter Factory & Configuration Provider
     const debugFactory = new E8085DebugAdapterFactory();
     const configProvider = new E8085DebugConfigurationProvider();
+
+    // Custom Debug Tree Views (Data Segment, BSS Segment, Stack)
+    const dataSegmentProvider = new E8085CustomDebugViewProvider('Data Segment', 'symbol-variable');
+    const bssSegmentProvider = new E8085CustomDebugViewProvider('BSS Segment', 'symbol-variable');
+    const stackViewProvider = new E8085CustomDebugViewProvider('Stack', 'layers');
+
+    const refreshCustomViews = () => {
+        dataSegmentProvider.refresh();
+        bssSegmentProvider.refresh();
+        stackViewProvider.refresh();
+    };
+
     context.subscriptions.push(
         vscode.debug.registerDebugAdapterDescriptorFactory('e8085', debugFactory),
         vscode.debug.registerDebugConfigurationProvider('e8085', configProvider),
+        vscode.window.registerTreeDataProvider('e8085.dataSegment', dataSegmentProvider),
+        vscode.window.registerTreeDataProvider('e8085.bssSegment', bssSegmentProvider),
+        vscode.window.registerTreeDataProvider('e8085.stackView', stackViewProvider),
+        vscode.debug.onDidChangeActiveDebugSession(() => refreshCustomViews()),
+        vscode.debug.onDidReceiveDebugSessionCustomEvent(() => refreshCustomViews()),
         vscode.debug.onDidStartDebugSession((session) => {
             if (session.type === 'e8085') {
+                refreshCustomViews();
                 setTimeout(() => {
                     E8085TerminalManager.getInstance().focusTerminal();
                 }, 100);
@@ -210,6 +229,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.debug.onDidTerminateDebugSession((session) => {
             if (session.type === 'e8085') {
                 E8085TerminalManager.getInstance().cleanup();
+                refreshCustomViews();
             }
         })
     );

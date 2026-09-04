@@ -13,12 +13,19 @@ pub struct SourceLocation {
     pub line_text: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SegmentKind {
+    Data,
+    Bss,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VariableSymbol {
     pub name: String,
     pub address: u16,
     pub size_bytes: usize,
     pub type_name: String, // "BYTE" | "WORD" | "BUFFER"
+    pub segment_kind: SegmentKind,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -72,21 +79,35 @@ impl SourceMap {
                     Segment::Data(defs) => {
                         for def in defs {
                             if let Some(&addr) = sym_map.get(&def.name) {
-                                let (size_bytes, type_name) = match def.size {
-                                    Size::Byte => {
-                                        let count = def.values.len().max(1);
-                                        (count, if count == 1 { "BYTE".to_string() } else { format!("BYTE[{count}]") })
+                                let mut total_units = 0;
+                                for val in &def.values {
+                                    match val {
+                                        Value::Number(_) | Value::Char(_) => total_units += 1,
+                                        Value::Str(s) => total_units += s.len(),
+                                        Value::Repeat { count, .. } => {
+                                            let n = match count.as_ref() {
+                                                Value::Number(num) => *num as usize,
+                                                _ => 1,
+                                            };
+                                            total_units += n;
+                                        }
+                                        _ => total_units += 1,
                                     }
-                                    Size::Word => {
-                                        let count = def.values.len().max(1);
-                                        (count * 2, if count == 1 { "WORD".to_string() } else { format!("WORD[{count}]") })
-                                    }
+                                }
+                                let size_bytes = match def.size {
+                                    Size::Byte => total_units.max(1),
+                                    Size::Word => total_units.max(1) * 2,
+                                };
+                                let type_name = match def.size {
+                                    Size::Byte => if size_bytes == 1 { "BYTE".to_string() } else { format!("BYTE[{size_bytes}]") },
+                                    Size::Word => if size_bytes == 2 { "WORD".to_string() } else { format!("WORD[{}]", size_bytes / 2) },
                                 };
                                 variables.push(VariableSymbol {
                                     name: def.name.clone(),
                                     address: addr,
                                     size_bytes,
                                     type_name,
+                                    segment_kind: SegmentKind::Data,
                                 });
                             }
                         }
@@ -98,15 +119,20 @@ impl SourceMap {
                                     Value::Number(n) => *n as usize,
                                     _ => 1,
                                 };
-                                let (size_bytes, type_name) = match res.size {
-                                    Size::Byte => (count_num, format!("BYTE[{count_num}]")),
-                                    Size::Word => (count_num * 2, format!("WORD[{count_num}]")),
+                                let size_bytes = match res.size {
+                                    Size::Byte => count_num,
+                                    Size::Word => count_num * 2,
+                                };
+                                let type_name = match res.size {
+                                    Size::Byte => if size_bytes == 1 { "BYTE".to_string() } else { format!("BYTE[{size_bytes}]") },
+                                    Size::Word => if size_bytes == 2 { "WORD".to_string() } else { format!("WORD[{}]", size_bytes / 2) },
                                 };
                                 variables.push(VariableSymbol {
                                     name: res.name.clone(),
                                     address: addr,
                                     size_bytes,
                                     type_name,
+                                    segment_kind: SegmentKind::Bss,
                                 });
                             }
                         }

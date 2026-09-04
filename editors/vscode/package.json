@@ -144,6 +144,25 @@
         ]
       }
     ],
+    "views": {
+      "debug": [
+        {
+          "id": "e8085.dataSegment",
+          "name": "Data Segment",
+          "when": "debugType == 'e8085'"
+        },
+        {
+          "id": "e8085.bssSegment",
+          "name": "BSS Segment",
+          "when": "debugType == 'e8085'"
+        },
+        {
+          "id": "e8085.stackView",
+          "name": "8085 Stack",
+          "when": "debugType == 'e8085'"
+        }
+      ]
+    },
     "configuration": {
       "type": "object",
       "title": "8085 Assembly",

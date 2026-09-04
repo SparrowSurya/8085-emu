@@ -8,8 +8,10 @@ use crate::value::Addr;
 pub const SCOPE_REGISTERS: i64 = 1000;
 pub const SCOPE_PAIRS: i64 = 2000;
 pub const SCOPE_FLAGS: i64 = 3000;
-pub const SCOPE_VARIABLES: i64 = 4000;
-pub const SCOPE_PERIPHERALS: i64 = 5000;
+pub const SCOPE_DATA: i64 = 4000;
+pub const SCOPE_BSS: i64 = 5000;
+pub const SCOPE_STACK: i64 = 6000;
+pub const SCOPE_PERIPHERALS: i64 = 7000;
 
 pub fn get_scopes(frame_id: i64) -> Vec<Scope> {
     vec![
@@ -38,9 +40,25 @@ pub fn get_scopes(frame_id: i64) -> Vec<Scope> {
             expensive: false,
         },
         Scope {
-            name: "Data Variables (.data / .bss)".to_string(),
+            name: "Data Segment (.data)".to_string(),
             presentation_hint: Some("locals".to_string()),
-            variables_reference: SCOPE_VARIABLES + frame_id,
+            variables_reference: SCOPE_DATA + frame_id,
+            named_variables: None,
+            indexed_variables: None,
+            expensive: false,
+        },
+        Scope {
+            name: "BSS Segment (.bss)".to_string(),
+            presentation_hint: Some("locals".to_string()),
+            variables_reference: SCOPE_BSS + frame_id,
+            named_variables: None,
+            indexed_variables: None,
+            expensive: false,
+        },
+        Scope {
+            name: "Stack".to_string(),
+            presentation_hint: Some("locals".to_string()),
+            variables_reference: SCOPE_STACK + frame_id,
             named_variables: None,
             indexed_variables: None,
             expensive: false,
@@ -81,8 +99,8 @@ pub fn get_variables(
                 var_8bit("H", regs.get8(Reg8::H)),
                 var_8bit("L", regs.get8(Reg8::L)),
                 var_8bit(&format!("M [HL: 0x{hl_addr:04X}]"), m_val),
-                var_16bit("SP", regs.sp.0),
-                var_16bit("PC", regs.pc.0),
+                var_16bit("SP", regs.sp.0, source_map),
+                var_16bit("PC", regs.pc.0, source_map),
                 Variable {
                     name: "T-States".to_string(),
                     value: format!("{elapsed_t_states} cycles"),
@@ -107,9 +125,9 @@ pub fn get_variables(
             let af = ((regs.get8(Reg8::A) as u16) << 8) | (psw as u16);
 
             vec![
-                var_16bit("BC", regs.get16(Reg16::BC).0),
-                var_16bit("DE", regs.get16(Reg16::DE).0),
-                var_16bit("HL", regs.get16(Reg16::HL).0),
+                var_16bit("BC", regs.get16(Reg16::BC).0, source_map),
+                var_16bit("DE", regs.get16(Reg16::DE).0, source_map),
+                var_16bit("HL", regs.get16(Reg16::HL).0, source_map),
                 Variable {
                     name: "PSW (AF)".to_string(),
                     value: format!("0x{af:04X} (A: 0x{:02X}, Flags: 0x{psw:02X})", regs.get8(Reg8::A)),
@@ -139,31 +157,138 @@ pub fn get_variables(
                 var_flag("Aux Carry (AC)", f.aux_carry, "BCD half-carry from bit 3 to 4"),
             ]
         }
-        SCOPE_VARIABLES => {
+        SCOPE_DATA => {
             let mut list = Vec::new();
             if let Some(sm) = source_map {
                 for var in &sm.variables {
-                    let mut bytes = Vec::new();
-                    let read_len = var.size_bytes.min(32);
-                    for i in 0..read_len {
-                        bytes.push(machine.ram.read(Addr(var.address.wrapping_add(i as u16))));
-                    }
+                    if var.segment_kind == crate::dap::sourcemap::SegmentKind::Data {
+                        let mut bytes = Vec::new();
+                        for i in 0..var.size_bytes {
+                            bytes.push(machine.ram.read(Addr(var.address.wrapping_add(i as u16))));
+                        }
+                        let is_word = var.type_name.starts_with("WORD");
+                        let type_char = if is_word { 'W' } else { 'B' };
+                        let count = if is_word { var.size_bytes / 2 } else { var.size_bytes };
+                        let name_label = format!("{} 0x{:04X} ({count}{type_char})", var.name, var.address);
+                        let val_display = format_escaped_string(&bytes);
 
-                    let val_display = format_variable_bytes(&bytes, &var.type_name);
-                    list.push(Variable {
-                        name: format!("{} (@ 0x{:04X})", var.name, var.address),
-                        value: val_display,
-                        r#type: Some(var.type_name.clone()),
-                        variables_reference: 0,
-                        evaluate_name: Some(var.name.clone()),
-                        memory_reference: Some(format!("0x{:04X}", var.address)),
-                    });
+                        list.push(Variable {
+                            name: name_label,
+                            value: val_display,
+                            r#type: Some(var.type_name.clone()),
+                            variables_reference: 0,
+                            evaluate_name: Some(var.name.clone()),
+                            memory_reference: Some(format!("0x{:04X}", var.address)),
+                        });
+                    }
                 }
             }
             if list.is_empty() {
                 list.push(Variable {
-                    name: "(No data variables)".to_string(),
+                    name: "(No data segment variables)".to_string(),
                     value: "".to_string(),
+                    r#type: None,
+                    variables_reference: 0,
+                    evaluate_name: None,
+                    memory_reference: None,
+                });
+            }
+            list
+        }
+        SCOPE_BSS => {
+            let mut list = Vec::new();
+            if let Some(sm) = source_map {
+                for var in &sm.variables {
+                    if var.segment_kind == crate::dap::sourcemap::SegmentKind::Bss {
+                        let mut bytes = Vec::new();
+                        for i in 0..var.size_bytes {
+                            bytes.push(machine.ram.read(Addr(var.address.wrapping_add(i as u16))));
+                        }
+                        let is_word = var.type_name.starts_with("WORD");
+                        let type_char = if is_word { 'W' } else { 'B' };
+                        let count = if is_word { var.size_bytes / 2 } else { var.size_bytes };
+                        let name_label = format!("{} 0x{:04X} ({count}{type_char})", var.name, var.address);
+                        let val_display = format_escaped_string(&bytes);
+
+                        list.push(Variable {
+                            name: name_label,
+                            value: val_display,
+                            r#type: Some(var.type_name.clone()),
+                            variables_reference: 0,
+                            evaluate_name: Some(var.name.clone()),
+                            memory_reference: Some(format!("0x{:04X}", var.address)),
+                        });
+                    }
+                }
+            }
+            if list.is_empty() {
+                list.push(Variable {
+                    name: "(No BSS variables)".to_string(),
+                    value: "".to_string(),
+                    r#type: None,
+                    variables_reference: 0,
+                    evaluate_name: None,
+                    memory_reference: None,
+                });
+            }
+            list
+        }
+        SCOPE_STACK => {
+            let mut list = Vec::new();
+            let sp = machine.cpu.regs.sp.0;
+
+            // Stack grows downward. Valid stack entries are from SP up to 0xFFFE.
+            // Iterate in 2-byte word increments.
+            if sp != 0 && sp <= 0xFFFE {
+                let mut addr = sp;
+                let mut count = 0;
+                while addr <= 0xFFFE && count < 64 {
+                    let low = machine.ram.read(Addr(addr));
+                    let high = machine.ram.read(Addr(addr.wrapping_add(1)));
+                    let word = ((high as u16) << 8) | (low as u16);
+                    let str_repr = format_escaped_string(&[high, low]);
+
+                    // Check for symbol / label associated with word or addr
+                    let sym_label = if let Some(sm) = source_map {
+                        sm.reverse_symbols.get(&word).or_else(|| sm.reverse_symbols.get(&addr))
+                    } else {
+                        None
+                    };
+
+                    let marker = match (addr == sp, sym_label) {
+                        (true, Some(sym)) => format!("(SP, {sym})"),
+                        (true, None) => "(SP)".to_string(),
+                        (false, Some(sym)) => format!("({sym})"),
+                        (false, None) => "".to_string(),
+                    };
+
+                    let val_formatted = if marker.is_empty() {
+                        format!("0x{word:04X}  {str_repr}")
+                    } else {
+                        format!("0x{word:04X}  {str_repr:<8}  {marker}")
+                    };
+
+                    list.push(Variable {
+                        name: format!("0x{addr:04X}"),
+                        value: val_formatted,
+                        r#type: Some("word".to_string()),
+                        variables_reference: 0,
+                        evaluate_name: None,
+                        memory_reference: Some(format!("0x{addr:04X}")),
+                    });
+
+                    if addr == 0xFFFE {
+                        break;
+                    }
+                    addr = addr.wrapping_add(2);
+                    count += 1;
+                }
+            }
+
+            if list.is_empty() {
+                list.push(Variable {
+                    name: "(Stack is empty)".to_string(),
+                    value: format!("SP = 0x{sp:04X}"),
                     r#type: None,
                     variables_reference: 0,
                     evaluate_name: None,
@@ -278,7 +403,8 @@ pub fn set_variable(
         _ => {
             // Check variable in source_map
             if let Some(sm) = source_map {
-                if let Some(&addr) = sm.symbols.get(clean_name) {
+                let base_name = clean_name.split('(').next().unwrap_or(clean_name).trim();
+                if let Some(&addr) = sm.symbols.get(base_name) {
                     machine.ram.write(Addr(addr), raw_val as u8);
                     return Ok((format!("0x{:02X}", raw_val as u8), "u8".to_string()));
                 }
@@ -304,10 +430,21 @@ fn var_8bit(name: &str, val: u8) -> Variable {
     }
 }
 
-fn var_16bit(name: &str, val: u16) -> Variable {
+fn var_16bit(name: &str, val: u16, source_map: Option<&SourceMap>) -> Variable {
+    let sym_label = if let Some(sm) = source_map {
+        sm.reverse_symbols.get(&val).cloned()
+    } else {
+        None
+    };
+
+    let bracket_content = match sym_label {
+        Some(sym) => sym,
+        None => format!("{val}"),
+    };
+
     Variable {
         name: name.to_string(),
-        value: format!("0x{val:04X} ({val})"),
+        value: format!("0x{val:04X} ({bracket_content})"),
         r#type: Some("u16".to_string()),
         variables_reference: 0,
         evaluate_name: Some(name.to_string()),
@@ -326,28 +463,23 @@ fn var_flag(name: &str, bit: bool, doc: &str) -> Variable {
     }
 }
 
-fn format_variable_bytes(bytes: &[u8], type_name: &str) -> String {
-    if bytes.is_empty() {
-        return "0x00 (0)".to_string();
+pub fn format_escaped_string(bytes: &[u8]) -> String {
+    let mut s = String::with_capacity(bytes.len() * 2 + 2);
+    s.push('"');
+    for &b in bytes {
+        match b {
+            b'\\' => s.push_str("\\\\"),
+            b'"' => s.push_str("\\\""),
+            b'\n' => s.push_str("\\n"),
+            b'\r' => s.push_str("\\r"),
+            b'\t' => s.push_str("\\t"),
+            0x20..=0x7E => s.push(b as char),
+            _ => {
+                use std::fmt::Write;
+                let _ = write!(s, "\\x{b:02X}");
+            }
+        }
     }
-    if type_name == "BYTE" && bytes.len() == 1 {
-        let b = bytes[0];
-        let ch = if (0x20..=0x7E).contains(&b) { format!("'{}'", b as char) } else { "'.'".to_string() };
-        return format!("0x{b:02X} ({b}, {ch})");
-    }
-    if type_name == "WORD" && bytes.len() >= 2 {
-        let w = (bytes[0] as u16) | ((bytes[1] as u16) << 8);
-        return format!("0x{w:04X} ({w})");
-    }
-
-    // Array / Buffer representation
-    let is_printable = bytes.iter().all(|&b| (0x20..=0x7E).contains(&b) || b == 0 || b == b'\n' || b == b'\t');
-    if is_printable && bytes.len() >= 3 {
-        let s: String = bytes.iter().take_while(|&&b| b != 0).map(|&b| b as char).collect();
-        let hex_preview = bytes.iter().take(8).map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(" ");
-        return format!("\"{s}\" [{hex_preview}...]");
-    }
-
-    let hex_preview = bytes.iter().take(8).map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(" ");
-    format!("[{hex_preview}]")
+    s.push('"');
+    s
 }

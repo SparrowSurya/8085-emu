@@ -63,26 +63,78 @@ flowchart TB
 - **Hit Count Breakpoints**: Break after a line has been hit a specified number of times (e.g. `>= 5`, `== 10`, `% 2 == 0`).
 
 ### 2.3 Comprehensive Variables & Scope Inspection
-The Variables panel exposes five specialized scopes:
+The Variables panel exposes seven specialized scopes:
 
 | Scope | Content & Details |
 |---|---|
 | **CPU Registers** | Individual 8-bit registers (`A`, `B`, `C`, `D`, `E`, `H`, `L`, `M`), 16-bit register pairs (`BC`, `DE`, `HL`, `SP`), and `PC`. Shows formatted Hex, Decimal, Binary, and ASCII character previews. |
+| **Register Pairs** | 16-bit CPU register pairs (`BC`, `DE`, `HL`, `SP`, `PC`) with 16-bit values formatted as `0xADDR (symbol_or_decimal)` (e.g. `HL: 0x0017 (askSize)` or `BC: 0x0005 (5)`). |
 | **Flags** | Individual flag bits (`Sign [S]`, `Zero [Z]`, `Auxiliary Carry [AC]`, `Parity [P]`, `Carry [CY]`) along with the full 8-bit **`Flags Byte (PSW)`** formatted as `0x56 (0b01010110)`. |
-| **Data Variables & BSS** | All variables declared in `segment .data` and `segment .bss` with their memory addresses, raw values, string contents, and array allocations. |
-| **Hardware Diagnostics** | Real-time VM statistics: elapsed T-states, instructions executed, current machine cycle (`Fetch`, `MemoryRead`, `MemoryWrite`, `IORead`, `IOWrite`), and shadow stack depth. |
-| **Peripheral Devices** | Status of attached hardware peripherals (`TerminalDevice`, `PrinterDevice`, `KeyboardDevice`) and their mapped I/O port assignments. |
+| **Data Segment** | Variables declared in `segment .data` formatted as `variable_name 0xADDR (size type) "value"` with non-printable bytes escaped as `\x00` / `\xHH`. |
+| **BSS Segment** | Variables declared in `segment .bss` formatted as `variable_name 0xADDR (size type) "value"` with non-printable bytes escaped as `\x00` / `\xHH`. |
+| **Stack Memory** | Active stack word rows from current `SP` up to top of stack memory, showing 16-bit word addresses, hex values, ASCII strings, and label/marker annotations `(SP, label.local)`. |
+| **Peripherals & Diagnostics** | Status of attached hardware peripherals (`TerminalDevice`, `PrinterDevice`, `KeyboardDevice`) and real-time VM statistics (elapsed T-states, instructions executed, machine cycles). |
 
-### 2.4 Live Variable & Register Mutation (`setVariable`)
-You can edit any register or memory variable directly in the VS Code Variables panel:
+### 2.4 Custom Debug Views (`Data Segment`, `BSS Segment`, and `8085 Stack`)
+In addition to the standard DAP variables tree, the VS Code extension contributes three dedicated custom tree views in the Debug Viewlet (`views.debug`), visible whenever an active 8085 debug session is running (`debugType == 'e8085'`):
+
+#### 1. Data Segment View (`Data Segment`)
+Displays all variables defined in `segment .data` in single-line full-length string format with memory address:
+```text
++-----------------------------------------+
+| ▼ Data Segment                          |
++-----------------------------------------+
+|                                         |
+| greeting 0x0017 (6B) "Hello,"           |
+| prompt 0x0020 (13B) "Who are you? "     |
+|                                         |
++-----------------------------------------+
+```
+- **Format**: `variable_name address_in_hex (buffer_or_value_length first_letter_of_type) variable_value`
+- **Escaping**: Non-printable characters (values outside ASCII 32..=126) and escape sequences are formatted in standard escaped notation (e.g. `\n`, `\r`, `\t`, `\x00`, `\x1B`).
+
+#### 2. BSS Segment View (`BSS Segment`)
+Displays uninitialized or buffer variables declared in `segment .bss` with memory address:
+```text
++-----------------------------------------+
+| ▼ BSS Segment                           |
++-----------------------------------------+
+|                                         |
+| buffer 0x0030 (32B) "\x00\x00\x00..."   |
+| length 0x0050 (1B) "\x00"               |
+|                                         |
++-----------------------------------------+
+```
+- Shows live buffer contents and updates dynamically as bytes are written during execution.
+
+#### 3. Stack Memory View (`8085 Stack`)
+Displays word-aligned 2-byte stack rows from the current Stack Pointer (`SP`) up to the initial stack address (`0xFFFE` / `sp_init`):
+```text
++-----------------------------------------+
+| ▼ 8085 Stack                            |
++-----------------------------------------+
+|                                         |
+| 0xFFFA  0x002B  "+."  (SP, draw.loop1)  |
+| 0xFFFC  0x0015  "\x15\x00"  (main)      |
+| 0xFFFE  0x0000  "\x00\x00"              |
+|                                         |
++-----------------------------------------+
+```
+- **Format**: `address  address_lowaddress_high  string  (marker or variable/label name)`
+- **`SP` Indicator**: The row corresponding to the current `SP` address is marked with `(SP)`.
+- **Symbol & Local Label Resolution**: Stack addresses that match global subroutines or scoped local labels are resolved in parent-child format (e.g. `(SP, draw.loop1)`).
+- **Upper-Stack Filtering**: Memory above the initial stack pointer is filtered out so only active stack frames are visible.
+
+### 2.5 Live Variable & Register Mutation (`setVariable`)
+You can edit any register or memory variable directly in the VS Code Variables panel or custom views:
 - Double-click the value in the panel and enter a new value (e.g. `0xFF`, `255`, `0b11111111`, `'Z'`).
 - The debugger validates and updates the live CPU registers or RAM contents immediately.
 
-### 2.5 Live Disassembly (`disassemble`)
+### 2.6 Live Disassembly (`disassemble`)
 - Inspect raw memory instructions alongside your source code.
 - Disassembles live machine bytes at any target memory reference (e.g. `PC`, `0x0000`, `label`) showing instruction hex bytes, mnemonics, and resolved symbol annotations.
 
-### 2.6 Expression Evaluation & REPL Console (`evaluate`)
+### 2.7 Expression Evaluation & REPL Console (`evaluate`)
 Use the Debug Console or hover over variables in the editor to evaluate expressions:
 - **Arithmetic & Logic**: `A + B`, `HL + 0x10`, `(A & 0x0F) == 0`.
 - **Register & Flag References**: `PC`, `SP`, `flags.CY`, `flags.Z`.
@@ -92,9 +144,9 @@ Use the Debug Console or hover over variables in the editor to evaluate expressi
   - `:in <text>`: Feeds text to the terminal input queue.
   - `:key <char>`: Presses a key on the virtual keyboard device.
 
-### 2.7 Clean Halt & Termination Lifecycle
-- When execution reaches `HLT`, the debugger pauses and indicates `CPU Halted (HLT)`.
-- Pressing **Continue** (`F5`) or **Step** after a halt cleanly terminates the debug session, sending standard `exited` (exit code `0`) and `terminated` DAP events to the editor.
+### 2.8 Automatic Halt & Termination Lifecycle
+- When execution reaches and executes `HLT`, the debugger automatically stops and terminates the debug session, sending standard DAP `exited` (exit code `0`) and `terminated` events to the editor.
+- The VS Code debug toolbar closes automatically without requiring an extra continue or step action.
 
 ---
 

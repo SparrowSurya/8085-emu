@@ -47,7 +47,7 @@ mod tests {
 
         // Check scopes
         let scopes = session.get_scopes(0);
-        assert_eq!(scopes.len(), 5);
+        assert_eq!(scopes.len(), 7);
 
         // Check variables
         let regs = session.get_variables(1000);

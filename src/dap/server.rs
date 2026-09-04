@@ -131,7 +131,7 @@ impl DapServer {
                 match self.session.launch(&args) {
                     Ok(reason) => {
                         if let Some(r) = reason {
-                            events.push(self.stop_reason_to_event(r));
+                            self.handle_stop_reason(r, &mut events);
                         }
                         self.create_response(req_seq, &command, true, None, None)
                     }
@@ -157,7 +157,7 @@ impl DapServer {
                 match self.session.restart(&launch_args) {
                     Ok(reason) => {
                         if let Some(r) = reason {
-                            events.push(self.stop_reason_to_event(r));
+                            self.handle_stop_reason(r, &mut events);
                         }
                         self.create_response(req_seq, &command, true, None, None)
                     }
@@ -258,7 +258,7 @@ impl DapServer {
                     match self.session.continue_exec() {
                         Ok(reason) => {
                             if let Some(r) = reason {
-                                events.push(self.stop_reason_to_event(r));
+                                self.handle_stop_reason(r, &mut events);
                             } else if self.session.is_terminated {
                                 events.push(self.create_event("exited", Some(serde_json::to_value(ExitedEventBody { exit_code: 0 }).unwrap())));
                                 events.push(self.create_event("terminated", None));
@@ -279,7 +279,7 @@ impl DapServer {
                     match self.session.step_over() {
                         Ok(reason) => {
                             if let Some(r) = reason {
-                                events.push(self.stop_reason_to_event(r));
+                                self.handle_stop_reason(r, &mut events);
                             } else if self.session.is_terminated {
                                 events.push(self.create_event("exited", Some(serde_json::to_value(ExitedEventBody { exit_code: 0 }).unwrap())));
                                 events.push(self.create_event("terminated", None));
@@ -299,7 +299,7 @@ impl DapServer {
                     match self.session.step_in() {
                         Ok(reason) => {
                             if let Some(r) = reason {
-                                events.push(self.stop_reason_to_event(r));
+                                self.handle_stop_reason(r, &mut events);
                             } else if self.session.is_terminated {
                                 events.push(self.create_event("exited", Some(serde_json::to_value(ExitedEventBody { exit_code: 0 }).unwrap())));
                                 events.push(self.create_event("terminated", None));
@@ -319,7 +319,7 @@ impl DapServer {
                     match self.session.step_out() {
                         Ok(reason) => {
                             if let Some(r) = reason {
-                                events.push(self.stop_reason_to_event(r));
+                                self.handle_stop_reason(r, &mut events);
                             } else if self.session.is_terminated {
                                 events.push(self.create_event("exited", Some(serde_json::to_value(ExitedEventBody { exit_code: 0 }).unwrap())));
                                 events.push(self.create_event("terminated", None));
@@ -337,7 +337,7 @@ impl DapServer {
                 match self.session.pause() {
                     Ok(reason) => {
                         if let Some(r) = reason {
-                            events.push(self.stop_reason_to_event(r));
+                            self.handle_stop_reason(r, &mut events);
                         }
                         self.create_response(req_seq, &command, true, None, None)
                     }
@@ -429,6 +429,15 @@ impl DapServer {
             seq,
             event: event.to_string(),
             body,
+        }
+    }
+
+    fn handle_stop_reason(&mut self, reason: StopReason, events: &mut Vec<Event>) {
+        if matches!(reason, StopReason::Halt) {
+            events.push(self.create_event("exited", Some(serde_json::to_value(ExitedEventBody { exit_code: 0 }).unwrap())));
+            events.push(self.create_event("terminated", None));
+        } else {
+            events.push(self.stop_reason_to_event(reason));
         }
     }
 
