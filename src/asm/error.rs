@@ -9,12 +9,19 @@ pub struct Span {
     pub line: u32,
     /// 1-based column number of the token's first character.
     pub col: u32,
+    /// 0-based file index in file registry (0 = main file, 1.. = included files).
+    pub file_id: u32,
 }
 
 impl Span {
     /// Construct a span at `line`:`col`.
     pub fn new(line: u32, col: u32) -> Self {
-        Span { line, col }
+        Span { line, col, file_id: 0 }
+    }
+
+    /// Construct a span with a specific `file_id`.
+    pub fn with_file(line: u32, col: u32, file_id: u32) -> Self {
+        Span { line, col, file_id }
     }
 }
 

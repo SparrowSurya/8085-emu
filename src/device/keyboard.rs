@@ -49,6 +49,11 @@ impl KeyboardDevice {
         self.press(code as u8)
     }
 
+    /// Number of keys waiting in the FIFO buffer.
+    pub fn buffer_len(&self) -> usize {
+        self.buffer.len()
+    }
+
     /// Whether a key is waiting to be read.
     pub fn has_key(&self) -> bool {
         !self.buffer.is_empty()

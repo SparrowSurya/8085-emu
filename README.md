@@ -87,7 +87,18 @@ cargo run --bin e8085 -- lsp
 ./open.sh
 ```
 
-### 6. Running Rust API Programmatic Examples
+### 6. Interactive Debugging & DAP Server (`dap`)
+Launch the Debug Adapter Protocol (DAP 1.6+) server for cycle-accurate debugging, step in/over/out, step back (time travel), conditional breakpoints, and live state inspection:
+
+```bash
+# Run standalone DAP binary over stdio
+cargo run --bin e8085-dap
+
+# Or via unified CLI subcommand
+cargo run --bin e8085 -- dap
+```
+
+### 7. Running Rust API Programmatic Examples
 Run any of the Rust API examples demonstrating direct hardware and emulator interaction:
 
 ```bash
@@ -101,7 +112,7 @@ cargo run --example usb_dma_transfer
 cargo run --example keyboard_input_interrupt
 ```
 
-### 7. Running the Test Suite
+### 8. Running the Test Suite
 ```bash
 # Run all unit tests, integration tests, and doc-tests
 cargo test --all-targets && cargo test --doc
@@ -147,8 +158,17 @@ emu8085/
 │
 ├── src/                # Core library and binaries
 │   ├── bin/
-│   │   ├── e8085.rs            # Unified CLI binary (run, compile, disassemble, lsp)
-│   │   └── e8085-lsp.rs        # Dedicated standalone Language Server binary
+│   │   ├── e8085.rs            # Unified CLI binary (run, compile, disassemble, lsp, dap)
+│   │   ├── e8085-lsp.rs        # Dedicated standalone Language Server binary
+│   │   └── e8085-dap.rs        # Dedicated standalone Debug Adapter Protocol binary
+│   ├── dap/                    # Debug Adapter Protocol (DAP 1.6+) Engine
+│   │   ├── protocol.rs         # Typed DAP request, response, and event messages
+│   │   ├── sourcemap.rs        # Source line <-> address index & variable extraction
+│   │   ├── eval.rs             # Hover, watch, and REPL expression evaluation
+│   │   ├── breakpoints.rs      # Line, label, conditional & hit-count breakpoints
+│   │   ├── inspect.rs          # Scopes, variables, and live register/memory mutation
+│   │   ├── session.rs          # State machine, stepping, callstack, ring-buffer snapshots
+│   │   └── server.rs           # JSON-RPC stdio wire framing & dispatch
 │   ├── lsp/                    # Language Server Protocol (LSP 3.17) Engine
 │   │   ├── document.rs         # In-memory document store & VFS
 │   │   ├── server.rs           # tower_lsp LanguageServer protocol handler
@@ -199,6 +219,7 @@ emu8085/
 │
 └── doc/                # Detailed technical documentation
     ├── ASSEMBLER.md            # In-depth Assembler pipeline, container format & static linker
+    ├── DEBUGGER.md             # Debug Adapter Protocol (DAP), VS Code debugger, terminal & inspection
     ├── GRAMMAR.md              # Complete .e8085 language reference & syntax
     └── LSP.md                  # Language Server Protocol capabilities, configuration & editor setup
 ```
@@ -224,6 +245,13 @@ emu8085/
 - **Language Server Protocol (`e8085-lsp`)**:
   - Asynchronous LSP 3.17 server (`tower-lsp` + `tokio`).
   - Rich hover documentation (including multi-radix numeric/character breakdown and `%include` module docstrings), Goto Definition across files, contextual auto-completion, workspace symbol renaming, live compiler diagnostics with CFG reachability analysis & unused symbol warnings, hardware cycle inlay hints, and quick fixes.
+- **Debug Adapter Protocol (`e8085-dap`)**:
+  - Full DAP 1.51+ compliance supporting VS Code, Neovim, and other DAP-enabled IDEs.
+  - Multi-file source mapping and stepping across `%include` imports and libraries.
+  - Conditional breakpoints (`A == 0x05`, `flags.Z == 1`) and hit-count breakpoints.
+  - 5-scope variable inspection: CPU registers, individual flags & 8-bit PSW byte, data & BSS variables, hardware diagnostics (T-states, cycles), and peripherals.
+  - Live register and memory mutation (`setVariable`).
+  - Interactive `"8085 Terminal"` tab backed by a bidirectional TCP socket bridge for terminal and printer peripherals.
 - **Rich Peripheral Set**:
   - `TerminalDevice`: Two-port virtual terminal supporting line-buffered input and output.
   - `PrinterDevice`: Character stream capture device with callbacks.
@@ -235,6 +263,7 @@ emu8085/
 ## Detailed Documentation
 
 For comprehensive technical documentation, refer to:
+- [**doc/DEBUGGER.md**](doc/DEBUGGER.md) — Complete guide to the Debug Adapter Protocol (`e8085-dap`), VS Code debugger setup, interactive terminal bridge, memory/register inspection, and walkthrough.
 - [**doc/LSP.md**](doc/LSP.md) — Comprehensive guide to the Language Server Protocol (`e8085-lsp`), feature capabilities, and editor integrations (VS Code, Neovim, Helix).
 - [**doc/ASSEMBLER.md**](doc/ASSEMBLER.md) — Detailed guide to the assembler pipeline, container layout, static linking, and symbol resolution.
 - [**doc/GRAMMAR.md**](doc/GRAMMAR.md) — Full language reference for `.e8085` assembly programs, syntax rules, directives, registers, and instructions.

@@ -24,6 +24,7 @@
 //! `Result<T, EmuError>` for error handling.
 
 pub mod asm;
+pub mod dap;
 pub mod lsp;
 
 pub mod bus;
@@ -38,10 +39,10 @@ pub mod value;
 pub mod cpu;
 
 pub use asm::{
-    BinaryContainer, ContainerHeader, ExtractedString, InspectOptions, LoadImage, SegmentRecord,
-    assemble, assemble_and_link, assemble_listing, assemble_with_options, assemble_with_symbols,
-    extract_strings, format_header, format_segments, format_strings, format_symbols, get_segments,
-    inspect_container, load,
+    BinaryContainer, ContainerHeader, ExtractedString, InspectOptions, ListingRow, LoadImage,
+    SegmentRecord, assemble, assemble_and_link, assemble_full, assemble_listing,
+    assemble_with_options, assemble_with_symbols, extract_strings, format_header, format_segments,
+    format_strings, format_symbols, get_segments, inspect_container, load,
 };
 pub use bus::{ControlLines, SystemBus};
 pub use cpu::flags::Flags;

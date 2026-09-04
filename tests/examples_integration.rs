@@ -2,8 +2,7 @@
 //! the reference implementation for both printer output and final CPU state.
 
 use emu8085::{Addr, Cpu, DeviceManager, Machine, Memory, PrinterDevice, SystemBus};
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 include!("common/example_cases.rs");
 
@@ -29,12 +28,12 @@ fn examples_match_reference() {
         cpu.regs.sp = Addr(c.sp0);
         cpu.start_at(Addr(c.at));
 
-        let seen = Rc::new(RefCell::new(String::new()));
+        let seen = Arc::new(Mutex::new(String::new()));
         if c.printer_port >= 0 {
             let sink = seen.clone();
             dm.attach(
                 Box::new(PrinterDevice::with_callback(move |ch| {
-                    sink.borrow_mut().push(ch)
+                    sink.lock().unwrap().push(ch)
                 })),
                 &[c.printer_port as u8],
             );
@@ -49,7 +48,7 @@ fn examples_match_reference() {
         }
 
         assert_eq!(
-            *seen.borrow(),
+            *seen.lock().unwrap(),
             c.out,
             "example `{}`: printer output",
             c.name

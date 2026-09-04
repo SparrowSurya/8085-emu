@@ -30,7 +30,6 @@ segment .data
     msg "Hello Diagnostics"
 
 segment .text
-    global main
     extern foo
     extern bar
 

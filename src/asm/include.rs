@@ -5,21 +5,86 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use super::ast::{Program, Segment};
+use super::ast::{Program, Segment, TextItem};
 use super::error::{AsmError, AsmErrorKind};
 use super::lexer::lex;
 use super::parser::parse;
 
+#[derive(Debug, Clone)]
+pub struct ResolvedIncludes {
+    pub program: Program,
+    pub file_table: Vec<(PathBuf, String)>,
+}
+
 /// Recursively resolves all `%include` directives in `program`, starting relative to `base_dir`.
 pub fn resolve_includes(base_dir: &Path, program: &Program) -> Result<Program, AsmError> {
     let mut visited = HashSet::new();
-    resolve_program_includes(base_dir, program, &mut visited)
+    let mut file_table = vec![(base_dir.to_path_buf(), String::new())];
+    resolve_program_includes(base_dir, program, &mut visited, &mut file_table)
+}
+
+/// Recursively resolves `%include` directives tracking full source file paths and sources.
+pub fn resolve_includes_with_sources(
+    main_file: &Path,
+    main_src: &str,
+    base_dir: &Path,
+    program: &Program,
+) -> Result<ResolvedIncludes, AsmError> {
+    let mut visited = HashSet::new();
+    let canon_main = main_file.canonicalize().unwrap_or_else(|_| main_file.to_path_buf());
+    visited.insert(canon_main.clone());
+    let mut file_table = vec![(canon_main, main_src.to_string())];
+    let resolved_prog = resolve_program_includes(base_dir, program, &mut visited, &mut file_table)?;
+    Ok(ResolvedIncludes {
+        program: resolved_prog,
+        file_table,
+    })
+}
+
+fn tag_program_spans(program: &mut Program, file_id: u32) {
+    for inc in &mut program.includes {
+        inc.span.file_id = file_id;
+    }
+    for def in &mut program.defines {
+        def.span.file_id = file_id;
+    }
+    for seg in &mut program.segments {
+        match seg {
+            Segment::Data(defs) => {
+                for d in defs {
+                    d.span.file_id = file_id;
+                }
+            }
+            Segment::Bss(decls) => {
+                for b in decls {
+                    b.span.file_id = file_id;
+                }
+            }
+            Segment::Text(items) => {
+                for item in items {
+                    match item {
+                        TextItem::Label(_, span)
+                        | TextItem::GlobalLabel(_, span)
+                        | TextItem::LocalLabel(_, span)
+                        | TextItem::GlobalDecl(_, span)
+                        | TextItem::ExternDecl(_, span) => {
+                            span.file_id = file_id;
+                        }
+                        TextItem::Instr(ins) => {
+                            ins.span.file_id = file_id;
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn resolve_program_includes(
     base_dir: &Path,
     program: &Program,
     visited: &mut HashSet<PathBuf>,
+    file_table: &mut Vec<(PathBuf, String)>,
 ) -> Result<Program, AsmError> {
     let mut merged_defines = Vec::new();
     let mut merged_externs = program.externs.clone();
@@ -49,11 +114,15 @@ fn resolve_program_includes(
             )
         })?;
 
+        let file_id = file_table.len() as u32;
+        file_table.push((canonical_path.clone(), src.clone()));
+
         let inc_tokens = lex(&src)?;
-        let inc_program = parse(inc_tokens)?;
+        let mut inc_program = parse(inc_tokens)?;
+        tag_program_spans(&mut inc_program, file_id);
 
         let inc_dir = inc_path.parent().unwrap_or(base_dir);
-        let resolved_inc = resolve_program_includes(inc_dir, &inc_program, visited)?;
+        let resolved_inc = resolve_program_includes(inc_dir, &inc_program, visited, file_table)?;
 
         // Merge defines
         for d in resolved_inc.defines {

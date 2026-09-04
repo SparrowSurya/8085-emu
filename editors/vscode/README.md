@@ -64,6 +64,40 @@ Full syntax highlighting support inside Markdown files (`.md`) and the VS Code *
 - **Editor Fenced Blocks**: Embedded `source.e8085` syntax highlighting in `.md` files for ```` ```e8085 ```` code fences.
 - **Markdown Preview Webview**: Built-in `markdown-it` plugin and theme-adaptive preview stylesheet (`markdown.previewStyles`) ensuring rich 8085 color styling in both light and dark preview modes.
 
+### 11. Interactive Cycle-Accurate Debugging (DAP 1.6+)
+Integrated Debug Adapter Protocol (DAP) server support:
+- **Stepping**: Step In (`F11`), Step Over (`F10`), Step Out (`Shift+F11`), and Time Travel / Step Back (`Ctrl+F10` / reverse continue).
+- **Breakpoints**: Line breakpoints, conditional expressions (e.g., `A == 0x05`, `*0x2000 > 10`), and hit counts (`> 5`, `== 3`).
+- **Scopes & Variable Inspection**:
+  - **CPU Registers**: 8-bit registers (`A`, `B`, `C`, `D`, `E`, `H`, `L`), `SP`, `PC`, and T-States / Cycles.
+  - **Register Pairs**: 16-bit views (`BC`, `DE`, `HL`, `PSW`).
+  - **Flags (PSW)**: Individual flag bits (`S`, `Z`, `AC`, `P`, `CY`).
+  - **Data Variables**: Live values for variables defined in `.data` and `.bss`.
+  - **Peripherals**: Real-time inspection of attached devices (`Terminal`, `Printer`, `Keyboard`).
+- **Live State Mutation**: Edit register and memory values on the fly during debugging.
+- **Debug Console / REPL**: Interactive expression evaluation, memory dereferencing (`*(HL)`, `*0x2000`), and REPL commands (`:mem 0x2000 16`, `:regs`).
+
+---
+
+## Debugging Setup (`launch.json`)
+
+Press `F5` in any open `.e8085` file, or create `.vscode/launch.json`:
+```json
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "e8085",
+      "name": "Debug 8085 Assembly",
+      "request": "launch",
+      "program": "${file}",
+      "stopOnEntry": true,
+      "maxHistory": 256
+    }
+  ]
+}
+```
+
 ---
 
 ## How to Use & Open in VS Code

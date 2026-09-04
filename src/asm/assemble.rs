@@ -7,6 +7,7 @@
 //! otherwise the first instruction of `.text`.
 
 use std::collections::{BTreeMap, HashMap};
+use std::path::PathBuf;
 
 use super::ast::*;
 use super::container::{
@@ -243,6 +244,12 @@ pub struct ListingRow {
     pub bytes: Vec<u8>,
     /// The trimmed source line.
     pub source: String,
+    /// Source line number (1-based, 0 if synthetic bootstrap/vector).
+    pub line: usize,
+    /// Source column number (1-based, 0 if synthetic bootstrap/vector).
+    pub col: usize,
+    /// Source file path where this line was defined (None for synthetic bootstrap).
+    pub file_path: Option<PathBuf>,
 }
 
 /// Assemble source text into a [`LoadImage`].
@@ -286,6 +293,41 @@ pub fn assemble_and_link(
     let (image, _symbols, _listing) =
         Assembler::new(&program, src, HashMap::new(), linked_containers.to_vec()).run()?;
     Ok(image)
+}
+
+/// Assemble source text, returning the image, resolved symbols, and line listing.
+pub fn assemble_full(
+    src: &str,
+    base_dir: Option<&std::path::Path>,
+    linked_containers: &[BinaryContainer],
+) -> Result<(LoadImage, BTreeMap<String, u16>, Vec<ListingRow>), AsmError> {
+    let cur_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let b_dir = base_dir.unwrap_or(&cur_dir);
+    let main_file = b_dir.join("main.e8085");
+    assemble_full_with_file(&main_file, src, base_dir, linked_containers)
+}
+
+/// Assemble source text with an explicit main file path for multi-file debugging listings.
+pub fn assemble_full_with_file(
+    main_file: &std::path::Path,
+    src: &str,
+    base_dir: Option<&std::path::Path>,
+    linked_containers: &[BinaryContainer],
+) -> Result<(LoadImage, BTreeMap<String, u16>, Vec<ListingRow>), AsmError> {
+    let raw_program = parse(lex(src)?)?;
+    let cur_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let b_dir = base_dir.unwrap_or(&cur_dir);
+    let resolved = super::include::resolve_includes_with_sources(main_file, src, b_dir, &raw_program)?;
+
+    let file_table = resolved
+        .file_table
+        .into_iter()
+        .map(|(p, s)| (p, s.lines().map(|l| l.to_string()).collect::<Vec<_>>()))
+        .collect();
+
+    let (image, symbols, listing) =
+        Assembler::new_with_files(&resolved.program, src, file_table, HashMap::new(), linked_containers.to_vec()).run()?;
+    Ok((image, symbols.into_iter().collect(), listing))
 }
 
 /// Assemble, also returning the resolved symbol table (name → absolute address), sorted
@@ -345,6 +387,7 @@ struct Var {
 struct Assembler<'a> {
     program: &'a Program,
     src_lines: Vec<String>,
+    file_table: Vec<(PathBuf, Vec<String>)>,
     defines: HashMap<String, DVal>,
     /// Byte size of every variable, filled in source order so `%len` can look backward.
     sizes: HashMap<String, u16>,
@@ -358,6 +401,16 @@ impl<'a> Assembler<'a> {
     fn new(
         program: &'a Program,
         src: &str,
+        external_symbols: HashMap<String, u16>,
+        linked_containers: Vec<BinaryContainer>,
+    ) -> Self {
+        Self::new_with_files(program, src, Vec::new(), external_symbols, linked_containers)
+    }
+
+    fn new_with_files(
+        program: &'a Program,
+        src: &str,
+        file_table: Vec<(PathBuf, Vec<String>)>,
         mut external_symbols: HashMap<String, u16>,
         linked_containers: Vec<BinaryContainer>,
     ) -> Self {
@@ -369,6 +422,7 @@ impl<'a> Assembler<'a> {
         Assembler {
             program,
             src_lines: src.lines().map(|l| l.to_string()).collect(),
+            file_table,
             defines: HashMap::new(),
             sizes: HashMap::new(),
             data_vars: Vec::new(),
@@ -378,12 +432,23 @@ impl<'a> Assembler<'a> {
         }
     }
 
-    /// The trimmed source text of a 1-based line (empty if out of range).
-    fn src_line(&self, line: u32) -> String {
-        self.src_lines
-            .get(line.saturating_sub(1) as usize)
-            .map(|l| l.trim().to_string())
-            .unwrap_or_default()
+    /// The trimmed source text of a 1-based line (empty if out of range) along with its file path.
+    fn src_line(&self, span: Span) -> (String, Option<PathBuf>) {
+        let file_idx = span.file_id as usize;
+        if let Some((path, lines)) = self.file_table.get(file_idx) {
+            let text = lines
+                .get(span.line.saturating_sub(1) as usize)
+                .map(|l| l.trim().to_string())
+                .unwrap_or_default();
+            (text, Some(path.clone()))
+        } else {
+            let text = self
+                .src_lines
+                .get(span.line.saturating_sub(1) as usize)
+                .map(|l| l.trim().to_string())
+                .unwrap_or_default();
+            (text, None)
+        }
     }
 
     fn run(mut self) -> Result<(LoadImage, HashMap<String, u16>, Vec<ListingRow>), AsmError> {
@@ -580,6 +645,9 @@ impl<'a> Assembler<'a> {
                 addr: 0,
                 bytes: vec![0xC3, lo, hi],
                 source: "; JMP entry (bootstrap)".into(),
+                line: 0,
+                col: 0,
+                file_path: None,
             });
         }
 
@@ -601,6 +669,9 @@ impl<'a> Assembler<'a> {
                         addr: *vec_addr,
                         bytes: vec![0xC3, tlo, thi],
                         source: format!("{desc} -> {sym}"),
+                        line: 0,
+                        col: 0,
+                        file_path: None,
                     });
                     break;
                 }
@@ -635,20 +706,28 @@ impl<'a> Assembler<'a> {
                     }
                 }
             }
+            let (source, file_path) = self.src_line(v.span);
             listing.push(ListingRow {
                 addr: symtab[&v.name],
                 bytes: vbytes.clone(),
-                source: self.src_line(v.span.line),
+                source,
+                line: v.span.line as usize,
+                col: v.span.col as usize,
+                file_path,
             });
             bytes[cur_d_addr..cur_d_addr + vbytes.len()].copy_from_slice(&vbytes);
             cur_d_addr += vbytes.len();
         }
 
         for v in &self.bss_vars {
+            let (source, file_path) = self.src_line(v.span);
             listing.push(ListingRow {
                 addr: symtab[&v.name],
                 bytes: Vec::new(),
-                source: self.src_line(v.span.line),
+                source,
+                line: v.span.line as usize,
+                col: v.span.col as usize,
+                file_path,
             });
         }
 
@@ -660,35 +739,51 @@ impl<'a> Assembler<'a> {
                     match item {
                         TextItem::Label(name, span) | TextItem::GlobalLabel(name, span) => {
                             current_parent_label = Some(name.clone());
+                            let (source, file_path) = self.src_line(*span);
                             listing.push(ListingRow {
                                 addr: taddr,
                                 bytes: Vec::new(),
-                                source: self.src_line(span.line),
+                                source,
+                                line: span.line as usize,
+                                col: span.col as usize,
+                                file_path,
                             });
                         }
                         TextItem::LocalLabel(name, span) => {
+                            let (source, file_path) = self.src_line(*span);
                             listing.push(ListingRow {
                                 addr: taddr,
                                 bytes: Vec::new(),
-                                source: self.src_line(span.line),
+                                source,
+                                line: span.line as usize,
+                                col: span.col as usize,
+                                file_path,
                             });
                             let _ = name;
                         }
                         TextItem::GlobalDecl(_name, span) | TextItem::ExternDecl(_name, span) => {
+                            let (source, file_path) = self.src_line(*span);
                             listing.push(ListingRow {
                                 addr: taddr,
                                 bytes: Vec::new(),
-                                source: self.src_line(span.line),
+                                source,
+                                line: span.line as usize,
+                                col: span.col as usize,
+                                file_path,
                             });
                         }
                         TextItem::Instr(ins) => {
                             let ops =
                                 self.final_operands(ins, &symtab, current_parent_label.as_deref())?;
                             let b = encode(&ins.mnemonic, ins.span, &ops)?;
+                            let (source, file_path) = self.src_line(ins.span);
                             listing.push(ListingRow {
                                 addr: taddr,
                                 bytes: b.clone(),
-                                source: self.src_line(ins.span.line),
+                                source,
+                                line: ins.span.line as usize,
+                                col: ins.span.col as usize,
+                                file_path,
                             });
                             let start = taddr as usize;
                             let end = start + b.len();

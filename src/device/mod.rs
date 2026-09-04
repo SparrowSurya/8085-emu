@@ -21,7 +21,7 @@ use std::collections::HashMap;
 /// A peripheral attached to the system. All hooks are defaulted so a device implements
 /// only the ones it needs (an output device overrides `port_write`, an interrupting
 /// device overrides `on_inta`, and so on).
-pub trait Device: std::any::Any {
+pub trait Device: std::any::Any + Send {
     /// Human-readable device name.
     fn name(&self) -> &str;
 
@@ -98,11 +98,25 @@ impl DeviceManager {
             .and_then(|b| b.as_any().downcast_ref::<T>())
     }
 
+    /// Find first attached device matching the concrete type.
+    pub fn find_device<T: Device + 'static>(&self) -> Option<&T> {
+        self.devices
+            .iter()
+            .find_map(|b| b.as_any().downcast_ref::<T>())
+    }
+
     /// Mutably borrow an attached device downcast to its concrete type.
     pub fn device_mut<T: Device + 'static>(&mut self, idx: usize) -> Option<&mut T> {
         self.devices
             .get_mut(idx)
             .and_then(|b| b.as_any_mut().downcast_mut::<T>())
+    }
+
+    /// Find first attached device matching the concrete type and mutably borrow it.
+    pub fn find_device_mut<T: Device + 'static>(&mut self) -> Option<&mut T> {
+        self.devices
+            .iter_mut()
+            .find_map(|b| b.as_any_mut().downcast_mut::<T>())
     }
 
     /// Service one bus cycle: fulfil an I/O read/write, or during INTA let the first

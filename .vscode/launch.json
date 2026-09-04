@@ -1,0 +1,25 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "e8085",
+      "name": "Debug Triangle Pattern",
+      "request": "launch",
+      "program": "${workspaceFolder}/programs/triangle_pattern.e8085",
+      "stopOnEntry": true,
+      "console": "integratedTerminal",
+      "terminalPort": 8085,
+      "internalConsoleOptions": "neverOpen"
+    },
+    {
+      "type": "e8085",
+      "name": "Debug Current 8085 File",
+      "request": "launch",
+      "program": "${file}",
+      "stopOnEntry": true,
+      "console": "integratedTerminal",
+      "terminalPort": 8085,
+      "internalConsoleOptions": "neverOpen"
+    }
+  ]
+}

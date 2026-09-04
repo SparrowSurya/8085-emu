@@ -3,8 +3,7 @@
 
 use emu8085::asm::{assemble, load};
 use emu8085::{Machine, PrinterDevice};
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 fn run_source(src: &str) -> Machine {
     let image = assemble(src).expect("assembles");
@@ -84,17 +83,17 @@ fn print_a_data_string_through_a_port() {
                hlt\n";
     let image = assemble(src).expect("assembles");
 
-    let printed = Rc::new(RefCell::new(String::new()));
+    let printed = Arc::new(Mutex::new(String::new()));
     let sink = printed.clone();
     let mut m = Machine::create(16, 8);
     m.attach_device(
         Box::new(PrinterDevice::with_callback(move |c| {
-            sink.borrow_mut().push(c)
+            sink.lock().unwrap().push(c)
         })),
         &[0x02],
     );
     load(&mut m, &image).expect("loads");
     m.run();
 
-    assert_eq!(*printed.borrow(), "Hi 8085");
+    assert_eq!(*printed.lock().unwrap(), "Hi 8085");
 }

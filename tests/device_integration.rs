@@ -2,8 +2,7 @@
 //! reference: keyboard `IN`, printer `OUT`, and an INTR/INTA vector fetch.
 
 use emu8085::{Addr, Cpu, DeviceManager, KeyboardDevice, Memory, PrinterDevice, SystemBus};
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 /// Tick CPU + RAM + devices together (the same order the Machine will use) until HLT.
 fn run(cpu: &mut Cpu, ram: &mut Memory, dm: &mut DeviceManager) {
@@ -38,9 +37,9 @@ fn keyboard_in_reads_buffered_key_then_zero() {
 
 #[test]
 fn printer_out_streams_characters() {
-    let seen = Rc::new(RefCell::new(String::new()));
+    let seen = Arc::new(Mutex::new(String::new()));
     let sink = seen.clone();
-    let printer = PrinterDevice::with_callback(move |c| sink.borrow_mut().push(c));
+    let printer = PrinterDevice::with_callback(move |c| sink.lock().unwrap().push(c));
     let mut dm = DeviceManager::new();
     dm.attach(Box::new(printer), &[0x02]);
 
@@ -55,7 +54,7 @@ fn printer_out_streams_characters() {
     cpu.start_at(Addr(0x00A0));
     run(&mut cpu, &mut ram, &mut dm);
 
-    assert_eq!(*seen.borrow(), "Hi");
+    assert_eq!(*seen.lock().unwrap(), "Hi");
 }
 
 #[test]

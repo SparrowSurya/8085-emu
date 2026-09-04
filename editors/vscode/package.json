@@ -12,7 +12,8 @@
   "main": "./out/extension.js",
   "activationEvents": [
     "onLanguage:e8085",
-    "onLanguage:markdown"
+    "onLanguage:markdown",
+    "onDebug"
   ],
   "scripts": {
     "vscode:prepublish": "npm run compile",
@@ -53,6 +54,96 @@
         }
       }
     ],
+    "breakpoints": [
+      {
+        "language": "e8085"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "e8085",
+        "label": "8085 Debugger",
+        "languages": [
+          "e8085"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "required": [
+              "program"
+            ],
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "Path to the .e8085 assembly source file to assemble and debug.",
+                "default": "${file}"
+              },
+              "stopOnEntry": {
+                "type": "boolean",
+                "description": "Automatically stop after loading program at entry point PC.",
+                "default": true
+              },
+              "includePaths": {
+                "type": "array",
+                "description": "Additional include directories for %include search.",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "linkLibraries": {
+                "type": "array",
+                "description": "Pre-compiled library containers (.e8085) to link with.",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "console": {
+                "type": "string",
+                "enum": [
+                  "integratedTerminal",
+                  "internalConsole",
+                  "externalTerminal"
+                ],
+                "description": "Where to launch the debug target and interactive terminal (default: integratedTerminal).",
+                "default": "integratedTerminal"
+              },
+              "terminalPort": {
+                "type": "number",
+                "description": "TCP port for the 8085 integrated terminal bridge (default: 8085).",
+                "default": 8085
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "e8085",
+            "name": "Debug 8085 Assembly",
+            "request": "launch",
+            "program": "${file}",
+            "stopOnEntry": true,
+            "console": "integratedTerminal",
+            "internalConsoleOptions": "neverOpen"
+          }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "8085: Debug Current File",
+            "description": "A launch configuration for debugging the currently active 8085 assembly file",
+            "body": {
+              "type": "e8085",
+              "name": "Debug 8085 (${fileBasename})",
+              "request": "launch",
+              "program": "^\"\\${file}\"",
+              "stopOnEntry": true,
+              "console": "integratedTerminal",
+              "internalConsoleOptions": "neverOpen"
+            }
+          }
+        ]
+      }
+    ],
     "configuration": {
       "type": "object",
       "title": "8085 Assembly",
@@ -61,6 +152,11 @@
           "type": "string",
           "default": "e8085-lsp",
           "description": "Path to the e8085-lsp binary (defaults to 'e8085-lsp' on PATH or cargo target/debug/e8085-lsp)"
+        },
+        "e8085.dapServerPath": {
+          "type": "string",
+          "default": "e8085-dap",
+          "description": "Path to the e8085-dap binary (defaults to 'e8085-dap' on PATH or cargo target/debug/e8085-dap)"
         }
       }
     }

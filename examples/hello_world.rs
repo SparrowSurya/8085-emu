@@ -2,16 +2,15 @@
 //! byte to a printer on I/O port 0x02. Run with `cargo run --example hello_world`.
 
 use emu8085::{Addr, Instruction, Machine, Opcode, Operand, PrinterDevice, Program};
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 fn main() {
     // A printer that echoes each character to stdout as it is written.
-    let printed = Rc::new(RefCell::new(String::new()));
+    let printed = Arc::new(Mutex::new(String::new()));
     let sink = printed.clone();
     let printer = PrinterDevice::with_callback(move |ch| {
         print!("{ch}");
-        sink.borrow_mut().push(ch);
+        sink.lock().unwrap().push(ch);
     });
 
     let mut machine = Machine::create(16, 8);
@@ -41,5 +40,5 @@ fn main() {
     machine.ram.write(Addr(0x0100 + message.len() as u16), 0x00);
 
     machine.run();
-    assert_eq!(*printed.borrow(), "Hello, World!\n");
+    assert_eq!(*printed.lock().unwrap(), "Hello, World!\n");
 }

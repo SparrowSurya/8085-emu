@@ -8,7 +8,7 @@ use super::Device;
 pub struct PrinterDevice {
     /// Everything printed so far, in order.
     pub history: String,
-    callback: Option<Box<dyn FnMut(char)>>,
+    callback: Option<Box<dyn FnMut(char) + Send>>,
 }
 
 impl PrinterDevice {
@@ -18,7 +18,7 @@ impl PrinterDevice {
     }
 
     /// A printer that also invokes `f` for each character as it is printed.
-    pub fn with_callback(f: impl FnMut(char) + 'static) -> Self {
+    pub fn with_callback(f: impl FnMut(char) + Send + 'static) -> Self {
         PrinterDevice {
             history: String::new(),
             callback: Some(Box::new(f)),
@@ -52,8 +52,7 @@ impl Device for PrinterDevice {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::RefCell;
-    use std::rc::Rc;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn records_history_in_order() {
@@ -66,12 +65,12 @@ mod tests {
 
     #[test]
     fn callback_sees_each_char() {
-        let seen = Rc::new(RefCell::new(String::new()));
+        let seen = Arc::new(Mutex::new(String::new()));
         let sink = seen.clone();
-        let mut p = PrinterDevice::with_callback(move |c| sink.borrow_mut().push(c));
+        let mut p = PrinterDevice::with_callback(move |c| sink.lock().unwrap().push(c));
         p.port_write(0, b'O');
         p.port_write(0, b'K');
-        assert_eq!(*seen.borrow(), "OK");
+        assert_eq!(*seen.lock().unwrap(), "OK");
         assert_eq!(p.history, "OK");
     }
 }

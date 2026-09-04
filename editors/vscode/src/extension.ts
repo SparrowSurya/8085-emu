@@ -7,6 +7,11 @@ import {
     ServerOptions,
     TransportKind
 } from 'vscode-languageclient/node';
+import {
+    E8085DebugAdapterFactory,
+    E8085DebugConfigurationProvider,
+    E8085TerminalManager
+} from './debugAdapterFactory';
 
 let client: LanguageClient | undefined;
 
@@ -188,6 +193,26 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     client.start();
+
+    // Register 8085 Debug Adapter Factory & Configuration Provider
+    const debugFactory = new E8085DebugAdapterFactory();
+    const configProvider = new E8085DebugConfigurationProvider();
+    context.subscriptions.push(
+        vscode.debug.registerDebugAdapterDescriptorFactory('e8085', debugFactory),
+        vscode.debug.registerDebugConfigurationProvider('e8085', configProvider),
+        vscode.debug.onDidStartDebugSession((session) => {
+            if (session.type === 'e8085') {
+                setTimeout(() => {
+                    E8085TerminalManager.getInstance().focusTerminal();
+                }, 100);
+            }
+        }),
+        vscode.debug.onDidTerminateDebugSession((session) => {
+            if (session.type === 'e8085') {
+                E8085TerminalManager.getInstance().cleanup();
+            }
+        })
+    );
 
     return {
         extendMarkdownIt(md: any) {

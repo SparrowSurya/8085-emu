@@ -110,6 +110,9 @@ enum Commands {
 
     /// Start the e8085 Language Server Protocol (LSP) over standard input/output
     Lsp,
+
+    /// Start the e8085 Debug Adapter Protocol (DAP) server over standard input/output
+    Dap,
 }
 
 #[tokio::main]
@@ -137,6 +140,11 @@ async fn main() {
         Commands::Strings { file, min_len } => strings_file(&file, min_len),
         Commands::Lsp => {
             emu8085::lsp::start_lsp_server().await;
+        }
+        Commands::Dap => {
+            if let Err(e) = emu8085::dap::DapServer::run_stdio().await {
+                eprintln!("DAP server error: {e}");
+            }
         }
     }
 }

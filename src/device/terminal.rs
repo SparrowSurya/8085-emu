@@ -56,7 +56,7 @@ pub struct TerminalDevice {
     input: VecDeque<u8>,
     output: Vec<u8>,
     rx: Option<Receiver<u8>>,
-    callback: Option<Box<dyn FnMut(u8) + 'static>>,
+    callback: Option<Box<dyn FnMut(u8) + Send + 'static>>,
 }
 
 impl TerminalDevice {
@@ -78,7 +78,7 @@ impl TerminalDevice {
     /// Creates a terminal with input receiver and output callback.
     pub fn with_io<F>(data_port: u8, cmd_port: u8, rx: Receiver<u8>, on_display: F) -> Self
     where
-        F: FnMut(u8) + 'static,
+        F: FnMut(u8) + Send + 'static,
     {
         TerminalDevice {
             cmd_port,
@@ -143,12 +143,13 @@ impl TerminalDevice {
     /// `READ`: read the payload from input. The payload is stored from `buffer[1]` and
     /// does not store newline. Input is truncated if payload length exceeds 255 bytes.
     fn capture(&mut self) {
-        if self.input.is_empty() {
+        if !self.input.contains(&b'\n') {
             if let Some(ref rx) = self.rx {
-                if let Ok(byte) = rx.recv() {
+                while let Ok(byte) = rx.recv() {
+                    let is_nl = byte == b'\n';
                     self.input.push_back(byte);
-                    while let Ok(b) = rx.try_recv() {
-                        self.input.push_back(b);
+                    if is_nl {
+                        break;
                     }
                 }
             }
@@ -159,7 +160,11 @@ impl TerminalDevice {
             if b == b'\n' {
                 break;
             }
-            line.push(b);
+            if b == 0x08 || b == 0x7f {
+                line.pop();
+            } else {
+                line.push(b);
+            }
         }
 
         let len = line.len().min(BUFFER_LEN - 1);

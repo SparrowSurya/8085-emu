@@ -4,10 +4,8 @@
 //! - `programs/programs.json` for standalone/terminal/printer executables in `programs/`
 //! - `programs/libraries.json` for reusable subroutine libraries in `devices/` and `lib/`
 
-use std::cell::RefCell;
 use std::fs;
 use std::path::Path;
-use std::rc::Rc;
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 
@@ -129,11 +127,11 @@ fn test_programs_manifest_suite() {
                 }
             }
             "printer" => {
-                let printed = Rc::new(RefCell::new(String::new()));
+                let printed = Arc::new(Mutex::new(String::new()));
                 let sink = printed.clone();
                 machine.attach_device(
                     Box::new(PrinterDevice::with_callback(move |c| {
-                        sink.borrow_mut().push(c);
+                        sink.lock().unwrap().push(c);
                     })),
                     &[0x02],
                 );
@@ -144,7 +142,7 @@ fn test_programs_manifest_suite() {
 
                 if let Some(expected) = &prog.expect_output {
                     assert_eq!(
-                        &*printed.borrow(),
+                        &*printed.lock().unwrap(),
                         expected,
                         "program '{}' printer output mismatch",
                         prog.name
