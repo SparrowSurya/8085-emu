@@ -1,23 +1,31 @@
+//! Debugger expression evaluation engine, REPL command handler, and symbol resolver.
+
 use crate::cpu::registers::{Reg8, Reg16};
+use crate::dap::error::DapError;
 use crate::dap::sourcemap::SourceMap;
 use crate::machine::Machine;
 use crate::value::Addr;
 
+/// Result of evaluating an expression or debugger command.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EvalResult {
+    /// Formatted display string shown in debug console and variable hovers.
     pub display: String,
+    /// Data type tag (e.g. `"u8"`, `"u16"`, `"bool"`, `"registers"`, `"memory_dump"`).
     pub r#type: String,
+    /// Raw evaluated numeric value when applicable.
     pub raw_value: Option<u16>,
 }
 
+/// Evaluates a debugger expression, comparison, arithmetic expression, or REPL command.
 pub fn evaluate_expression(
     expr: &str,
     machine: &Machine,
     source_map: Option<&SourceMap>,
-) -> Result<EvalResult, String> {
+) -> Result<EvalResult, DapError> {
     let trimmed = expr.trim();
     if trimmed.is_empty() {
-        return Err("empty expression".to_string());
+        return Err(DapError::InvalidExpression("empty expression".to_string()));
     }
 
     // 1. Check REPL commands (starting with ':')
@@ -47,7 +55,7 @@ pub fn evaluate_expression(
         }
     }
 
-    // 3. Evaluate single term or arithmetic (+ / -)
+    // 3. Evaluate binary arithmetic (+ / -)
     if let Some((lhs, rhs)) = split_binary_op(trimmed, "+") {
         let left_val = eval_term(lhs.trim(), machine, source_map)?;
         let right_val = eval_term(rhs.trim(), machine, source_map)?;
@@ -67,24 +75,54 @@ pub fn evaluate_expression(
 }
 
 fn split_binary_op<'a>(s: &'a str, op: &str) -> Option<(&'a str, &'a str)> {
-    if let Some(idx) = s.find(op) {
-        // Ensure not part of longer token (e.g. `==` vs `=`)
-        let lhs = &s[..idx];
-        let rhs = &s[idx + op.len()..];
-        Some((lhs, rhs))
+    // If op is "-" or "+", skip leading unary sign at index 0 so unary prefix is not treated as a binary split
+    let search_start = if (op == "-" || op == "+") && (s.starts_with('-') || s.starts_with('+')) {
+        1
     } else {
-        None
+        0
+    };
+    if search_start >= s.len() {
+        return None;
     }
+    if let Some(idx) = s[search_start..].find(op) {
+        let actual_idx = search_start + idx;
+        let lhs = &s[..actual_idx];
+        let rhs = &s[actual_idx + op.len()..];
+        if !lhs.trim().is_empty() && !rhs.trim().is_empty() {
+            return Some((lhs, rhs));
+        }
+    }
+    None
 }
 
+/// Evaluates a single term: register, memory dereference, flag, symbol, or numeric literal (including unary +/-).
 pub fn eval_term(
     term: &str,
     machine: &Machine,
     source_map: Option<&SourceMap>,
-) -> Result<u16, String> {
+) -> Result<u16, DapError> {
     let s = term.trim();
     if s.is_empty() {
-        return Err("empty operand".to_string());
+        return Err(DapError::InvalidExpression("empty operand".to_string()));
+    }
+
+    // Unary negative / negation (e.g. `-1`, `-0x10`, `-A`)
+    if let Some(rest) = s.strip_prefix('-') {
+        let rest_trimmed = rest.trim();
+        if rest_trimmed.is_empty() {
+            return Err(DapError::InvalidExpression(format!("invalid negative operand '{s}'")));
+        }
+        let inner_val = eval_term(rest_trimmed, machine, source_map)?;
+        return Ok(0u16.wrapping_sub(inner_val));
+    }
+
+    // Unary positive (e.g. `+5`, `+0x20`)
+    if let Some(rest) = s.strip_prefix('+') {
+        let rest_trimmed = rest.trim();
+        if rest_trimmed.is_empty() {
+            return Err(DapError::InvalidExpression(format!("invalid positive operand '{s}'")));
+        }
+        return eval_term(rest_trimmed, machine, source_map);
     }
 
     // Dereference pointer `*0x2000`, `*(HL)`, `*var`
@@ -106,29 +144,29 @@ pub fn eval_term(
             "\\'" => b'\'',
             "\\\"" => b'\"',
             _ if inner.len() == 1 => inner.as_bytes()[0],
-            _ => return Err(format!("invalid character literal: {s}")),
+            _ => return Err(DapError::InvalidExpression(format!("invalid character literal: {s}"))),
         };
         return Ok(ch as u16);
     }
 
     // Hex number 0x...
     if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
-        return u16::from_str_radix(hex, 16).map_err(|e| format!("invalid hex number '{s}': {e}"));
+        return u16::from_str_radix(hex, 16).map_err(|e| DapError::InvalidExpression(format!("invalid hex number '{s}': {e}")));
     }
 
     // Binary number 0b...
     if let Some(bin) = s.strip_prefix("0b").or_else(|| s.strip_prefix("0B")) {
-        return u16::from_str_radix(bin, 2).map_err(|e| format!("invalid binary number '{s}': {e}"));
+        return u16::from_str_radix(bin, 2).map_err(|e| DapError::InvalidExpression(format!("invalid binary number '{s}': {e}")));
     }
 
     // Octal number 0o...
     if let Some(oct) = s.strip_prefix("0o").or_else(|| s.strip_prefix("0O")) {
-        return u16::from_str_radix(oct, 8).map_err(|e| format!("invalid octal number '{s}': {e}"));
+        return u16::from_str_radix(oct, 8).map_err(|e| DapError::InvalidExpression(format!("invalid octal number '{s}': {e}")));
     }
 
     // Decimal number
     if s.chars().all(|c| c.is_ascii_digit()) {
-        return s.parse::<u16>().map_err(|e| format!("invalid decimal number '{s}': {e}"));
+        return s.parse::<u16>().map_err(|e| DapError::InvalidExpression(format!("invalid decimal number '{s}': {e}")));
     }
 
     // Registers (8-bit)
@@ -167,10 +205,10 @@ pub fn eval_term(
         }
     }
 
-    Err(format!("unknown symbol, register, or identifier '{s}'"))
+    Err(DapError::UnknownIdentifier(s.to_string()))
 }
 
-fn format_eval_value(val: u16, is_word: bool) -> Result<EvalResult, String> {
+fn format_eval_value(val: u16, is_word: bool) -> Result<EvalResult, DapError> {
     let ascii_char = if val <= 0x7E && val >= 0x20 {
         format!("'{}'", (val as u8) as char)
     } else {
@@ -195,16 +233,16 @@ fn handle_repl_command(
     cmd: &str,
     machine: &Machine,
     source_map: Option<&SourceMap>,
-) -> Result<EvalResult, String> {
+) -> Result<EvalResult, DapError> {
     let parts: Vec<&str> = cmd.split_whitespace().collect();
     if parts.is_empty() {
-        return Err("empty command".to_string());
+        return Err(DapError::InvalidExpression("empty command".to_string()));
     }
 
     match parts[0] {
         "mem" | "dump" => {
             if parts.len() < 2 {
-                return Err("usage: :mem <addr> [count]".to_string());
+                return Err(DapError::InvalidExpression("usage: :mem <addr> [count]".to_string()));
             }
             let addr = eval_term(parts[1], machine, source_map)?;
             let count = if parts.len() >= 3 {
@@ -262,6 +300,54 @@ fn handle_repl_command(
             r#type: "help".to_string(),
             raw_value: None,
         }),
-        _ => Err(format!("unknown debug command ':{cmd}'")),
+        _ => Err(DapError::InvalidExpression(format!("unknown debug command ':{cmd}'"))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn negative_literal_and_unary_sign_evaluation() {
+        let mut machine = Machine::default();
+        machine.cpu.regs.set8(Reg8::A, 0x05);
+
+        // Negative literal -1 evaluates to 0xFFFF
+        let res_neg1 = evaluate_expression("-1", &machine, None).unwrap();
+        assert_eq!(res_neg1.raw_value, Some(0xFFFF));
+
+        // Negative hex -0x10 evaluates to 0xFFF0
+        let res_neg_hex = evaluate_expression("-0x10", &machine, None).unwrap();
+        assert_eq!(res_neg_hex.raw_value, Some(0xFFF0));
+
+        // Positive literal +42
+        let res_pos = evaluate_expression("+42", &machine, None).unwrap();
+        assert_eq!(res_pos.raw_value, Some(42));
+
+        // Subtraction with register: A - 1 = 4
+        let res_sub = evaluate_expression("A - 1", &machine, None).unwrap();
+        assert_eq!(res_sub.raw_value, Some(4));
+
+        // Negative arithmetic: -5 - 2 = -7 (0xFFF9)
+        let res_neg_sub = evaluate_expression("-5 - 2", &machine, None).unwrap();
+        assert_eq!(res_neg_sub.raw_value, Some(0xFFF9));
+
+        // Comparison with negative literal
+        let res_cmp = evaluate_expression("A != -1", &machine, None).unwrap();
+        assert_eq!(res_cmp.raw_value, Some(1));
+    }
+
+    #[test]
+    fn register_flag_and_memory_dereference() {
+        let mut machine = Machine::default();
+        machine.cpu.regs.set8(Reg8::B, 0x42);
+        machine.cpu.flags.zero = true;
+        machine.ram.write(Addr(0x2000), 0x77);
+
+        assert_eq!(evaluate_expression("B", &machine, None).unwrap().raw_value, Some(0x42));
+        assert_eq!(evaluate_expression("Z", &machine, None).unwrap().raw_value, Some(1));
+        assert_eq!(evaluate_expression("*0x2000", &machine, None).unwrap().raw_value, Some(0x77));
+        assert_eq!(evaluate_expression("B == 0x42", &machine, None).unwrap().raw_value, Some(1));
     }
 }

@@ -135,7 +135,7 @@ impl DapServer {
                         }
                         self.create_response(req_seq, &command, true, None, None)
                     }
-                    Err(err) => self.create_response(req_seq, &command, false, Some(err), None),
+                    Err(err) => self.create_response(req_seq, &command, false, Some(err.to_string()), None),
                 }
             }
             "restart" => {
@@ -161,7 +161,7 @@ impl DapServer {
                         }
                         self.create_response(req_seq, &command, true, None, None)
                     }
-                    Err(err) => self.create_response(req_seq, &command, false, Some(err), None),
+                    Err(err) => self.create_response(req_seq, &command, false, Some(err.to_string()), None),
                 }
             }
             "setBreakpoints" => {
@@ -244,7 +244,7 @@ impl DapServer {
                         };
                         self.create_response(req_seq, &command, true, None, Some(serde_json::to_value(body).unwrap()))
                     }
-                    Err(err) => self.create_response(req_seq, &command, false, Some(err), None),
+                    Err(err) => self.create_response(req_seq, &command, false, Some(err.to_string()), None),
                 }
             }
             "continue" => {
@@ -266,7 +266,7 @@ impl DapServer {
                             let body = ContinueResponseBody { all_threads_continued: Some(true) };
                             self.create_response(req_seq, &command, true, None, Some(serde_json::to_value(body).unwrap()))
                         }
-                        Err(err) => self.create_response(req_seq, &command, false, Some(err), None),
+                        Err(err) => self.create_response(req_seq, &command, false, Some(err.to_string()), None),
                     }
                 }
             }
@@ -286,7 +286,7 @@ impl DapServer {
                             }
                             self.create_response(req_seq, &command, true, None, None)
                         }
-                        Err(err) => self.create_response(req_seq, &command, false, Some(err), None),
+                        Err(err) => self.create_response(req_seq, &command, false, Some(err.to_string()), None),
                     }
                 }
             }
@@ -306,7 +306,7 @@ impl DapServer {
                             }
                             self.create_response(req_seq, &command, true, None, None)
                         }
-                        Err(err) => self.create_response(req_seq, &command, false, Some(err), None),
+                        Err(err) => self.create_response(req_seq, &command, false, Some(err.to_string()), None),
                     }
                 }
             }
@@ -326,7 +326,7 @@ impl DapServer {
                             }
                             self.create_response(req_seq, &command, true, None, None)
                         }
-                        Err(err) => self.create_response(req_seq, &command, false, Some(err), None),
+                        Err(err) => self.create_response(req_seq, &command, false, Some(err.to_string()), None),
                     }
                 }
             }
@@ -341,7 +341,7 @@ impl DapServer {
                         }
                         self.create_response(req_seq, &command, true, None, None)
                     }
-                    Err(err) => self.create_response(req_seq, &command, false, Some(err), None),
+                    Err(err) => self.create_response(req_seq, &command, false, Some(err.to_string()), None),
                 }
             }
             "evaluate" => {
@@ -360,7 +360,7 @@ impl DapServer {
                         };
                         self.create_response(req_seq, &command, true, None, Some(serde_json::to_value(body).unwrap()))
                     }
-                    Err(err) => self.create_response(req_seq, &command, false, Some(err), None),
+                    Err(err) => self.create_response(req_seq, &command, false, Some(err.to_string()), None),
                 }
             }
             "disassemble" => {

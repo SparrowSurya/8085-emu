@@ -1,6 +1,7 @@
 //! Intel 8085 Debug Adapter Protocol (DAP 1.6+) implementation.
 
 pub mod breakpoints;
+pub mod error;
 pub mod eval;
 pub mod inspect;
 pub mod protocol;
@@ -9,6 +10,7 @@ pub mod session;
 pub mod sourcemap;
 
 pub use breakpoints::{ActiveBreakpoint, BreakpointHit, BreakpointManager};
+pub use error::DapError;
 pub use eval::{eval_term, evaluate_expression, EvalResult};
 pub use inspect::{get_scopes, get_variables, set_variable};
 pub use protocol::*;
@@ -22,7 +24,7 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
-    fn test_dap_session_launch_and_step() {
+    fn launch_and_step_tracks_tstates_and_scopes() {
         let mut session = DebugSession::new();
         let demo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("programs/demo.e8085");
         let args = LaunchRequestArguments {
@@ -64,7 +66,7 @@ mod tests {
     }
 
     #[test]
-    fn test_dap_breakpoints_and_continue() {
+    fn line_breakpoints_pause_execution_on_hit() {
         let mut session = DebugSession::new();
         let demo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("programs/directives.e8085");
         let args = LaunchRequestArguments {

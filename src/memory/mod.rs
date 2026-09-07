@@ -65,6 +65,27 @@ impl Memory {
         self.data.is_empty()
     }
 
+    /// Returns an immutable slice view of the entire underlying RAM buffer.
+    #[inline]
+    pub fn as_slice(&self) -> &[u8] {
+        &self.data
+    }
+
+    /// Returns a mutable slice view of the entire underlying RAM buffer.
+    #[inline]
+    pub fn as_mut_slice(&mut self) -> &mut [u8] {
+        &mut self.data
+    }
+
+    /// Copies bytes from `src` into the entire underlying RAM buffer.
+    ///
+    /// # Panics
+    /// Panics if `src.len() != self.len()`.
+    #[inline]
+    pub fn copy_from_slice(&mut self, src: &[u8]) {
+        self.data.copy_from_slice(src);
+    }
+
     /// Read a byte, wrapping the address at the memory boundary.
     #[inline]
     pub fn read(&self, addr: Addr) -> u8 {
@@ -169,5 +190,22 @@ mod tests {
         bus.set_data(0x00);
         m.step(&mut bus);
         assert_eq!(bus.data(), 0x7E);
+    }
+
+    #[test]
+    fn slice_accessors_and_bulk_copy() {
+        let mut m = Memory::from_lines(8); // 256 bytes
+        m.write(Addr(0), 0x11);
+        m.write(Addr(1), 0x22);
+        assert_eq!(m.as_slice()[0], 0x11);
+        assert_eq!(m.as_slice()[1], 0x22);
+
+        m.as_mut_slice()[2] = 0x33;
+        assert_eq!(m.read(Addr(2)), 0x33);
+
+        let new_data = vec![0xAA; 256];
+        m.copy_from_slice(&new_data);
+        assert_eq!(m.read(Addr(0)), 0xAA);
+        assert_eq!(m.read(Addr(255)), 0xAA);
     }
 }

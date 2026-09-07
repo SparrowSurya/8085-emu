@@ -1,4 +1,5 @@
 use crate::cpu::registers::{Reg8, Reg16};
+use crate::dap::error::DapError;
 use crate::dap::eval::eval_term;
 use crate::dap::protocol::{Scope, Variable};
 use crate::dap::sourcemap::SourceMap;
@@ -346,7 +347,7 @@ pub fn set_variable(
     value: &str,
     machine: &mut Machine,
     source_map: Option<&SourceMap>,
-) -> Result<(String, String), String> {
+) -> Result<(String, String), DapError> {
     let raw_val = eval_term(value, machine, source_map)?;
     let clean_name = name.split_whitespace().next().unwrap_or(name);
     let upper = clean_name.to_ascii_uppercase();
@@ -409,7 +410,7 @@ pub fn set_variable(
                     return Ok((format!("0x{:02X}", raw_val as u8), "u8".to_string()));
                 }
             }
-            Err(format!("cannot modify variable/register '{clean_name}'"))
+            Err(DapError::InvalidVariable(format!("cannot modify variable/register '{clean_name}'")))
         }
     }
 }

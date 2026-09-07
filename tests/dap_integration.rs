@@ -61,7 +61,7 @@ impl MockDapClient {
 }
 
 #[tokio::test]
-async fn test_full_dap_session_workflow() {
+async fn full_dap_session_drives_client_lifecycle() {
     let (client_stream, server_stream_client) = tokio::io::duplex(64 * 1024);
     let (server_stream_server, client_stream_server) = tokio::io::duplex(64 * 1024);
 
@@ -200,7 +200,7 @@ async fn test_full_dap_session_workflow() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn test_multifile_terminal_bridge_and_halt_termination() {
+async fn multifile_source_stepping_and_terminal_bridge_stream_io() {
     // 1. Start mock TCP terminal server simulating VS Code "8085 Terminal" on 127.0.0.1:18085
     let listener = tokio::net::TcpListener::bind("127.0.0.1:18085").await.unwrap();
 
@@ -336,7 +336,7 @@ async fn test_multifile_terminal_bridge_and_halt_termination() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn test_stack_word_and_parent_child_label_formatting() {
+async fn stack_word_and_parent_child_labels_format_in_call_stack() {
     let (client_stream, server_stream_client) = tokio::io::duplex(64 * 1024);
     let (server_stream_server, client_stream_server) = tokio::io::duplex(64 * 1024);
 

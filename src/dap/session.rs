@@ -1,4 +1,11 @@
 //! Core Debug Session controller, execution state machine, and time-travel engine for 8085.
+//!
+//! [`DebugSession`] manages the complete execution lifecycle of an Intel 8085 program under debug:
+//! - Multi-file source mapping, breakpoint resolution (line, function, conditional, hit-count), and stepping.
+//! - Time-travel history snapshots (up to 256 states) supporting bidirectional stepping ([`step_back`](DebugSession::step_back))
+//!   and reverse execution ([`reverse_continue`](DebugSession::reverse_continue)).
+//! - Shadow call stack tracking nested subroutine invocations and returns without requiring hardware stack frame pointers.
+//! - Peripheral device integration (virtual text I/O controller, printer, keyboard) and optional TCP socket bridging.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::fs;
@@ -7,6 +14,7 @@ use std::path::{Path, PathBuf};
 use crate::asm::{assemble_full_with_file, BinaryContainer, LoadImage};
 use crate::cpu::MachineCycle;
 use crate::dap::breakpoints::BreakpointManager;
+use crate::dap::error::DapError;
 use crate::dap::eval::{evaluate_expression, EvalResult};
 use crate::dap::inspect::{get_scopes, get_variables, set_variable};
 use crate::dap::protocol::{
@@ -18,46 +26,78 @@ use crate::instruction::disassemble_bytes;
 use crate::machine::Machine;
 use crate::value::Addr;
 
+/// Maximum number of time-travel execution snapshots retained in the rewind buffer.
 const MAX_HISTORY_SNAPSHOTS: usize = 256;
 
+/// Reason why the debugger stopped execution and yielded control to the client.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StopReason {
+    /// Paused at the program entry point upon launch.
     Entry,
+    /// Paused after completing a single step (step-in, step-over, step-out, or step-back).
     Step,
+    /// Paused because an active breakpoint (identified by its breakpoint ID) was hit.
     Breakpoint(i64),
+    /// Paused asynchronously in response to an explicit user pause request.
     Pause,
+    /// Paused because an illegal memory access or illegal opcode exception/fault occurred.
     Exception(String),
+    /// Program executed a `HLT` instruction and terminated.
     Halt,
 }
 
+/// A frame on the debugger's shadow call stack, tracking subroutine calls across modules.
 #[derive(Debug, Clone)]
 pub struct ShadowFrame {
+    /// Memory address of the `CALL` or `RST` instruction that initiated the subroutine call.
     pub call_address: u16,
+    /// Expected return address pushed onto the stack (address immediately following the call instruction).
     pub return_address: u16,
+    /// Symbolic subroutine name resolved from source map or symbol table.
     pub subroutine_name: String,
 }
 
+/// Complete machine snapshot for time-travel debugging and reverse execution.
 #[derive(Debug, Clone)]
 pub struct MachineSnapshot {
+    /// Full CPU register and flag state.
     pub cpu: crate::cpu::Cpu,
-    pub ram: Box<[u8; 65536]>,
+    /// Complete snapshot of RAM memory dynamically sized to `machine.ram.len()`.
+    pub ram: Box<[u8]>,
+    /// Accumulated elapsed clock cycles (T-states) up to this point in execution.
     pub elapsed_t_states: u64,
+    /// Total number of machine instructions executed up to this snapshot.
     pub instruction_count: u64,
+    /// Copy of the shadow call stack at this execution point.
     pub shadow_stack: Vec<ShadowFrame>,
 }
 
+/// Core debugger session controller managing the 8085 virtual machine, breakpoints,
+/// source mapping, time-travel history, and DAP client interactions.
 pub struct DebugSession {
+    /// The underlying 8085 microprocessor virtual machine.
     pub machine: Machine,
+    /// Source map correlating memory addresses to source file lines, columns, and symbols.
     pub source_map: SourceMap,
+    /// Breakpoint manager maintaining verified line, function, conditional, and temporary breakpoints.
     pub breakpoints: BreakpointManager,
+    /// Whether the execution loop is currently actively running instructions forward.
     pub is_running: bool,
+    /// Whether the target program has executed a `HLT` instruction or reached termination.
     pub is_terminated: bool,
+    /// Current stop reason if execution is paused.
     pub stop_reason: Option<StopReason>,
+    /// Total elapsed T-states across the entire debugging session.
     pub elapsed_t_states: u64,
+    /// Total count of instructions executed since launch.
     pub instruction_count: u64,
+    /// Shadow call stack recording active call nesting hierarchy.
     pub shadow_stack: Vec<ShadowFrame>,
+    /// Ring buffer of execution snapshots for time-travel stepping (`step_back`, `reverse_continue`).
     pub history: VecDeque<MachineSnapshot>,
+    /// Filesystem path to the primary assembly source or binary container being debugged.
     pub program_path: PathBuf,
+    /// Thread-safe queue of captured text emitted by peripheral devices (TextIO, Printer).
     pub output_queue: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
 }
 
@@ -81,6 +121,7 @@ impl Default for DebugSession {
 }
 
 impl DebugSession {
+    /// Creates a new, uninitialized [`DebugSession`] with a default 64KB machine and empty state.
     pub fn new() -> Self {
         Self {
             machine: Machine::default(),
@@ -98,18 +139,31 @@ impl DebugSession {
         }
     }
 
-    pub fn launch(&mut self, args: &LaunchRequestArguments) -> Result<Option<StopReason>, String> {
+    /// Launches a debugging session for the program specified in `args`.
+    ///
+    /// This method:
+    /// 1. Reads and compiles `.e8085` source code (or decodes `.8085.bin` containers) and builds the AST source map.
+    /// 2. Initializes CPU registers (`PC`, `SP`) and loads segments into memory.
+    /// 3. Attaches virtual hardware peripherals ([`TextIODevice`](crate::device::TextIODevice), [`KeyboardDevice`](crate::device::KeyboardDevice), [`PrinterDevice`](crate::device::PrinterDevice)) with optional TCP socket bridging.
+    /// 4. Records the initial entry snapshot in time-travel history.
+    /// 5. Pauses on entry if `stop_on_entry` is true, or begins forward execution.
+    ///
+    /// # Errors
+    /// Returns [`DapError::FileNotFound`] if the target path does not exist,
+    /// [`DapError::Assembly`] if source compilation fails, or
+    /// [`DapError::ContainerDecode`] if binary container decoding fails.
+    pub fn launch(&mut self, args: &LaunchRequestArguments) -> Result<Option<StopReason>, DapError> {
         let path = PathBuf::from(&args.program);
         if !path.exists() {
-            return Err(format!("program file not found: {}", path.display()));
+            return Err(DapError::FileNotFound(path));
         }
         self.program_path = path.clone();
 
         // 1. Compile or load program
         let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
         let load_image = if ext == "bin" || ext == "8085" {
-            let bytes = fs::read(&path).map_err(|e| format!("failed to read binary {}: {e}", path.display()))?;
-            let container = BinaryContainer::decode(&bytes).map_err(|e| format!("failed to decode binary container: {e}"))?;
+            let bytes = fs::read(&path).map_err(|e| DapError::Io(format!("failed to read binary {}: {e}", path.display())))?;
+            let container = BinaryContainer::decode(&bytes).map_err(|e| DapError::ContainerDecode(format!("failed to decode binary container: {e}")))?;
             let image = LoadImage {
                 bytes: container.text_bytes.clone(),
                 entry: container.header.entry_pc,
@@ -138,10 +192,10 @@ impl DebugSession {
             image
         } else {
             let source_text = fs::read_to_string(&path)
-                .map_err(|e| format!("failed to read source file {}: {e}", path.display()))?;
+                .map_err(|e| DapError::Io(format!("failed to read source file {}: {e}", path.display())))?;
             let base_dir = path.parent();
             let (image, symbols, listing) = assemble_full_with_file(&path, &source_text, base_dir, &[])
-                .map_err(|e| format!("assembly failed at line {}:{}: {}", e.span.line, e.span.col, e.kind))?;
+                .map_err(|e| DapError::Assembly(format!("assembly failed at line {}:{}: {}", e.span.line, e.span.col, e.kind)))?;
 
             // Build AST to get data variables metadata across all files
             let raw_prog = crate::asm::parse(crate::asm::lex(&source_text).unwrap_or_default()).ok();
@@ -159,7 +213,7 @@ impl DebugSession {
         // 2. Initialize Machine RAM and Registers
         self.machine = Machine::default();
         crate::asm::load(&mut self.machine, &load_image)
-            .map_err(|e| format!("failed to load image into machine: {e:?}"))?;
+            .map_err(|e| DapError::MachineLoad(format!("failed to load image into machine: {e:?}")))?;
 
         // Optional TCP bridge for integrated terminal (defaults to port 8085)
         let (term_rx, term_tcp_writer): (std::sync::mpsc::Receiver<u8>, Option<std::sync::Arc<std::sync::Mutex<std::net::TcpStream>>>) =
@@ -277,22 +331,41 @@ impl DebugSession {
         }
     }
 
-    pub fn restart(&mut self, args: &LaunchRequestArguments) -> Result<Option<StopReason>, String> {
+    /// Restarts program execution from the beginning while preserving all active breakpoints.
+    ///
+    /// # Errors
+    /// Returns [`DapError`] if reloading the target program fails.
+    pub fn restart(&mut self, args: &LaunchRequestArguments) -> Result<Option<StopReason>, DapError> {
         let saved_breakpoints = self.breakpoints.clone();
         let result = self.launch(args)?;
         self.breakpoints = saved_breakpoints;
         Ok(result)
     }
 
+    /// Sets or clears verified source-line breakpoints for a specific file.
+    ///
+    /// Maps source line numbers to machine instruction memory addresses, validating conditions
+    /// and hit-count specifications against the active [`SourceMap`].
     pub fn set_line_breakpoints(&mut self, file: &Path, requested: &[SourceBreakpoint]) -> Vec<Breakpoint> {
         self.breakpoints.set_line_breakpoints(file, requested, &self.source_map)
     }
 
+    /// Sets or clears verified function/subroutine breakpoints by symbol name.
+    ///
+    /// Resolves global and local label names to addresses using the active [`SourceMap`].
     pub fn set_function_breakpoints(&mut self, requested: &[FunctionBreakpoint]) -> Vec<Breakpoint> {
         self.breakpoints.set_function_breakpoints(requested, &self.source_map)
     }
 
-    pub fn step_in(&mut self) -> Result<Option<StopReason>, String> {
+    /// Executes a single 8085 machine instruction at the current `PC` (Step In).
+    ///
+    /// If the instruction is a subroutine call (`CALL`, `CZ`, etc.), execution enters the body
+    /// of the called subroutine and a [`ShadowFrame`] is pushed onto the shadow call stack.
+    /// Records an execution snapshot before advancing to enable time-travel step-back.
+    ///
+    /// # Errors
+    /// Returns [`DapError`] if stepping fails.
+    pub fn step_in(&mut self) -> Result<Option<StopReason>, DapError> {
         if self.is_terminated {
             return Ok(None);
         }
@@ -307,7 +380,15 @@ impl DebugSession {
         }
     }
 
-    pub fn step_over(&mut self) -> Result<Option<StopReason>, String> {
+    /// Steps over subroutine calls and software interrupts at the current `PC` (Step Over).
+    ///
+    /// If the current instruction is a `CALL` or `RST`, plants a temporary breakpoint at the return
+    /// address immediately following the call instruction and continues running until it returns or
+    /// encounters another breakpoint. For all other instructions, behaves identically to [`step_in`](Self::step_in).
+    ///
+    /// # Errors
+    /// Returns [`DapError`] if stepping fails.
+    pub fn step_over(&mut self) -> Result<Option<StopReason>, DapError> {
         if self.is_terminated {
             return Ok(None);
         }
@@ -325,7 +406,14 @@ impl DebugSession {
         self.step_in()
     }
 
-    pub fn step_out(&mut self) -> Result<Option<StopReason>, String> {
+    /// Steps out of the currently executing subroutine (Step Out).
+    ///
+    /// Plants a temporary breakpoint at the return address recorded in the topmost [`ShadowFrame`]
+    /// and resumes execution until the subroutine returns to its caller.
+    ///
+    /// # Errors
+    /// Returns [`DapError`] if execution fails.
+    pub fn step_out(&mut self) -> Result<Option<StopReason>, DapError> {
         if self.is_terminated {
             return Ok(None);
         }
@@ -338,12 +426,17 @@ impl DebugSession {
         }
     }
 
-    pub fn step_back(&mut self) -> Result<Option<StopReason>, String> {
+    /// Rewinds execution by exactly one machine instruction using the time-travel history buffer (Step Back).
+    ///
+    /// Restores the most recently captured [`MachineSnapshot`], including all CPU registers, flags,
+    /// full RAM state via bulk slice copying, elapsed T-states, and shadow call stack frames.
+    ///
+    /// # Errors
+    /// Returns [`DapError::NoHistory`] if execution is already at the earliest recorded snapshot.
+    pub fn step_back(&mut self) -> Result<Option<StopReason>, DapError> {
         if let Some(snap) = self.history.pop_back() {
             self.machine.cpu = snap.cpu;
-            for (i, &b) in snap.ram.iter().enumerate() {
-                self.machine.ram.write(Addr(i as u16), b);
-            }
+            self.machine.ram.copy_from_slice(&snap.ram);
             self.elapsed_t_states = snap.elapsed_t_states;
             self.instruction_count = snap.instruction_count;
             self.shadow_stack = snap.shadow_stack;
@@ -351,19 +444,25 @@ impl DebugSession {
             self.is_terminated = false;
             Ok(Some(StopReason::Step))
         } else {
-            Err("no earlier execution history available".to_string())
+            Err(DapError::NoHistory)
         }
     }
 
-    pub fn reverse_continue(&mut self) -> Result<Option<StopReason>, String> {
+    /// Replays execution backward through the history buffer until a breakpoint is hit or the beginning is reached (Reverse Continue).
+    ///
+    /// Continuously pops and restores snapshots. If an active breakpoint matches the restored `PC`
+    /// (and its condition/hit-count is satisfied), pauses with [`StopReason::Breakpoint`].
+    /// If the history buffer becomes empty, pauses at the program entry state with [`StopReason::Entry`].
+    ///
+    /// # Errors
+    /// Returns [`DapError::NoHistory`] if no earlier history snapshots are available.
+    pub fn reverse_continue(&mut self) -> Result<Option<StopReason>, DapError> {
         if self.history.is_empty() {
-            return Err("no earlier execution history available".to_string());
+            return Err(DapError::NoHistory);
         }
         while let Some(snap) = self.history.pop_back() {
             self.machine.cpu = snap.cpu;
-            for (i, &b) in snap.ram.iter().enumerate() {
-                self.machine.ram.write(Addr(i as u16), b);
-            }
+            self.machine.ram.copy_from_slice(&snap.ram);
             self.elapsed_t_states = snap.elapsed_t_states;
             self.instruction_count = snap.instruction_count;
             self.shadow_stack = snap.shadow_stack;
@@ -387,24 +486,34 @@ impl DebugSession {
         Ok(Some(StopReason::Step))
     }
 
+    /// Drains and returns all queued output strings captured from virtual peripheral devices since the last call.
     pub fn drain_output_events(&mut self) -> Vec<String> {
         let mut q = self.output_queue.lock().unwrap();
         std::mem::take(&mut *q)
     }
 
+    /// Feeds a line of text into the attached [`TextIODevice`](crate::device::TextIODevice) input buffer.
     pub fn feed_terminal_input(&mut self, text: &str) {
         if let Some(term) = self.machine.devices.find_device_mut::<crate::device::TextIODevice>() {
             term.feed_line(text);
         }
     }
 
+    /// Enqueues a character into the attached [`KeyboardDevice`](crate::device::KeyboardDevice) FIFO buffer.
     pub fn press_keyboard_char(&mut self, c: char) {
         if let Some(kbd) = self.machine.devices.find_device_mut::<crate::device::KeyboardDevice>() {
             let _ = kbd.press_char(c);
         }
     }
 
-    pub fn continue_exec(&mut self) -> Result<Option<StopReason>, String> {
+    /// Resumes forward execution (Continue).
+    ///
+    /// Executes instructions in a loop until a verified breakpoint is hit, the CPU halts (`HLT`),
+    /// a hardware exception occurs, or a pause request is received.
+    ///
+    /// # Errors
+    /// Returns [`DapError`] if an execution error occurs.
+    pub fn continue_exec(&mut self) -> Result<Option<StopReason>, DapError> {
         if self.is_terminated {
             return Ok(None);
         }
@@ -418,12 +527,17 @@ impl DebugSession {
         self.run_execution_loop()
     }
 
-    pub fn pause(&mut self) -> Result<Option<StopReason>, String> {
+    /// Asynchronously pauses a currently running execution loop.
+    pub fn pause(&mut self) -> Result<Option<StopReason>, DapError> {
         self.is_running = false;
         self.stop_reason = Some(StopReason::Pause);
         Ok(Some(StopReason::Pause))
     }
 
+    /// Builds the active DAP call stack frames.
+    ///
+    /// Returns Frame 0 (current `PC`, symbol, and source coordinates) followed by caller frames
+    /// reconstructed from the shadow call stack.
     pub fn get_stack_trace(&self) -> Vec<StackFrame> {
         let current_pc = self.machine.cpu.regs.pc.0;
         let mut frames = Vec::new();
@@ -489,10 +603,13 @@ impl DebugSession {
         frames
     }
 
+    /// Returns the seven specialized variable scopes for the given stack frame ID:
+    /// CPU Registers, Register Pairs, Flags, Data Segment, BSS Segment, Stack Memory, Peripherals & Diagnostics.
     pub fn get_scopes(&self, frame_id: i64) -> Vec<Scope> {
         get_scopes(frame_id)
     }
 
+    /// Resolves and formats variables for a given scope or variable reference ID.
     pub fn get_variables(&self, variables_reference: i64) -> Vec<Variable> {
         get_variables(
             variables_reference,
@@ -503,11 +620,19 @@ impl DebugSession {
         )
     }
 
-    pub fn set_variable(&mut self, ref_id: i64, name: &str, value: &str) -> Result<(String, String), String> {
+    /// Mutates a register, flag, data variable, or memory location during an active debug pause.
+    ///
+    /// # Errors
+    /// Returns [`DapError::InvalidVariable`] if the target variable cannot be modified or the value is invalid.
+    pub fn set_variable(&mut self, ref_id: i64, name: &str, value: &str) -> Result<(String, String), DapError> {
         set_variable(ref_id, name, value, &mut self.machine, Some(&self.source_map))
     }
 
-    pub fn evaluate(&mut self, expr: &str) -> Result<EvalResult, String> {
+    /// Evaluates a debugger expression, comparison (`A == 0x05`), pointer dereference (`*0x2000`), or REPL command (`:in`, `:key`, `:mem`, `:regs`, `:help`).
+    ///
+    /// # Errors
+    /// Returns [`DapError`] if evaluation syntax or identifier resolution fails.
+    pub fn evaluate(&mut self, expr: &str) -> Result<EvalResult, DapError> {
         let trimmed = expr.trim();
         if let Some(cmd) = trimmed.strip_prefix(':') {
             let parts: Vec<&str> = cmd.split_whitespace().collect();
@@ -517,7 +642,7 @@ impl DebugSession {
                         let text = cmd.strip_prefix(parts[0]).unwrap().trim();
                         self.feed_terminal_input(text);
                         return Ok(EvalResult {
-                            display: format!("Fed input to terminal: \"{text}\""),
+                            display: format!("Fed input to TextIO device: \"{text}\""),
                             r#type: "input".to_string(),
                             raw_value: None,
                         });
@@ -539,6 +664,8 @@ impl DebugSession {
         evaluate_expression(expr, &self.machine, Some(&self.source_map))
     }
 
+    /// Disassembles `count` consecutive instructions from RAM starting at `start_addr`,
+    /// annotating instructions with exported symbols and source locations.
     pub fn disassemble_memory(&self, start_addr: u16, count: usize) -> Vec<DisassembledInstruction> {
         let mut results = Vec::new();
         let mut addr = start_addr;
@@ -592,7 +719,7 @@ impl DebugSession {
         results
     }
 
-    fn run_execution_loop(&mut self) -> Result<Option<StopReason>, String> {
+    fn run_execution_loop(&mut self) -> Result<Option<StopReason>, DapError> {
         let mut step_limit = 100_000;
         while self.is_running && step_limit > 0 {
             step_limit -= 1;
@@ -623,7 +750,7 @@ impl DebugSession {
         }
     }
 
-    fn execute_single_step(&mut self) -> Result<Option<StopReason>, String> {
+    fn execute_single_step(&mut self) -> Result<Option<StopReason>, DapError> {
         let pc_before = self.machine.cpu.regs.pc.0;
         let opcode_byte = self.machine.ram.read(Addr(pc_before));
 
@@ -691,10 +818,7 @@ impl DebugSession {
         if self.history.len() >= MAX_HISTORY_SNAPSHOTS {
             self.history.pop_front();
         }
-        let mut ram_copy = Box::new([0u8; 65536]);
-        for (i, slot) in ram_copy.iter_mut().enumerate() {
-            *slot = self.machine.ram.read(Addr(i as u16));
-        }
+        let ram_copy = self.machine.ram.as_slice().to_vec().into_boxed_slice();
         self.history.push_back(MachineSnapshot {
             cpu: self.machine.cpu.clone(),
             ram: ram_copy,
