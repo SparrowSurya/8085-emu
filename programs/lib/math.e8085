@@ -1,29 +1,38 @@
-; =================================================================
-; 8085 MATH MATHEMATICAL ENGINE SUBROUTINES
-; Includes: Division, Multiplication, Modulo, and Power
-; =================================================================
+; ==============================================================================
+; 8085 Math Library
+;
+; Provides fundamental 8-bit arithmetic subroutines for 8085 programs.
+; Includes integer division, multiplication, modulo (remainder), and exponentiation.
+;
+; Exported Subroutines:
+;   - divide:   Unsigned 8-bit integer division (Dividend / Divisor)
+;   - multiply: Unsigned 8-bit integer multiplication (Multiplicand * Multiplier)
+;   - modulo:   Unsigned 8-bit integer modulo remainder (Dividend % Divisor)
+;   - power:    Unsigned 8-bit integer exponentiation (Base ^ Exponent)
+; ==============================================================================
 
 
 segment .text
 
-    global divide
-    global multiply
-    global modulo
-    global power
-
-
-; -----------------------------------------------------------------
-; SUBROUTINE: divide
-; Description: Divides an 8-bit unsigned integer by another.
-; Inputs:      B = Dividend, A = Divisor
-; Outputs:     C = Quotient, D = Remainder
-; Registers:   Alters A, B, C, D, E
-; -----------------------------------------------------------------
-divide:
+; Divides an 8-bit unsigned integer by another using restoring division.
+;
+; Performs `B / A` using bitwise shift-and-subtract over 8 bits.
+;
+; **Inputs**:
+; - `B`: Dividend (numerator, `0..255`)
+; - `A`: Divisor (denominator, `1..255`)
+;
+; **Outputs**:
+; - `C`: Quotient (`B / A`)
+; - `D`: Remainder (`B % A`)
+;
+; **Alters**: `A`, `B`, `C`, `D`, `E`
+global divide:
     mov C, A      ; Move divisor to C to clear accumulator
     mvi D, 0x00   ; Clear D (running remainder accumulator)
     mvi E, 0x08   ; Set loop counter E = 8 bits
 
+; Loop body: shifts dividend and remainder left, subtracting divisor if remainder >= divisor
 .div_loop:
     mov A, B   ; Shift dividend (B) left by 1 bit
     add A      ; Fast shift left (MSB goes into carry flag)
@@ -38,6 +47,7 @@ divide:
     sub C   ; Subtract divisor from remainder
     inr B   ; Flip the lowest bit of B to 1 (quotient bit)
 
+; Skips subtraction step when running remainder < divisor
 .skip_sub:
     mov D, A        ; Save updated remainder back to D
     dcr E           ; Decrement bit loop counter
@@ -47,19 +57,26 @@ divide:
     ret
 
 
-; -----------------------------------------------------------------
-; SUBROUTINE: multiply
-; Description: Multiplies two 8-bit integers using shift-and-add.
-; Inputs:      B = Multiplicand, A = Multiplier
-; Outputs:     C = Product (Lower Byte), D = Product (Upper Byte)
-; Registers:   Alters A, B, C, D, E, H
-; -----------------------------------------------------------------
-multiply:
+; Multiplies two 8-bit unsigned integers using shift-and-add algorithm.
+;
+; Computes `B * A` yielding a 16-bit product across register pair `D`:`C`.
+;
+; **Inputs**:
+; - `B`: Multiplicand (`0..255`)
+; - `A`: Multiplier (`0..255`)
+;
+; **Outputs**:
+; - `C`: Product lower 8 bits (LSB)
+; - `D`: Product upper 8 bits (MSB)
+;
+; **Alters**: `A`, `B`, `C`, `D`, `E`, `H`
+global multiply:
     mov E, A      ; E = Multiplier
     mvi C, 0x00   ; Clear lower byte of product
     mvi D, 0x00   ; Clear upper byte of product
     mvi H, 0x08   ; Loop counter = 8 bits
 
+; Loop body: tests multiplier LSB, accumulates multiplicand into product, and shifts
 .mult_loop:
     mov A, E        ; Get multiplier
     rar             ; Shift right, moving LSB to carry
@@ -73,6 +90,7 @@ multiply:
     aci 0x00
     mov D, A
 
+; Skips addition step when multiplier bit is 0
 .skip_add:
     mov A, B   ; Shift Multiplicand (B) left for next iteration
     add A      ; B = B * 2
@@ -83,18 +101,22 @@ multiply:
     ret
 
 
-; -----------------------------------------------------------------
-; SUBROUTINE: modulo
-; Description: Calculates the remainder of a division operation.
-; Inputs:      B = Dividend, A = Divisor
-; Outputs:     C = Remainder
-; Registers:   Alters A, B, C, D, E
-; -----------------------------------------------------------------
-modulo:
+; Calculates the remainder of an 8-bit unsigned integer division (`B % A`).
+;
+; **Inputs**:
+; - `B`: Dividend (`0..255`)
+; - `A`: Divisor (`1..255`)
+;
+; **Outputs**:
+; - `C`: Remainder (`B % A`)
+;
+; **Alters**: `A`, `B`, `C`, `D`, `E`
+global modulo:
     mov C, A      ; C = Divisor
     mvi D, 0x00   ; D = Running remainder accumulator
     mvi E, 0x08   ; Loop counter = 8 bits
 
+; Loop body: bitwise division loop tracking remainder in D
 .mod_loop:
     mov A, B   ; Shift dividend left
     add A
@@ -107,6 +129,7 @@ modulo:
     jc .skip_mod
     sub C          ; Subtract if remainder >= divisor
 
+; Skips subtraction step when remainder < divisor
 .skip_mod:
     mov D, A        ; Save remainder
     dcr E           ; Decrement loop counter
@@ -116,23 +139,31 @@ modulo:
     ret
 
 
-; -----------------------------------------------------------------
-; SUBROUTINE: power
-; Description: Computes base raised to the exponent power (B^A).
-; Inputs:      B = Base, A = Exponent
-; Outputs:     C = Result (Truncated to lower 8 bits if overflow occurs)
-; Registers:   Alters A, B, C, D, E, H (Preserves base across loops)
-; -----------------------------------------------------------------
-power:
+; Computes base raised to an exponent power (`B ^ A`).
+;
+; Multiplies `B` by itself `A` times. Returns 1 when exponent `A == 0`.
+; Result is truncated to the lower 8 bits if overflow exceeds 255.
+;
+; **Inputs**:
+; - `B`: Base (`0..255`)
+; - `A`: Exponent (`0..255`)
+;
+; **Outputs**:
+; - `C`: Result (`B ^ A`, lower 8 bits)
+;
+; **Alters**: `A`, `B`, `C`, `D`, `E`, `H`
+global power:
     cpi 0x00         ; Check if exponent (A) is 0
     jnz .pow_start
     mvi C, 0x01      ; Any base to the power of 0 is 1
     ret
 
+; Non-zero exponent entry: initializes product to 1
 .pow_start:
     mov E, A      ; E = Loop counter (Exponent value)
     mvi C, 0x01   ; Initialize running product result = 1
 
+; Exponentiation loop: repeatedly multiplies running product by base
 .pow_loop:
     push BC         ; Save original base register pair (B-C)
     mov A, C        ; Move current product to multiplier parameter (A)

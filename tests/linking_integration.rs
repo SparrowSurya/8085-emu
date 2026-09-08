@@ -261,3 +261,131 @@ func_b:
     assert_eq!(container.header.entry_pc, 0);
     assert_eq!(container.export_symbols.len(), 2);
 }
+
+#[test]
+fn test_cmp_library_relational_and_range_subroutines() {
+    let base_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("programs");
+    let test_src = r#"
+%include "lib/cmp.e8085"
+
+segment .text
+
+main:
+    ; 1. Test less_than (5 < 10 -> true (1))
+    mvi A, 5
+    mvi B, 10
+    call less_than
+    cpi 1
+    jnz .fail
+
+    ; 2. Test less_than false (10 < 10 -> false (0))
+    mvi A, 10
+    mvi B, 10
+    call less_than
+    cpi 0
+    jnz .fail
+
+    ; 3. Test greater_than (20 > 10 -> true (1))
+    mvi A, 20
+    mvi B, 10
+    call greater_than
+    cpi 1
+    jnz .fail
+
+    ; 4. Test greater_than false (10 > 10 -> false (0))
+    mvi A, 10
+    mvi B, 10
+    call greater_than
+    cpi 0
+    jnz .fail
+
+    ; 5. Test greater_than_or_equal (10 >= 10 -> true (1))
+    mvi A, 10
+    mvi B, 10
+    call greater_than_or_equal
+    cpi 1
+    jnz .fail
+
+    ; 6. Test greater_than_or_equal false (5 >= 10 -> false (0))
+    mvi A, 5
+    mvi B, 10
+    call greater_than_or_equal
+    cpi 0
+    jnz .fail
+
+    ; 7. Test less_than_or_equal (10 <= 10 -> true (1))
+    mvi A, 10
+    mvi B, 10
+    call less_than_or_equal
+    cpi 1
+    jnz .fail
+
+    ; 8. Test less_than_or_equal false (15 <= 10 -> false (0))
+    mvi A, 15
+    mvi B, 10
+    call less_than_or_equal
+    cpi 0
+    jnz .fail
+
+    ; 9. Test in_range (15 in [10, 20] -> true (1))
+    mvi A, 15
+    mvi B, 10
+    mvi C, 20
+    call in_range
+    cpi 1
+    jnz .fail
+
+    ; 10. Test in_range boundaries (10 in [10, 20] -> true (1))
+    mvi A, 10
+    mvi B, 10
+    mvi C, 20
+    call in_range
+    cpi 1
+    jnz .fail
+
+    ; 11. Test in_range boundaries (20 in [10, 20] -> true (1))
+    mvi A, 20
+    mvi B, 10
+    mvi C, 20
+    call in_range
+    cpi 1
+    jnz .fail
+
+    ; 12. Test in_range out below (9 in [10, 20] -> false (0))
+    mvi A, 9
+    mvi B, 10
+    mvi C, 20
+    call in_range
+    cpi 0
+    jnz .fail
+
+    ; 13. Test in_range out above (21 in [10, 20] -> false (0))
+    mvi A, 21
+    mvi B, 10
+    mvi C, 20
+    call in_range
+    cpi 0
+    jnz .fail
+
+    ; All checks succeeded: put 0xFF in A and halt
+    mvi A, 0xFF
+    hlt
+
+.fail:
+    mvi A, 0xEE
+    hlt
+"#;
+
+    let image = assemble_and_link(test_src, Some(&base_dir), &[])
+        .expect("assembles and links test program with lib/cmp.e8085");
+    let mut machine = Machine::default();
+    load(&mut machine, &image).expect("loads into machine");
+    machine.run();
+
+    assert_eq!(
+        machine.cpu.regs.a, 0xFF,
+        "Expected all comparison assertions to pass (A=0xFF), but got: 0x{:02X}",
+        machine.cpu.regs.a
+    );
+    assert!(machine.cpu.is_halt);
+}

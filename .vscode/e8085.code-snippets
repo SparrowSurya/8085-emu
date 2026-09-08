@@ -1,0 +1,47 @@
+{
+    "Basic e8085 program": {
+        "scope": "e8085",
+        "prefix": "main",
+        "body": [
+            "segment .text",
+            "main:",
+            "\thlt",
+            "$0"
+        ],
+        "description": "Creates baisc e8085 program."
+    },
+    "Include directive": {
+        "scope": "e8085",
+        "prefix": "include",
+        "body": "%include \"$0\""
+    },
+    "Define directive": {
+        "scope": "e8085",
+        "prefix": "define",
+        "body": "%define ${1:NAME} $0"
+    },
+    "Data segment": {
+        "scope": "e8085",
+        "prefix": "data",
+        "body": [
+            "segment .data",
+            "\t$0"
+        ]
+    },
+    "BSS segment": {
+        "scope": "e8085",
+        "prefix": "bss",
+        "body": [
+            "segment .bss",
+            "\t$0"
+        ]
+    },
+    "Text segment": {
+        "scope": "e8085",
+        "prefix": "text",
+        "body": [
+            "segment .text",
+            "\t$0"
+        ]
+    },
+}

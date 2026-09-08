@@ -1,18 +1,48 @@
-; This program provides useful functions to interact with the `TextIODevice`
+; ==============================================================================
+; Text I/O Device Library for 8085 Microprocessor
+;
+; Provides subroutines and port definitions to interact with the TextIODevice.
+; Enables buffered text output, reading interactive user input, printing single
+; characters, and outputting newlines.
+;
+; Exported Subroutines:
+;   - print:  Displays a string buffer of specified length
+;   - input:  Captures interactive user input into a memory buffer
+;   - putch:  Prints a single ASCII character
+;   - endl:   Outputs a newline (0x0A) character
+; ==============================================================================
 
 
+; Command code: Enter write mode to buffer output characters
 %define TEXTIO_CMD_WRITE   0x00
+
+; Command code: Flush and display buffered characters
 %define TEXTIO_CMD_DISPLAY 0x01
+
+; Command code: Enter read mode to capture user input
 %define TEXTIO_CMD_READ    0x02
+
+; Data port: Used for streaming character payload bytes and length prefixes
 %define TEXTIO_DATA_PORT   0x01
+
+; Command port: Used for sending control commands (write, display, read)
 %define TEXTIO_CMD_PORT    0x02
+
 
 segment .text
 
-; Subroutine: Displays the text in TextIO device
-; Args:
-;   * Memory address of buffer in HL register pair
-;   * Size of buffer to display in register B
+; Displays text to the Text I/O device.
+;
+; Streams `B` characters from the memory buffer at `HL` to the device data port
+; and issues the display command to render the output.
+;
+; **Inputs**:
+; - `HL`: Memory address of character buffer
+; - `B`: Number of characters to display
+;
+; **Outputs**: None
+;
+; **Alters**: `A`, `B`, `HL`
 global print:
     ; Enter write mode on TextIO device
     mvi A, TEXTIO_CMD_WRITE
@@ -22,6 +52,7 @@ global print:
     mov A, B
     out TEXTIO_DATA_PORT
 
+; Loop body: writes each character byte from [HL] to data port
 .send:
     mov A, M
     out TEXTIO_DATA_PORT
@@ -35,12 +66,20 @@ global print:
     ret
 
 
-; Subroutine: read the text from TextIO device
-; Args:
-;   * Memory address of buffer to store input text in HL register
-;   * Size of input to write in buffer in register B
-; Result:
-;   * Size of text read from input (in registers A and B)
+; Reads an interactive line of text from the Text I/O device into memory.
+;
+; Issues the read command to the device, retrieves the captured length, and reads
+; characters from the data port into the buffer pointed to by `HL`.
+;
+; **Inputs**:
+; - `HL`: Destination memory address to store input text
+; - `B`: Maximum buffer capacity / requested length
+;
+; **Outputs**:
+; - `A`: Number of bytes read (0 if empty/EOF)
+; - `B`: Number of bytes read (0 if empty/EOF)
+;
+; **Alters**: `A`, `B`, `C`, `D`, `HL`
 global input:
     ; Enter read mode on TextIO device
     mvi A, TEXTIO_CMD_READ
@@ -55,6 +94,7 @@ global input:
     mov C, A
     mov D, A
 
+; Loop body: reads each incoming character byte into [HL]
 .recv:
     in TEXTIO_DATA_PORT
     mov M, A
@@ -67,16 +107,23 @@ global input:
     mov B, D
     ret
 
+; Handles empty input stream (returns 0 in A and B)
 .empty:
     mvi A, 0
     mvi B, 0
     ret
 
 
-; Subroutine: Prints a single character to the TextIO device
-; Args:
-;   * Character byte in register A
-; Clobbers: Registers A, C
+; Prints a single ASCII character to the Text I/O device.
+;
+; Sends a single character to the device buffer and immediately flushes and displays it.
+;
+; **Inputs**:
+; - `A`: ASCII character byte to display
+;
+; **Outputs**: None
+;
+; **Alters**: `A`, `C`
 global putch:
     ; Save character in C
     mov C, A
@@ -99,9 +146,13 @@ global putch:
     ret
 
 
-; Subroutine: Prints a newline character to the TextIO device
-; Args: None
-; Clobbers: Registers A, C
+; Prints a newline character (`\n`, `0x0A`) to the Text I/O device.
+;
+; **Inputs**: None
+;
+; **Outputs**: None
+;
+; **Alters**: `A`, `C`
 global endl:
     mvi A, 0x0A
     jmp putch

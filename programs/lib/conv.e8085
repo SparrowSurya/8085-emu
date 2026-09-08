@@ -1,33 +1,43 @@
-; =================================================================
-; 8085 STRING & INTEGER CONVERSION SUBROUTINES
-; Includes: to_uint8 (string -> 8-bit int), to_str8 (8-bit int -> string)
-; Requires: math.8085.bin (for divide)
-; =================================================================
+; ==============================================================================
+; 8085 String & Integer Conversion Library
+;
+; Subroutines for converting between ASCII decimal strings and 8-bit unsigned integers.
+; Requires the `divide` subroutine from `lib/math.e8085`.
+;
+; Exported Subroutines:
+;   - to_uint8: Converts an ASCII decimal string in memory to an 8-bit integer (0..255)
+;   - to_str8:  Converts an 8-bit unsigned integer (0..255) to an ASCII decimal string
+; ==============================================================================
 
 
 segment .text
 
-    global to_uint8
-    global to_str8
-
+    ; External division subroutine: inputs B (dividend) and A (divisor), outputs C (quotient) and D (remainder)
     extern divide
 
 
-; -----------------------------------------------------------------
-; SUBROUTINE: to_uint8
-; Description: Converts an ASCII decimal string to an 8-bit unsigned integer.
-; Args:        HL = Address of ASCII string buffer
-;              B  = Number of characters in string
-; Returns:     A  = 8-bit unsigned integer result (0..255)
-; Alters:      A, B, C, D, E, HL
-; -----------------------------------------------------------------
-to_uint8:
+; Converts an ASCII decimal string into an 8-bit unsigned integer.
+;
+; Parses up to `B` ASCII digit characters ('0'..'9') from the memory buffer
+; at `HL` using decimal accumulation (`result = result * 10 + digit`).
+; Returns 0 if string length is 0.
+;
+; **Inputs**:
+; - `HL`: Address of ASCII string buffer in memory
+; - `B`: Number of characters in string
+;
+; **Outputs**:
+; - `A`: 8-bit unsigned integer value (`0..255`)
+;
+; **Alters**: `A`, `B`, `C`, `D`, `E`, `HL`
+global to_uint8:
     mov A, B        ; Check if string length is 0
     cpi 0x00
     jz .empty_str
 
     mvi C, 0x00   ; C = running integer result accumulator
 
+; Parsing loop: multiplies accumulator by 10 and adds next numeric digit
 .loop:
     mov A, M   ; A = current ASCII character from [HL]
     sui 0x30   ; Convert ASCII ('0'..'9') to numeric (0..9)
@@ -49,21 +59,27 @@ to_uint8:
     mov A, C   ; Place final integer in return register A
     ret
 
+; Handles empty input string (returns 0 in A)
 .empty_str:
     mvi A, 0x00   ; Return 0 for empty string
     ret
 
 
-; -----------------------------------------------------------------
-; SUBROUTINE: to_str8
-; Description: Converts an 8-bit unsigned integer to an ASCII decimal string.
-; Args:        HL = Address of destination buffer
-;              A  = 8-bit unsigned integer (0..255)
-; Returns:     B  = Length of the generated ASCII string (1..3)
-;              A  = Length of the generated ASCII string (1..3)
-; Alters:      A, B, C, D, E, HL
-; -----------------------------------------------------------------
-to_str8:
+; Converts an 8-bit unsigned integer into an ASCII decimal string.
+;
+; Repeatedly divides `A` by 10 using `call divide`, pushes decimal digits onto the stack,
+; and writes the resulting ASCII string ('0'..'9') into the destination buffer at `HL`.
+;
+; **Inputs**:
+; - `HL`: Memory address of destination buffer
+; - `A`: 8-bit unsigned integer (`0..255`)
+;
+; **Outputs**:
+; - `A`: Length of generated ASCII string (`1..3`)
+; - `B`: Length of generated ASCII string (`1..3`)
+;
+; **Alters**: `A`, `B`, `C`, `D`, `E`, `HL`
+global to_str8:
     cpi 0x00        ; Check if input is 0
     jnz .non_zero
 
@@ -73,29 +89,32 @@ to_str8:
     mvi A, 0x01
     ret
 
+; Handles non-zero integer values by successive division by 10
 .non_zero:
     mvi E, 0x00   ; E = digit counter (number of digits pushed)
 
+; Division loop: extracts least-significant decimal digits and pushes to stack
 .div_loop:
     push DE       ; Save digit counter across subroutine call
     mov B, A      ; B = Dividend
     mvi A, 0x0A   ; A = Divisor (10)
     call divide   ; Inputs: B=Dividend, A=Divisor -> Outputs: C=Quotient, D=Remainder
+    mov A, D      ; A = Remainder digit (0..9) - save before pop DE overwrites D!
     pop DE        ; Restore digit counter (E)
     inr E         ; Increment digit counter
 
-    mov A, D   ; A = Remainder digit (0..9)
-    adi 0x30   ; Convert to ASCII character
-    push PSW   ; Push ASCII character onto stack
+    adi 0x30      ; Convert to ASCII character
+    push PSW      ; Push ASCII character onto stack
 
-    mov A, C        ; A = Quotient
-    cpi 0x00        ; If quotient != 0, continue dividing
+    mov A, C      ; A = Quotient
+    cpi 0x00      ; If quotient != 0, continue dividing
     jnz .div_loop
 
     ; Write characters from stack into buffer at HL (left to right)
     mov B, E   ; B = total string length
     mov C, E   ; C = loop counter for writing characters
 
+; Write loop: pops decimal digits from stack and writes ASCII characters to [HL]
 .write_loop:
     pop PSW           ; Pop most significant digit first
     mov M, A          ; Write character to buffer [HL]

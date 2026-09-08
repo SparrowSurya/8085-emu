@@ -99,3 +99,44 @@ fn read_then_display_echoes_a_line() {
         "hello 8085"
     );
 }
+
+#[test]
+fn repl_evaluates_arithmetic_expressions_and_exits() {
+    let repl_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("spec/repl.e8085");
+    let base_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("spec");
+    let src = std::fs::read_to_string(&repl_path).unwrap();
+
+    let image = emu8085::asm::assemble_and_link(&src, Some(&base_dir), &[])
+        .expect("assembles repl.e8085");
+
+    let mut machine = emu8085::Machine::default();
+    let mut text_io = TextIODevice::new(0x02, 0x01);
+    text_io.feed_line("10 + 20");
+    text_io.feed_line("100 - 45");
+    text_io.feed_line("6 * 7");
+    text_io.feed_line("50 / 5");
+    text_io.feed_line("2 + 3 * 4"); // (2 + 3) * 4 = 20 (left-to-right evaluation)
+    text_io.feed_line("10 / 0");     // Division by zero error
+    text_io.feed_line("5 + invalid"); // Invalid syntax error
+    text_io.feed_line("q");
+
+    machine.attach_device(Box::new(text_io), &[0x01, 0x02]);
+    emu8085::asm::load(&mut machine, &image).expect("loads repl image");
+    
+    machine.cpu.is_halt = false;
+    machine.run();
+    let dev = machine.devices.find_device::<TextIODevice>().unwrap();
+    let out = dev.output_string();
+
+    assert!(machine.cpu.is_halt);
+
+    assert!(out.contains("Welcome to 8085 calculator REPL"));
+    assert!(out.contains("30"));
+    assert!(out.contains("55"));
+    assert!(out.contains("42"));
+    assert!(out.contains("10"));
+    assert!(out.contains("20"));
+    assert!(out.contains("Error: Division by zero"));
+    assert!(out.contains("Error: Invalid Expression"));
+    assert!(out.contains("Exited successfully"));
+}

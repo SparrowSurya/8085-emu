@@ -1974,4 +1974,101 @@ main:
             panic!("expected markup");
         }
     }
+
+    #[test]
+    fn test_hover_standard_library_and_devices_modules() {
+        let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let main_file = manifest_dir.join("programs/triangle_pattern.e8085");
+        let text = std::fs::read_to_string(&main_file).unwrap();
+        let uri = Url::from_file_path(&main_file).unwrap();
+        let doc = Document::new(uri, 1, text);
+
+        // 1. Hover on %include "devices/text_io.e8085" (line 0)
+        let h_text_io_inc = get_hover(&doc, &Position { line: 0, character: 15 }).unwrap();
+        if let HoverContents::Markup(m) = h_text_io_inc.contents {
+            assert!(m.value.contains("Text I/O Device Library for 8085 Microprocessor"));
+            assert!(m.value.contains("print:"));
+            assert!(m.value.contains("input:"));
+        } else {
+            panic!("expected markup");
+        }
+
+        // 2. Hover on %include "lib/math.e8085" (line 1)
+        let h_math_inc = get_hover(&doc, &Position { line: 1, character: 15 }).unwrap();
+        if let HoverContents::Markup(m) = h_math_inc.contents {
+            assert!(m.value.contains("8085 Math Library"));
+            assert!(m.value.contains("divide:"));
+            assert!(m.value.contains("multiply:"));
+        } else {
+            panic!("expected markup");
+        }
+
+        // 3. Hover on %include "lib/conv.e8085" (line 2)
+        let h_conv_inc = get_hover(&doc, &Position { line: 2, character: 15 }).unwrap();
+        if let HoverContents::Markup(m) = h_conv_inc.contents {
+            assert!(m.value.contains("8085 String & Integer Conversion Library"));
+            assert!(m.value.contains("to_uint8:"));
+            assert!(m.value.contains("to_str8:"));
+        } else {
+            panic!("expected markup");
+        }
+
+        // 3b. Hover on %include "lib/cmp.e8085"
+        let cmp_text = "%include \"lib/cmp.e8085\"\n\nmain:\n    call in_range\n    hlt\n".to_string();
+        let cmp_doc = Document::new(Url::from_file_path(manifest_dir.join("programs/cmp_test.e8085")).unwrap(), 1, cmp_text);
+        let h_cmp_inc = get_hover(&cmp_doc, &Position { line: 0, character: 15 }).unwrap();
+        if let HoverContents::Markup(m) = h_cmp_inc.contents {
+            assert!(m.value.contains("8085 Comparison & Relational Library"));
+            assert!(m.value.contains("less_than:"));
+            assert!(m.value.contains("in_range:"));
+        } else {
+            panic!("expected markup");
+        }
+
+        let h_in_range = get_hover(&cmp_doc, &Position { line: 3, character: 12 }).unwrap();
+        if let HoverContents::Markup(m) = h_in_range.contents {
+            assert!(m.value.contains("in_range:"));
+            assert!(m.value.contains("Tests if a value (A) falls within the closed interval"));
+            assert!(m.value.contains("B <= A <= C"));
+        } else {
+            panic!("expected markup");
+        }
+
+        // 4. Hover on imported symbol `print` (line 20: call print)
+        let h_print = get_hover(&doc, &Position { line: 20, character: 10 }).unwrap();
+        if let HoverContents::Markup(m) = h_print.contents {
+            assert!(m.value.contains("print:"));
+            assert!(m.value.contains("Displays text to the Text I/O device"));
+            assert!(m.value.contains("**Inputs**:"));
+        } else {
+            panic!("expected markup");
+        }
+
+        // 5. Hover on imported symbol `input` (line 25: call input)
+        let h_input = get_hover(&doc, &Position { line: 25, character: 10 }).unwrap();
+        if let HoverContents::Markup(m) = h_input.contents {
+            assert!(m.value.contains("input:"));
+            assert!(m.value.contains("Reads an interactive line of text"));
+        } else {
+            panic!("expected markup");
+        }
+
+        // 6. Hover on imported symbol `to_uint8` (line 34: call to_uint8)
+        let h_to_uint8 = get_hover(&doc, &Position { line: 34, character: 10 }).unwrap();
+        if let HoverContents::Markup(m) = h_to_uint8.contents {
+            assert!(m.value.contains("to_uint8:"));
+            assert!(m.value.contains("Converts an ASCII decimal string into an 8-bit unsigned integer"));
+        } else {
+            panic!("expected markup");
+        }
+
+        // 7. Hover on imported symbol `putch` (line 58: call putch)
+        let h_putch = get_hover(&doc, &Position { line: 58, character: 10 }).unwrap();
+        if let HoverContents::Markup(m) = h_putch.contents {
+            assert!(m.value.contains("putch:"));
+            assert!(m.value.contains("Prints a single ASCII character"));
+        } else {
+            panic!("expected markup");
+        }
+    }
 }

@@ -1,0 +1,228 @@
+; ==============================================================================
+; 8085 Comparison & Relational Library
+;
+; Provides unsigned 8-bit comparison, relational predicates, and range checking
+; subroutines for 8085 assembly programs.
+;
+; Exported Subroutines:
+;   - less_than:              Tests if A < B (strictly less than)
+;   - greater_than:           Tests if A > B (strictly greater than)
+;   - greater_than_or_equal:  Tests if A >= B (greater than or equal)
+;   - less_than_or_equal:     Tests if A <= B (less than or equal)
+;   - in_range:               Tests if B <= A <= C (inclusive range check)
+; ==============================================================================
+
+
+segment .text
+
+; Tests if the first operand (A) is strictly less than the second operand (B).
+;
+; Performs unsigned 8-bit comparison: `A < B`.
+;
+; **Inputs**:
+; - `A`: First operand (X)
+; - `B`: Second operand (Y)
+;
+; **Outputs**:
+; - `A`: `1` if `A < B` (true), `0` if `A >= B` (false)
+; - `C`: `1` if `A < B` (true), `0` if `A >= B` (false)
+; - **Flags**: `Z=0` (NZ) if true, `Z=1` (Z) if false
+;
+; **Alters**: `A`, `C` (preserves `B`)
+;
+; **Example**:
+; ```e8085
+; mvi A, 5
+; mvi B, 10
+; call less_than
+; jnz .is_less    ; jumps because 5 < 10 (A=1, Z=0)
+; ```
+global less_than:
+    cmp B
+    jc .is_true
+
+; Handles false condition (returns 0 in A and C, sets Z=1)
+.is_false:
+    mvi A, 0x00
+    mvi C, 0x00
+    ora A         ; Set Z=1 (false)
+    ret
+
+; Handles true condition (returns 1 in A and C, sets Z=0)
+.is_true:
+    mvi A, 0x01
+    mvi C, 0x01
+    ora A         ; Set Z=0 (true)
+    ret
+
+
+; Tests if the first operand (A) is strictly greater than the second operand (B).
+;
+; Performs unsigned 8-bit comparison: `A > B`.
+;
+; **Inputs**:
+; - `A`: First operand (X)
+; - `B`: Second operand (Y)
+;
+; **Outputs**:
+; - `A`: `1` if `A > B` (true), `0` if `A <= B` (false)
+; - `C`: `1` if `A > B` (true), `0` if `A <= B` (false)
+; - **Flags**: `Z=0` (NZ) if true, `Z=1` (Z) if false
+;
+; **Alters**: `A`, `C` (preserves `B`)
+;
+; **Example**:
+; ```e8085
+; mvi A, 20
+; mvi B, 10
+; call greater_than
+; jnz .is_greater ; jumps because 20 > 10 (A=1, Z=0)
+; ```
+global greater_than:
+    cmp B
+    jz .is_false   ; If A == B, not strictly greater
+    jnc .is_true   ; If A >= B and A != B => A > B (CY=0)
+
+; Handles false condition (returns 0 in A and C, sets Z=1)
+.is_false:
+    mvi A, 0x00
+    mvi C, 0x00
+    ora A         ; Set Z=1 (false)
+    ret
+
+; Handles true condition (returns 1 in A and C, sets Z=0)
+.is_true:
+    mvi A, 0x01
+    mvi C, 0x01
+    ora A         ; Set Z=0 (true)
+    ret
+
+
+; Tests if the first operand (A) is greater than or equal to the second operand (B).
+;
+; Performs unsigned 8-bit comparison: `A >= B`.
+;
+; **Inputs**:
+; - `A`: First operand (X)
+; - `B`: Second operand (Y)
+;
+; **Outputs**:
+; - `A`: `1` if `A >= B` (true), `0` if `A < B` (false)
+; - `C`: `1` if `A >= B` (true), `0` if `A < B` (false)
+; - **Flags**: `Z=0` (NZ) if true, `Z=1` (Z) if false
+;
+; **Alters**: `A`, `C` (preserves `B`)
+;
+; **Example**:
+; ```e8085
+; mvi A, 10
+; mvi B, 10
+; call greater_than_or_equal
+; jnz .is_gte     ; jumps because 10 >= 10 (A=1, Z=0)
+; ```
+global greater_than_or_equal:
+    cmp B
+    jnc .is_true   ; If CY=0, then A >= B
+
+; Handles false condition (returns 0 in A and C, sets Z=1)
+.is_false:
+    mvi A, 0x00
+    mvi C, 0x00
+    ora A         ; Set Z=1 (false)
+    ret
+
+; Handles true condition (returns 1 in A and C, sets Z=0)
+.is_true:
+    mvi A, 0x01
+    mvi C, 0x01
+    ora A         ; Set Z=0 (true)
+    ret
+
+
+; Tests if the first operand (A) is less than or equal to the second operand (B).
+;
+; Performs unsigned 8-bit comparison: `A <= B`.
+;
+; **Inputs**:
+; - `A`: First operand (X)
+; - `B`: Second operand (Y)
+;
+; **Outputs**:
+; - `A`: `1` if `A <= B` (true), `0` if `A > B` (false)
+; - `C`: `1` if `A <= B` (true), `0` if `A > B` (false)
+; - **Flags**: `Z=0` (NZ) if true, `Z=1` (Z) if false
+;
+; **Alters**: `A`, `C` (preserves `B`)
+;
+; **Example**:
+; ```e8085
+; mvi A, 10
+; mvi B, 10
+; call less_than_or_equal
+; jnz .is_lte     ; jumps because 10 <= 10 (A=1, Z=0)
+; ```
+global less_than_or_equal:
+    cmp B
+    jc .is_true   ; If A < B (CY=1) -> true
+    jz .is_true   ; If A == B (Z=1) -> true
+
+; Handles false condition (returns 0 in A and C, sets Z=1)
+.is_false:
+    mvi A, 0x00
+    mvi C, 0x00
+    ora A         ; Set Z=1 (false)
+    ret
+
+; Handles true condition (returns 1 in A and C, sets Z=0)
+.is_true:
+    mvi A, 0x01
+    mvi C, 0x01
+    ora A         ; Set Z=0 (true)
+    ret
+
+
+; Tests if a value (A) falls within the closed interval [B, C] (inclusive on both ends).
+;
+; Evaluates whether `B <= A <= C`.
+;
+; **Inputs**:
+; - `A`: Value to check (val)
+; - `B`: Minimum boundary (min)
+; - `C`: Maximum boundary (max)
+;
+; **Outputs**:
+; - `A`: `1` if `B <= A <= C` (true), `0` if out of range (false)
+; - `C`: `1` if `B <= A <= C` (true), `0` if out of range (false)
+; - **Flags**: `Z=0` (NZ) if true, `Z=1` (Z) if false
+;
+; **Alters**: `A`, `C` (preserves `B`)
+;
+; **Example**:
+; ```e8085
+; mvi A, 15       ; value to test
+; mvi B, 10       ; lower bound
+; mvi C, 20       ; upper bound
+; call in_range
+; jnz .within     ; jumps because 10 <= 15 <= 20 (A=1, Z=0)
+; ```
+global in_range:
+    cmp B              ; Compare val (A) with min (B)
+    jc .out_of_range   ; If val < min (CY=1), return false
+
+    cmp C          ; Compare val (A) with max (C)
+    jc .in_range   ; If val < max (CY=1), return true
+    jz .in_range   ; If val == max (Z=1), return true
+
+; Handles out of range condition (returns 0 in A and C, sets Z=1)
+.out_of_range:
+    mvi A, 0x00
+    mvi C, 0x00
+    ora A         ; Set Z=1 (false)
+    ret
+
+; Handles in range condition (returns 1 in A and C, sets Z=0)
+.in_range:
+    mvi A, 0x01
+    mvi C, 0x01
+    ora A         ; Set Z=0 (true)
+    ret

@@ -18,6 +18,18 @@
       "file": "lib/conv.e8085",
       "link_libs": ["lib/math.e8085"],
       "expected_symbols": ["to_uint8", "to_str8"]
+    },
+    {
+      "name": "cmp",
+      "dir": "lib",
+      "file": "lib/cmp.e8085",
+      "expected_symbols": [
+        "less_than",
+        "greater_than",
+        "greater_than_or_equal",
+        "less_than_or_equal",
+        "in_range"
+      ]
     }
   ]
 }
