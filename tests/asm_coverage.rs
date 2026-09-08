@@ -45,16 +45,12 @@ fn char_literal_operand() {
 }
 
 #[test]
-fn multiple_segments_of_same_kind_concatenate() {
+fn duplicate_segment_in_single_file_is_rejected() {
+    use emu8085::asm::AsmErrorKind;
     let src = "segment .data\nx BYTE 0x11\nsegment .data\ny BYTE 0x22\n\
-               segment .text\nmain:\nlda x\nmov B, A\nlda y\nhlt\n";
-    let b = image(src);
-    // x at 0x0040, y at 0x0041
-    assert_eq!(b[0x40], 0x11);
-    assert_eq!(b[0x41], 0x22);
-    let m = run(src);
-    assert_eq!(m.cpu.regs.b, 0x11); // lda x
-    assert_eq!(m.cpu.regs.a, 0x22); // lda y
+               segment .text\nmain:\nhlt\n";
+    let err = emu8085::asm::assemble(src).unwrap_err();
+    assert!(matches!(err.kind, AsmErrorKind::DuplicateSegment(ref s) if s == "data"));
 }
 
 #[test]
@@ -73,4 +69,38 @@ fn forward_len_reference_is_rejected() {
     )
     .unwrap_err();
     assert!(matches!(err.kind, AsmErrorKind::UndefinedName(_)));
+}
+
+#[test]
+fn duplicate_global_declaration_is_rejected() {
+    use emu8085::asm::AsmErrorKind;
+    // Top-level duplicate
+    let src1 = "global func\nglobal func\nsegment .text\nfunc:\nret\nmain:\nhlt\n";
+    let err1 = assemble(src1).unwrap_err();
+    assert!(matches!(err1.kind, AsmErrorKind::DuplicateGlobal(ref s) if s == "func"));
+
+    // Inline + top-level duplicate
+    let src2 = "global func\nsegment .text\nglobal func:\nret\nmain:\nhlt\n";
+    let err2 = assemble(src2).unwrap_err();
+    assert!(matches!(err2.kind, AsmErrorKind::DuplicateGlobal(ref s) if s == "func"));
+}
+
+#[test]
+fn duplicate_extern_declaration_is_rejected() {
+    use emu8085::asm::AsmErrorKind;
+    let src = "extern helper\nextern helper\nsegment .text\nmain:\nhlt\n";
+    let err = assemble(src).unwrap_err();
+    assert!(matches!(err.kind, AsmErrorKind::DuplicateExtern(ref s) if s == "helper"));
+}
+
+#[test]
+fn conflicting_global_and_extern_declaration_is_rejected() {
+    use emu8085::asm::AsmErrorKind;
+    let src1 = "global foo\nextern foo\nsegment .text\nfoo:\nret\nmain:\nhlt\n";
+    let err1 = assemble(src1).unwrap_err();
+    assert!(matches!(err1.kind, AsmErrorKind::ConflictingDeclaration(ref s) if s == "foo"));
+
+    let src2 = "extern bar\nglobal bar\nsegment .text\nbar:\nret\nmain:\nhlt\n";
+    let err2 = assemble(src2).unwrap_err();
+    assert!(matches!(err2.kind, AsmErrorKind::ConflictingDeclaration(ref s) if s == "bar"));
 }

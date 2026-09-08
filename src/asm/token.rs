@@ -37,7 +37,7 @@ pub enum TokenKind {
     Comma,
     /// `:`
     Colon,
-    /// `.` — precedes a segment name.
+    /// `.` — precedes a segment name
     Period,
     /// End of a logical line.
     Newline,

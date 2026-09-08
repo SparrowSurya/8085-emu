@@ -102,8 +102,8 @@ fn read_then_display_echoes_a_line() {
 
 #[test]
 fn repl_evaluates_arithmetic_expressions_and_exits() {
-    let repl_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("spec/repl.e8085");
-    let base_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("spec");
+    let repl_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("demo/repl.e8085");
+    let base_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("demo");
     let src = std::fs::read_to_string(&repl_path).unwrap();
 
     let image = emu8085::asm::assemble_and_link(&src, Some(&base_dir), &[])

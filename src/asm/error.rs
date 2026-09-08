@@ -110,6 +110,8 @@ pub enum AsmErrorKind {
     DefineAfterSegment,
     /// A segment name other than `data`, `bss`, or `text`.
     UnknownSegment(String),
+    /// A segment of the same kind was declared more than once in a single file.
+    DuplicateSegment(String),
     /// A `%` directive other than `define`, `repeat`, or `len`.
     UnknownDirective(String),
     /// A reserved keyword was used where a label/variable/define name was required.
@@ -150,6 +152,12 @@ pub enum AsmErrorKind {
     IncludeError(String),
     /// The `main` label cannot be declared `global`.
     GlobalMainForbidden,
+    /// A symbol was declared `global` more than once.
+    DuplicateGlobal(String),
+    /// A symbol was declared `extern` more than once.
+    DuplicateExtern(String),
+    /// A symbol was declared as both `global` and `extern`.
+    ConflictingDeclaration(String),
     /// Attempted to access a private symbol from another module.
     PrivateSymbolAccess {
         /// The referenced symbol.
@@ -188,6 +196,7 @@ impl fmt::Display for AsmErrorKind {
             }
             DefineAfterSegment => write!(f, "%define must appear before any segment"),
             UnknownSegment(s) => write!(f, "unknown segment {s:?} (expected data, bss, or text)"),
+            DuplicateSegment(s) => write!(f, "duplicate segment .{s}"),
             UnknownDirective(s) => write!(f, "unknown directive %{s}"),
             ReservedName(s) => write!(f, "{s:?} is a reserved keyword and cannot be a name"),
             TooManyOperands => write!(f, "too many operands (instructions take at most two)"),
@@ -214,6 +223,9 @@ impl fmt::Display for AsmErrorKind {
             CircularInclude(s) => write!(f, "circular include detected for {s}"),
             IncludeError(s) => write!(f, "include error: {s}"),
             GlobalMainForbidden => write!(f, "main label cannot be declared global"),
+            DuplicateGlobal(s) => write!(f, "duplicate global declaration of '{s}'"),
+            DuplicateExtern(s) => write!(f, "duplicate extern declaration of '{s}'"),
+            ConflictingDeclaration(s) => write!(f, "symbol '{s}' cannot be both global and extern"),
             PrivateSymbolAccess { symbol, module } => {
                 write!(f, "symbol {symbol:?} is private to module {module:?}")
             }

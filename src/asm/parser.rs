@@ -15,6 +15,8 @@ pub fn parse(tokens: Vec<Token>) -> Result<Program, AsmError> {
     Parser {
         toks: tokens,
         pos: 0,
+        seen_globals: std::collections::HashSet::new(),
+        seen_externs: std::collections::HashSet::new(),
     }
     .program()
 }
@@ -22,6 +24,8 @@ pub fn parse(tokens: Vec<Token>) -> Result<Program, AsmError> {
 struct Parser {
     toks: Vec<Token>,
     pos: usize,
+    seen_globals: std::collections::HashSet<String>,
+    seen_externs: std::collections::HashSet<String>,
 }
 
 impl Parser {
@@ -111,6 +115,43 @@ impl Parser {
         }
     }
 
+    fn declare_extern(&mut self, name: &str, span: Span) -> Result<(), AsmError> {
+        if self.seen_externs.iter().any(|s| s.eq_ignore_ascii_case(name)) {
+            return Err(AsmError::new(
+                span,
+                AsmErrorKind::DuplicateExtern(name.to_string()),
+            ));
+        }
+        if self.seen_globals.iter().any(|s| s.eq_ignore_ascii_case(name)) {
+            return Err(AsmError::new(
+                span,
+                AsmErrorKind::ConflictingDeclaration(name.to_string()),
+            ));
+        }
+        self.seen_externs.insert(name.to_string());
+        Ok(())
+    }
+
+    fn declare_global(&mut self, name: &str, span: Span) -> Result<(), AsmError> {
+        if name.eq_ignore_ascii_case("main") {
+            return Err(AsmError::new(span, AsmErrorKind::GlobalMainForbidden));
+        }
+        if self.seen_globals.iter().any(|s| s.eq_ignore_ascii_case(name)) {
+            return Err(AsmError::new(
+                span,
+                AsmErrorKind::DuplicateGlobal(name.to_string()),
+            ));
+        }
+        if self.seen_externs.iter().any(|s| s.eq_ignore_ascii_case(name)) {
+            return Err(AsmError::new(
+                span,
+                AsmErrorKind::ConflictingDeclaration(name.to_string()),
+            ));
+        }
+        self.seen_globals.insert(name.to_string());
+        Ok(())
+    }
+
     // ── top level ──────────────────────────────────────────────────────────
 
     fn program(&mut self) -> Result<Program, AsmError> {
@@ -130,17 +171,16 @@ impl Parser {
             } else if self.is_extern_ahead() {
                 let span = self.span();
                 self.bump(); // 'extern'
-                let (name, _) = self.ident()?;
+                let (name, nspan) = self.ident()?;
                 self.expect_newline()?;
+                self.declare_extern(&name, nspan)?;
                 externs.push(name);
                 let _ = span;
             } else if self.is_global_ahead() && !matches!(self.peek_at(2), TokenKind::Colon) {
                 let span = self.span();
                 self.bump(); // 'global'
                 let (name, nspan) = self.ident()?;
-                if name.eq_ignore_ascii_case("main") {
-                    return Err(AsmError::new(nspan, AsmErrorKind::GlobalMainForbidden));
-                }
+                self.declare_global(&name, nspan)?;
                 self.expect_newline()?;
                 globals.push(name);
                 let _ = span;
@@ -148,6 +188,8 @@ impl Parser {
                 break;
             }
         }
+
+        let mut seen_segments = std::collections::HashSet::new();
 
         // Then segments; a %define or %include here is an error.
         loop {
@@ -161,7 +203,7 @@ impl Parser {
             if self.is_include_ahead() {
                 return Err(self.err(AsmErrorKind::DefineAfterSegment));
             }
-            segments.push(self.segment()?);
+            segments.push(self.segment(&mut seen_segments)?);
         }
 
         Ok(Program {
@@ -198,16 +240,14 @@ impl Parser {
     fn include(&mut self) -> Result<Include, AsmError> {
         let span = self.span();
         self.bump(); // %
-        self.keyword_ci("include")?;
+        self.bump(); // include
         let path = match self.peek() {
-            TokenKind::Str(_) => {
-                if let TokenKind::Str(s) = self.bump() {
-                    s
-                } else {
-                    unreachable!()
-                }
+            TokenKind::Str(s) => {
+                let p = s.clone();
+                self.bump();
+                p
             }
-            _ => return Err(self.unexpected("a double-quoted file path")),
+            _ => return Err(self.unexpected("a quoted string path")),
         };
         self.expect_newline()?;
         Ok(Include { path, span })
@@ -216,11 +256,8 @@ impl Parser {
     fn define(&mut self) -> Result<Define, AsmError> {
         let span = self.span();
         self.bump(); // %
-        self.keyword_ci("define")?;
-        let (name, nspan) = self.ident()?;
-        if keyword::is_reserved(&name) {
-            return Err(AsmError::new(nspan, AsmErrorKind::ReservedName(name)));
-        }
+        self.bump(); // define
+        let (name, _) = self.name()?;
         let value = self.value()?;
         self.expect_newline()?;
         Ok(Define { name, value, span })
@@ -228,7 +265,7 @@ impl Parser {
 
     // ── segments ───────────────────────────────────────────────────────────
 
-    fn segment(&mut self) -> Result<Segment, AsmError> {
+    fn segment(&mut self, seen_segments: &mut std::collections::HashSet<String>) -> Result<Segment, AsmError> {
         self.keyword_ci("segment")?;
         match self.peek() {
             TokenKind::Period => {
@@ -237,7 +274,12 @@ impl Parser {
             _ => return Err(self.unexpected("`.` before the segment name")),
         }
         let (kind, kspan) = self.ident()?;
-        let seg = match kind.to_ascii_lowercase().as_str() {
+        let norm_kind = kind.to_ascii_lowercase();
+        if seen_segments.contains(&norm_kind) {
+            return Err(AsmError::new(kspan, AsmErrorKind::DuplicateSegment(norm_kind)));
+        }
+        seen_segments.insert(norm_kind.clone());
+        let seg = match norm_kind.as_str() {
             "data" => {
                 self.expect_newline()?;
                 Segment::Data(self.data_body()?)
@@ -338,8 +380,9 @@ impl Parser {
             if self.is_extern_ahead() {
                 let span = self.span();
                 self.bump(); // 'extern'
-                let (name, _) = self.ident()?;
+                let (name, nspan) = self.ident()?;
                 self.expect_newline()?;
+                self.declare_extern(&name, nspan)?;
                 items.push(TextItem::ExternDecl(name, span));
                 continue;
             }
@@ -349,9 +392,7 @@ impl Parser {
                 let span = self.span();
                 self.bump(); // 'global'
                 let (name, nspan) = self.ident()?;
-                if name.eq_ignore_ascii_case("main") {
-                    return Err(AsmError::new(nspan, AsmErrorKind::GlobalMainForbidden));
-                }
+                self.declare_global(&name, nspan)?;
                 if matches!(self.peek(), TokenKind::Colon) {
                     self.bump(); // ':'
                     self.expect_newline()?;

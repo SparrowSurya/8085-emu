@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionList, CompletionResponse, InsertTextFormat,
     Position,
@@ -5,11 +6,30 @@ use tower_lsp::lsp_types::{
 
 use super::document::{Document, resolve_relative_path};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum SegmentKind {
     Text,
     Data,
     Bss,
+}
+
+/// Detects all segment kinds declared in the current document.
+fn get_present_segments(doc: &Document) -> HashSet<SegmentKind> {
+    let mut present = HashSet::new();
+    for line in doc.text.lines() {
+        let code_line = line.split(';').next().unwrap_or("").trim();
+        if code_line.to_lowercase().starts_with("segment ") {
+            let seg_name = code_line[8..].trim().to_lowercase();
+            if seg_name == ".text" || seg_name == "text" {
+                present.insert(SegmentKind::Text);
+            } else if seg_name == ".data" || seg_name == "data" {
+                present.insert(SegmentKind::Data);
+            } else if seg_name == ".bss" || seg_name == "bss" {
+                present.insert(SegmentKind::Bss);
+            }
+        }
+    }
+    present
 }
 
 /// Computes intelligent auto-completions based on active segment and instruction operand context.
@@ -26,7 +46,32 @@ pub fn get_completions(doc: &Document, position: &Position) -> Option<Completion
         }));
     }
 
+    let lower_prefix = line_prefix.to_lowercase();
+
+    // 2. Check if typing after `extern ` (Issue 6: suggest only external symbols, no CPU instructions)
+    if lower_prefix.starts_with("extern ")
+        || (lower_prefix == "extern" && line[..char_idx].ends_with(char::is_whitespace))
+    {
+        let extern_items = get_extern_symbol_completions(doc);
+        return Some(CompletionResponse::List(CompletionList {
+            is_incomplete: false,
+            items: extern_items,
+        }));
+    }
+
+    // 3. Check if typing after `global ` (Issue 7: suggest only unexported local labels, no CPU instructions)
+    if lower_prefix.starts_with("global ")
+        || (lower_prefix == "global" && line[..char_idx].ends_with(char::is_whitespace))
+    {
+        let global_items = get_global_declaration_completions(doc);
+        return Some(CompletionResponse::List(CompletionList {
+            is_incomplete: false,
+            items: global_items,
+        }));
+    }
+
     let active_segment = get_active_segment(doc, position.line as usize);
+    let present_segments = get_present_segments(doc);
     let mut items = Vec::new();
 
     match active_segment {
@@ -39,10 +84,10 @@ pub fn get_completions(doc: &Document, position: &Position) -> Option<Completion
             } else {
                 // At instruction position (start of line / indentation)
                 if line_prefix.starts_with('%') {
-                    items.extend(get_header_directives());
+                    items.extend(get_header_directives(&present_segments));
                 } else {
                     items.extend(get_instruction_completions());
-                    items.extend(get_text_directives());
+                    items.extend(get_text_directives(&present_segments));
                     items.extend(get_label_completions(doc, position));
                 }
             }
@@ -52,16 +97,16 @@ pub fn get_completions(doc: &Document, position: &Position) -> Option<Completion
                 items.extend(get_data_directives());
             } else {
                 items.extend(get_data_directives());
-                items.extend(get_data_segment_completions());
+                items.extend(get_data_segment_completions(&present_segments));
                 items.extend(get_constant_and_len_completions(doc));
             }
         }
         Some(SegmentKind::Bss) => {
-            items.extend(get_bss_segment_completions());
+            items.extend(get_bss_segment_completions(&present_segments));
         }
         None => {
             // Before any segment declaration (file header)
-            items.extend(get_header_directives());
+            items.extend(get_header_directives(&present_segments));
         }
     }
 
@@ -164,34 +209,66 @@ fn get_instruction_operand_completions(
     position: &Position,
     line_prefix: &str,
 ) -> Option<Vec<CompletionItem>> {
-    let code_line = line_prefix.split(';').next().unwrap_or("").trim_start();
-    if code_line.is_empty() {
+    let code_line = line_prefix.split(';').next().unwrap_or("");
+    let trimmed_lead = code_line.trim_start();
+    if trimmed_lead.is_empty() {
         return None;
     }
 
-    // Split on whitespace or comma to detect mnemonic and operand position
-    let parts: Vec<&str> = code_line.split_whitespace().collect();
-    if parts.is_empty() {
+    let mut iter = trimmed_lead.split_whitespace();
+    let first_word = iter.next()?;
+    let mnemonic = first_word.to_uppercase();
+
+    // If user is still typing the mnemonic (no whitespace after mnemonic),
+    // let general instruction completions take over.
+    let after_first = &trimmed_lead[first_word.len()..];
+    if after_first.is_empty() && !code_line.ends_with(char::is_whitespace) {
         return None;
     }
 
-    let mnemonic = parts[0].to_uppercase();
-    let has_comma = code_line.contains(',');
+    let operands_str = after_first.trim_start();
 
     match mnemonic.as_str() {
-        // 1. Branch & Subroutine Call Target Labels
-        "CALL" | "CZ" | "CNZ" | "CC" | "CNC" | "CP" | "CM" | "CPE" | "CPO" | "JMP" | "JZ"
-        | "JNZ" | "JC" | "JNC" | "JP" | "JM" | "JPE" | "JPO" => {
-            Some(get_label_completions(doc, position))
+        // ── 0-operand instructions: any trailing space/operands means satisfied ──
+        "NOP" | "HLT" | "EI" | "DI" | "RIM" | "SIM"
+        | "XCHG" | "XTHL" | "SPHL" | "PCHL"
+        | "DAA" | "CMA" | "CMC" | "STC" | "RLC" | "RRC" | "RAL" | "RAR"
+        | "RET" | "RZ" | "RNZ" | "RC" | "RNC" | "RP" | "RM" | "RPE" | "RPO" => {
+            Some(vec![])
         }
 
-        // 2. Direct Address instructions (LDA, STA, LHLD, SHLD)
-        "LDA" | "STA" | "LHLD" | "SHLD" => Some(get_memory_symbol_completions(doc)),
+        // ── 1-operand branch / call labels ──
+        "CALL" | "CZ" | "CNZ" | "CC" | "CNC" | "CP" | "CM" | "CPE" | "CPO"
+        | "JMP" | "JZ" | "JNZ" | "JC" | "JNC" | "JP" | "JM" | "JPE" | "JPO" => {
+            if is_one_operand_satisfied(operands_str) {
+                Some(vec![])
+            } else {
+                Some(get_label_completions(doc, position))
+            }
+        }
 
-        // 3. LXI: Operand 1 = Reg Pair, Operand 2 = Address / Symbol / Constant
-        "LXI" => {
-            if has_comma {
+        // ── 1-operand direct memory load/store (variables & constants only, no labels) ──
+        "LDA" | "STA" | "LHLD" | "SHLD" => {
+            if is_one_operand_satisfied(operands_str) {
+                Some(vec![])
+            } else {
                 Some(get_memory_symbol_completions(doc))
+            }
+        }
+
+        // ── 1-operand 8-bit registers ──
+        "ADD" | "ADC" | "SUB" | "SBB" | "INR" | "DCR" | "ANA" | "XRA" | "ORA" | "CMP" => {
+            if is_one_operand_satisfied(operands_str) {
+                Some(vec![])
+            } else {
+                Some(get_8bit_registers())
+            }
+        }
+
+        // ── 1-operand 16-bit register pairs ──
+        "INX" | "DCX" | "DAD" => {
+            if is_one_operand_satisfied(operands_str) {
+                Some(vec![])
             } else {
                 Some(vec![
                     make_reg_item("BC", "Register Pair BC (16-bit)"),
@@ -202,67 +279,177 @@ fn get_instruction_operand_completions(
             }
         }
 
-        // 4. MOV: Both operands are 8-bit registers / M
-        "MOV" => Some(get_8bit_registers()),
+        // ── 1-operand stack pairs ──
+        "PUSH" | "POP" => {
+            if is_one_operand_satisfied(operands_str) {
+                Some(vec![])
+            } else {
+                Some(vec![
+                    make_reg_item("BC", "Register Pair BC (16-bit)"),
+                    make_reg_item("DE", "Register Pair DE (16-bit)"),
+                    make_reg_item("HL", "Register Pair HL (16-bit)"),
+                    make_reg_item("PSW", "Program Status Word (A + Flags)"),
+                ])
+            }
+        }
 
-        // 5. MVI: Operand 1 = Reg, Operand 2 = Constants / Immediates
-        "MVI" => {
-            if has_comma {
+        // ── 1-operand indirect pointers ──
+        "LDAX" | "STAX" => {
+            if is_one_operand_satisfied(operands_str) {
+                Some(vec![])
+            } else {
+                Some(vec![
+                    make_reg_item("BC", "Register Pair BC pointer"),
+                    make_reg_item("DE", "Register Pair DE pointer"),
+                ])
+            }
+        }
+
+        // ── 1-operand 8-bit immediate / port ──
+        "ADI" | "ACI" | "SUI" | "SBI" | "ANI" | "XRI" | "ORI" | "CPI" | "IN" | "OUT" => {
+            if is_one_operand_satisfied(operands_str) {
+                Some(vec![])
+            } else {
                 Some(get_constant_and_len_completions(doc))
+            }
+        }
+
+        // ── 1-operand RST interrupt vector ──
+        "RST" => {
+            if is_one_operand_satisfied(operands_str) {
+                Some(vec![])
+            } else {
+                Some(vec![
+                    make_snippet_item("0", "0", "RST 0 (0x0000)"),
+                    make_snippet_item("1", "1", "RST 1 (0x0008)"),
+                    make_snippet_item("2", "2", "RST 2 (0x0010)"),
+                    make_snippet_item("3", "3", "RST 3 (0x0018)"),
+                    make_snippet_item("4", "4", "RST 4 (0x0020)"),
+                    make_snippet_item("5", "5", "RST 5 (0x0028)"),
+                    make_snippet_item("6", "6", "RST 6 (0x0030)"),
+                    make_snippet_item("7", "7", "RST 7 (0x0038)"),
+                ])
+            }
+        }
+
+        // ── 2-operand MOV dest, src ──
+        "MOV" => {
+            if let Some((op1, op2)) = split_two_operands(operands_str) {
+                if let Some(op2_str) = op2 {
+                    if is_second_operand_satisfied(op2_str) {
+                        Some(vec![])
+                    } else {
+                        Some(get_8bit_registers())
+                    }
+                } else if is_first_operand_finished_without_comma(op1) {
+                    Some(vec![])
+                } else {
+                    Some(get_8bit_registers())
+                }
             } else {
                 Some(get_8bit_registers())
             }
         }
 
-        // 6. Arithmetic / Logic register instructions
-        "ADD" | "ADC" | "SUB" | "SBB" | "INR" | "DCR" | "ANA" | "XRA" | "ORA" | "CMP" => {
-            Some(get_8bit_registers())
+        // ── 2-operand MVI dest, imm8 ──
+        "MVI" => {
+            if let Some((op1, op2)) = split_two_operands(operands_str) {
+                if let Some(op2_str) = op2 {
+                    if is_second_operand_satisfied(op2_str) {
+                        Some(vec![])
+                    } else {
+                        Some(get_constant_and_len_completions(doc))
+                    }
+                } else if is_first_operand_finished_without_comma(op1) {
+                    Some(vec![])
+                } else {
+                    Some(get_8bit_registers())
+                }
+            } else {
+                Some(get_8bit_registers())
+            }
         }
 
-        // 7. Register Pair (INX, DCX, DAD)
-        "INX" | "DCX" | "DAD" => Some(vec![
-            make_reg_item("BC", "Register Pair BC (16-bit)"),
-            make_reg_item("DE", "Register Pair DE (16-bit)"),
-            make_reg_item("HL", "Register Pair HL (16-bit)"),
-            make_reg_item("SP", "Stack Pointer SP (16-bit)"),
-        ]),
-
-        // 8. Stack Pair (PUSH, POP)
-        "PUSH" | "POP" => Some(vec![
-            make_reg_item("BC", "Register Pair BC (16-bit)"),
-            make_reg_item("DE", "Register Pair DE (16-bit)"),
-            make_reg_item("HL", "Register Pair HL (16-bit)"),
-            make_reg_item("PSW", "Program Status Word (A + Flags)"),
-        ]),
-
-        // 9. Indirect Load/Store (LDAX, STAX)
-        "LDAX" | "STAX" => Some(vec![
-            make_reg_item("BC", "Register Pair BC pointer"),
-            make_reg_item("DE", "Register Pair DE pointer"),
-        ]),
-
-        // 10. Immediate Arithmetic (ADI, ACI, SUI, SBI, ANI, XRI, ORI, CPI)
-        "ADI" | "ACI" | "SUI" | "SBI" | "ANI" | "XRI" | "ORI" | "CPI" => {
-            Some(get_constant_and_len_completions(doc))
+        // ── 2-operand LXI pair, imm16 (variables & constants only, no labels) ──
+        "LXI" => {
+            if let Some((op1, op2)) = split_two_operands(operands_str) {
+                if let Some(op2_str) = op2 {
+                    if is_second_operand_satisfied(op2_str) {
+                        Some(vec![])
+                    } else {
+                        Some(get_memory_symbol_completions(doc))
+                    }
+                } else if is_first_operand_finished_without_comma(op1) {
+                    Some(vec![])
+                } else {
+                    Some(vec![
+                        make_reg_item("BC", "Register Pair BC (16-bit)"),
+                        make_reg_item("DE", "Register Pair DE (16-bit)"),
+                        make_reg_item("HL", "Register Pair HL (16-bit)"),
+                        make_reg_item("SP", "Stack Pointer SP (16-bit)"),
+                    ])
+                }
+            } else {
+                Some(vec![
+                    make_reg_item("BC", "Register Pair BC (16-bit)"),
+                    make_reg_item("DE", "Register Pair DE (16-bit)"),
+                    make_reg_item("HL", "Register Pair HL (16-bit)"),
+                    make_reg_item("SP", "Stack Pointer SP (16-bit)"),
+                ])
+            }
         }
-
-        // 11. I/O Ports
-        "IN" | "OUT" => Some(get_constant_and_len_completions(doc)),
-
-        // 12. RST
-        "RST" => Some(vec![
-            make_snippet_item("0", "0", "RST 0 (0x0000)"),
-            make_snippet_item("1", "1", "RST 1 (0x0008)"),
-            make_snippet_item("2", "2", "RST 2 (0x0010)"),
-            make_snippet_item("3", "3", "RST 3 (0x0018)"),
-            make_snippet_item("4", "4", "RST 4 (0x0020)"),
-            make_snippet_item("5", "5", "RST 5 (0x0028)"),
-            make_snippet_item("6", "6", "RST 6 (0x0030)"),
-            make_snippet_item("7", "7", "RST 7 (0x0038)"),
-        ]),
 
         _ => None,
     }
+}
+
+fn is_one_operand_satisfied(operands_str: &str) -> bool {
+    let trimmed = operands_str.trim_start();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    if trimmed.to_lowercase().starts_with("%len") {
+        let after_len = trimmed[4..].trim_start();
+        if after_len.is_empty() {
+            return false;
+        }
+        return after_len.contains(char::is_whitespace) || after_len.contains(',');
+    }
+
+    trimmed.contains(char::is_whitespace) || trimmed.contains(',')
+}
+
+fn split_two_operands(operands_str: &str) -> Option<(&str, Option<&str>)> {
+    if let Some(idx) = operands_str.find(',') {
+        let op1 = &operands_str[..idx];
+        let op2 = &operands_str[idx + 1..];
+        Some((op1, Some(op2)))
+    } else {
+        Some((operands_str, None))
+    }
+}
+
+fn is_first_operand_finished_without_comma(op1: &str) -> bool {
+    let trimmed = op1.trim();
+    !trimmed.is_empty() && op1.ends_with(char::is_whitespace)
+}
+
+fn is_second_operand_satisfied(op2: &str) -> bool {
+    let trimmed = op2.trim_start();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    if trimmed.to_lowercase().starts_with("%len") {
+        let after_len = trimmed[4..].trim_start();
+        if after_len.is_empty() {
+            return false;
+        }
+        return after_len.contains(char::is_whitespace) || after_len.contains(',');
+    }
+
+    trimmed.contains(char::is_whitespace) || trimmed.contains(',')
 }
 
 fn get_8bit_registers() -> Vec<CompletionItem> {
@@ -400,8 +587,17 @@ fn get_label_completions(doc: &Document, position: &Position) -> Vec<CompletionI
     items
 }
 
-fn get_memory_symbol_completions(doc: &Document) -> Vec<CompletionItem> {
-    let mut items = Vec::new();
+struct VariableInfo {
+    name: String,
+    detail: String,
+}
+
+fn extract_variables_and_constants(doc: &Document) -> (Vec<VariableInfo>, Vec<String>) {
+    let mut vars = Vec::new();
+    let mut constants = Vec::new();
+
+    // 1. Scan doc lines with segment awareness
+    let mut current_segment: Option<SegmentKind> = None;
 
     for line in doc.text.lines() {
         let code_line = line.split(';').next().unwrap_or("").trim();
@@ -409,51 +605,69 @@ fn get_memory_symbol_completions(doc: &Document) -> Vec<CompletionItem> {
             continue;
         }
 
+        if code_line.to_lowercase().starts_with("segment ") {
+            let seg_name = code_line[8..].trim().to_lowercase();
+            if seg_name == ".text" || seg_name == "text" {
+                current_segment = Some(SegmentKind::Text);
+            } else if seg_name == ".data" || seg_name == "data" {
+                current_segment = Some(SegmentKind::Data);
+            } else if seg_name == ".bss" || seg_name == "bss" {
+                current_segment = Some(SegmentKind::Bss);
+            }
+            continue;
+        }
+
+        if code_line.to_lowercase().starts_with("%define") {
+            let parts: Vec<&str> = code_line.split_whitespace().collect();
+            if parts.len() >= 2 {
+                constants.push(parts[1].to_string());
+            }
+            continue;
+        }
+
         let parts: Vec<&str> = code_line.split_whitespace().collect();
-
-        // 1. Data & BSS Variables
-        if !parts.is_empty()
-            && !is_reserved_keyword(parts[0])
-            && !parts[0].starts_with('%')
-            && !parts[0].ends_with(':')
-            && (code_line.contains('"') || code_line.contains("BYTE") || code_line.contains("WORD"))
-        {
-            items.push(CompletionItem {
-                label: parts[0].to_string(),
-                kind: Some(CompletionItemKind::VARIABLE),
-                detail: Some("Data Variable".to_string()),
-                ..Default::default()
-            });
+        if parts.is_empty() {
+            continue;
         }
 
-        // 2. Constants (%define)
-        if code_line.starts_with("%define") && parts.len() >= 2 {
-            items.push(CompletionItem {
-                label: parts[1].to_string(),
-                kind: Some(CompletionItemKind::CONSTANT),
-                detail: Some("Defined Constant".to_string()),
-                ..Default::default()
-            });
+        let first = parts[0].trim_end_matches(':');
+        if is_reserved_keyword(first) || first.starts_with('%') || first.is_empty() {
+            continue;
         }
 
-        // 3. Global Labels
-        if let Some(rest) = code_line.strip_suffix(':') {
-            let clean = rest.strip_prefix("global ").unwrap_or(rest).trim();
-            if !clean.starts_with('.') && !clean.is_empty() {
-                items.push(CompletionItem {
-                    label: clean.to_string(),
-                    kind: Some(CompletionItemKind::FUNCTION),
-                    detail: Some("Label Address".to_string()),
-                    ..Default::default()
+        let lower_line = code_line.to_lowercase();
+
+        match current_segment {
+            Some(SegmentKind::Data) => {
+                vars.push(VariableInfo {
+                    name: first.to_string(),
+                    detail: "Data Variable".to_string(),
                 });
+            }
+            Some(SegmentKind::Bss) => {
+                vars.push(VariableInfo {
+                    name: first.to_string(),
+                    detail: "BSS Buffer".to_string(),
+                });
+            }
+            _ => {
+                if lower_line.contains("byte")
+                    || lower_line.contains("word")
+                    || lower_line.contains('"')
+                {
+                    vars.push(VariableInfo {
+                        name: first.to_string(),
+                        detail: "Variable".to_string(),
+                    });
+                }
             }
         }
     }
 
-    // 4. Imported symbols from %include
+    // 2. Scan %include files
     for line in doc.text.lines() {
         let code_line = line.split(';').next().unwrap_or("").trim();
-        if code_line.starts_with("%include") {
+        if code_line.to_lowercase().starts_with("%include") {
             if let Some(quote_char) = if code_line.contains('"') {
                 Some('"')
             } else if code_line.contains('\'') {
@@ -465,32 +679,68 @@ fn get_memory_symbol_completions(doc: &Document) -> Vec<CompletionItem> {
                     if let Some(end_q) = code_line[start_q + 1..].find(quote_char) {
                         let rel_path = &code_line[start_q + 1..start_q + 1 + end_q];
                         if let Some(target_path) = resolve_relative_path(&doc.uri, rel_path) {
-                            if let Ok(content) = std::fs::read_to_string(target_path) {
+                            if let Ok(content) = std::fs::read_to_string(&target_path) {
+                                let mut inc_seg: Option<SegmentKind> = None;
                                 for inc_line in content.lines() {
                                     let inc_code = inc_line.split(';').next().unwrap_or("").trim();
-                                    let parts: Vec<&str> = inc_code.split_whitespace().collect();
-                                    if !parts.is_empty()
-                                        && !is_reserved_keyword(parts[0])
-                                        && !parts[0].starts_with('%')
-                                        && !parts[0].ends_with(':')
-                                        && (inc_code.contains('"')
-                                            || inc_code.contains("BYTE")
-                                            || inc_code.contains("WORD"))
-                                    {
-                                        items.push(CompletionItem {
-                                            label: parts[0].to_string(),
-                                            kind: Some(CompletionItemKind::VARIABLE),
-                                            detail: Some(format!("Variable from {}", rel_path)),
-                                            ..Default::default()
-                                        });
+                                    if inc_code.is_empty() {
+                                        continue;
                                     }
-                                    if inc_code.starts_with("%define") && parts.len() >= 2 {
-                                        items.push(CompletionItem {
-                                            label: parts[1].to_string(),
-                                            kind: Some(CompletionItemKind::CONSTANT),
-                                            detail: Some(format!("Constant from {}", rel_path)),
-                                            ..Default::default()
-                                        });
+                                    if inc_code.to_lowercase().starts_with("segment ") {
+                                        let seg_name = inc_code[8..].trim().to_lowercase();
+                                        if seg_name == ".text" || seg_name == "text" {
+                                            inc_seg = Some(SegmentKind::Text);
+                                        } else if seg_name == ".data" || seg_name == "data" {
+                                            inc_seg = Some(SegmentKind::Data);
+                                        } else if seg_name == ".bss" || seg_name == "bss" {
+                                            inc_seg = Some(SegmentKind::Bss);
+                                        }
+                                        continue;
+                                    }
+                                    if inc_code.to_lowercase().starts_with("%define") {
+                                        let parts: Vec<&str> =
+                                            inc_code.split_whitespace().collect();
+                                        if parts.len() >= 2 {
+                                            constants.push(parts[1].to_string());
+                                        }
+                                        continue;
+                                    }
+                                    let parts: Vec<&str> = inc_code.split_whitespace().collect();
+                                    if parts.is_empty() {
+                                        continue;
+                                    }
+                                    let first = parts[0].trim_end_matches(':');
+                                    if is_reserved_keyword(first)
+                                        || first.starts_with('%')
+                                        || first.is_empty()
+                                    {
+                                        continue;
+                                    }
+                                    let lower_inc = inc_code.to_lowercase();
+                                    match inc_seg {
+                                        Some(SegmentKind::Data) => {
+                                            vars.push(VariableInfo {
+                                                name: first.to_string(),
+                                                detail: format!("Data Variable from {}", rel_path),
+                                            });
+                                        }
+                                        Some(SegmentKind::Bss) => {
+                                            vars.push(VariableInfo {
+                                                name: first.to_string(),
+                                                detail: format!("BSS Buffer from {}", rel_path),
+                                            });
+                                        }
+                                        _ => {
+                                            if lower_inc.contains("byte")
+                                                || lower_inc.contains("word")
+                                                || lower_inc.contains('"')
+                                            {
+                                                vars.push(VariableInfo {
+                                                    name: first.to_string(),
+                                                    detail: format!("Variable from {}", rel_path),
+                                                });
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -501,41 +751,33 @@ fn get_memory_symbol_completions(doc: &Document) -> Vec<CompletionItem> {
         }
     }
 
-    items
+    (vars, constants)
 }
 
-fn get_constant_and_len_completions(doc: &Document) -> Vec<CompletionItem> {
+fn get_memory_symbol_completions(doc: &Document) -> Vec<CompletionItem> {
     let mut items = Vec::new();
+    let (vars, constants) = extract_variables_and_constants(doc);
+    let mut seen = HashSet::new();
 
-    for line in doc.text.lines() {
-        let code_line = line.split(';').next().unwrap_or("").trim();
-        if code_line.is_empty() {
-            continue;
-        }
-
-        let parts: Vec<&str> = code_line.split_whitespace().collect();
-
-        if code_line.starts_with("%define") && parts.len() >= 2 {
+    // 1. Data and BSS Variables
+    for var in vars {
+        if seen.insert(var.name.clone()) {
             items.push(CompletionItem {
-                label: parts[1].to_string(),
-                kind: Some(CompletionItemKind::CONSTANT),
-                detail: Some("Defined Constant".to_string()),
+                label: var.name,
+                kind: Some(CompletionItemKind::VARIABLE),
+                detail: Some(var.detail),
                 ..Default::default()
             });
         }
+    }
 
-        // Variables eligible for %len
-        if !parts.is_empty()
-            && !is_reserved_keyword(parts[0])
-            && !parts[0].starts_with('%')
-            && !parts[0].ends_with(':')
-            && (code_line.contains('"') || code_line.contains("BYTE") || code_line.contains("WORD"))
-        {
+    // 2. Constants
+    for c in constants {
+        if seen.insert(c.clone()) {
             items.push(CompletionItem {
-                label: format!("%len {}", parts[0]),
-                kind: Some(CompletionItemKind::FUNCTION),
-                detail: Some(format!("Byte length of {}", parts[0])),
-                insert_text: Some(format!("%len {}", parts[0])),
+                label: c,
+                kind: Some(CompletionItemKind::CONSTANT),
+                detail: Some("Defined Constant".to_string()),
                 ..Default::default()
             });
         }
@@ -544,8 +786,39 @@ fn get_constant_and_len_completions(doc: &Document) -> Vec<CompletionItem> {
     items
 }
 
-fn get_header_directives() -> Vec<CompletionItem> {
-    vec![
+fn get_constant_and_len_completions(doc: &Document) -> Vec<CompletionItem> {
+    let mut items = Vec::new();
+    let (vars, constants) = extract_variables_and_constants(doc);
+
+    // 1. Defined Constants
+    for c in constants {
+        items.push(CompletionItem {
+            label: c,
+            kind: Some(CompletionItemKind::CONSTANT),
+            detail: Some("Defined Constant".to_string()),
+            ..Default::default()
+        });
+    }
+
+    // 2. %len <variable> for all Data and BSS variables (case-insensitive)
+    let mut seen_len = HashSet::new();
+    for var in vars {
+        if seen_len.insert(var.name.clone()) {
+            items.push(CompletionItem {
+                label: format!("%len {}", var.name),
+                kind: Some(CompletionItemKind::FUNCTION),
+                detail: Some(format!("Byte length of {}", var.name)),
+                insert_text: Some(format!("%len {}", var.name)),
+                ..Default::default()
+            });
+        }
+    }
+
+    items
+}
+
+fn get_header_directives(present: &HashSet<SegmentKind>) -> Vec<CompletionItem> {
+    let mut items = vec![
         make_snippet_item(
             "%define",
             "%define ${1:NAME} ${2:value}",
@@ -556,26 +829,33 @@ fn get_header_directives() -> Vec<CompletionItem> {
             "%include \"${1:path/to/file.e8085}\"",
             "Include an external source file",
         ),
-        make_snippet_item(
+    ];
+    if !present.contains(&SegmentKind::Text) {
+        items.push(make_snippet_item(
             "segment .text",
             "segment .text\n$0",
             "Executable code segment",
-        ),
-        make_snippet_item(
+        ));
+    }
+    if !present.contains(&SegmentKind::Data) {
+        items.push(make_snippet_item(
             "segment .data",
             "segment .data\n$0",
             "Initialized data segment",
-        ),
-        make_snippet_item(
+        ));
+    }
+    if !present.contains(&SegmentKind::Bss) {
+        items.push(make_snippet_item(
             "segment .bss",
             "segment .bss\n$0",
             "Uninitialized memory buffer segment",
-        ),
-    ]
+        ));
+    }
+    items
 }
 
-fn get_text_directives() -> Vec<CompletionItem> {
-    vec![
+fn get_text_directives(present: &HashSet<SegmentKind>) -> Vec<CompletionItem> {
+    let mut items = vec![
         make_snippet_item(
             "global",
             "global ${1:subroutine_name}:\n    $0\n    ret",
@@ -586,13 +866,22 @@ fn get_text_directives() -> Vec<CompletionItem> {
             "extern ${1:function_name}",
             "Declare external linked symbol",
         ),
-        make_snippet_item(
+    ];
+    if !present.contains(&SegmentKind::Data) {
+        items.push(make_snippet_item(
             "segment .data",
             "segment .data\n$0",
             "Switch to data segment",
-        ),
-        make_snippet_item("segment .bss", "segment .bss\n$0", "Switch to bss segment"),
-    ]
+        ));
+    }
+    if !present.contains(&SegmentKind::Bss) {
+        items.push(make_snippet_item(
+            "segment .bss",
+            "segment .bss\n$0",
+            "Switch to bss segment",
+        ));
+    }
+    items
 }
 
 fn get_data_directives() -> Vec<CompletionItem> {
@@ -610,8 +899,8 @@ fn get_data_directives() -> Vec<CompletionItem> {
     ]
 }
 
-fn get_data_segment_completions() -> Vec<CompletionItem> {
-    vec![
+fn get_data_segment_completions(present: &HashSet<SegmentKind>) -> Vec<CompletionItem> {
+    let mut items = vec![
         make_snippet_item(
             "string variable",
             "${1:name} \"${2:Hello, World!\\n}\"",
@@ -627,17 +916,26 @@ fn get_data_segment_completions() -> Vec<CompletionItem> {
             "${1:name} WORD ${2:0x1000, 0x2000}",
             "Declare initialized 16-bit word array",
         ),
-        make_snippet_item(
+    ];
+    if !present.contains(&SegmentKind::Text) {
+        items.push(make_snippet_item(
             "segment .text",
             "segment .text\n$0",
             "Switch to text segment",
-        ),
-        make_snippet_item("segment .bss", "segment .bss\n$0", "Switch to bss segment"),
-    ]
+        ));
+    }
+    if !present.contains(&SegmentKind::Bss) {
+        items.push(make_snippet_item(
+            "segment .bss",
+            "segment .bss\n$0",
+            "Switch to bss segment",
+        ));
+    }
+    items
 }
 
-fn get_bss_segment_completions() -> Vec<CompletionItem> {
-    vec![
+fn get_bss_segment_completions(present: &HashSet<SegmentKind>) -> Vec<CompletionItem> {
+    let mut items = vec![
         make_snippet_item(
             "BYTE buffer",
             "${1:name} BYTE ${2:64}",
@@ -648,17 +946,203 @@ fn get_bss_segment_completions() -> Vec<CompletionItem> {
             "${1:name} WORD ${2:32}",
             "Allocate uninitialized word buffer in BSS",
         ),
-        make_snippet_item(
+    ];
+    if !present.contains(&SegmentKind::Text) {
+        items.push(make_snippet_item(
             "segment .text",
             "segment .text\n$0",
             "Switch to text segment",
-        ),
-        make_snippet_item(
+        ));
+    }
+    if !present.contains(&SegmentKind::Data) {
+        items.push(make_snippet_item(
             "segment .data",
             "segment .data\n$0",
             "Switch to data segment",
-        ),
-    ]
+        ));
+    }
+    items
+}
+
+fn get_extern_symbol_completions(doc: &Document) -> Vec<CompletionItem> {
+    let mut items = Vec::new();
+    let mut seen = HashSet::new();
+
+    // 1. Gather all symbols already declared/defined in the current doc to avoid duplicate suggestions
+    let mut local_symbols = HashSet::new();
+    for line in doc.text.lines() {
+        let code_line = line.split(';').next().unwrap_or("").trim();
+        if let Some(rest) = code_line.strip_prefix("extern ") {
+            local_symbols.insert(rest.trim().to_string());
+        }
+        if let Some(rest) = code_line.strip_prefix("global ") {
+            let clean = rest.trim().trim_end_matches(':');
+            local_symbols.insert(clean.to_string());
+        }
+        if let Some(rest) = code_line.strip_suffix(':') {
+            let clean = rest.strip_prefix("global ").unwrap_or(rest).trim();
+            local_symbols.insert(clean.to_string());
+        }
+    }
+
+    // 2. Check %include files for global exports
+    for line in doc.text.lines() {
+        let code_line = line.split(';').next().unwrap_or("").trim();
+        if code_line.to_lowercase().starts_with("%include") {
+            if let Some(quote_char) = if code_line.contains('"') {
+                Some('"')
+            } else if code_line.contains('\'') {
+                Some('\'')
+            } else {
+                None
+            } {
+                if let Some(start_q) = code_line.find(quote_char) {
+                    if let Some(end_q) = code_line[start_q + 1..].find(quote_char) {
+                        let rel_path = &code_line[start_q + 1..start_q + 1 + end_q];
+                        if let Some(target_path) = resolve_relative_path(&doc.uri, rel_path) {
+                            if let Ok(content) = std::fs::read_to_string(&target_path) {
+                                extract_exported_globals_from_str(
+                                    &content,
+                                    &format!("Imported from {rel_path}"),
+                                    &local_symbols,
+                                    &mut seen,
+                                    &mut items,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Scan workspace / library directories (programs/lib, programs/devices)
+    if let Ok(doc_path) = doc.uri.to_file_path() {
+        let project_root = crate::asm::include::find_project_root(&doc_path);
+        let search_dirs = [
+            project_root.join("programs").join("lib"),
+            project_root.join("programs").join("devices"),
+        ];
+
+        for sdir in &search_dirs {
+            if sdir.exists() && sdir.is_dir() {
+                if let Ok(entries) = std::fs::read_dir(sdir) {
+                    for entry in entries.flatten() {
+                        let p = entry.path();
+                        if p.is_file()
+                            && (p.extension().is_some_and(|e| e == "e8085" || e == "inc"))
+                        {
+                            if let Ok(content) = std::fs::read_to_string(&p) {
+                                let file_name =
+                                    p.file_name().unwrap_or_default().to_string_lossy();
+                                extract_exported_globals_from_str(
+                                    &content,
+                                    &format!("Library symbol ({file_name})"),
+                                    &local_symbols,
+                                    &mut seen,
+                                    &mut items,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    items
+}
+
+fn extract_exported_globals_from_str(
+    content: &str,
+    detail: &str,
+    local_symbols: &HashSet<String>,
+    seen: &mut HashSet<String>,
+    items: &mut Vec<CompletionItem>,
+) {
+    for line in content.lines() {
+        let code_line = line.split(';').next().unwrap_or("").trim();
+        if code_line.is_empty() {
+            continue;
+        }
+        if let Some(rest) = code_line.strip_prefix("global ") {
+            let clean = rest.trim().trim_end_matches(':');
+            if !clean.is_empty()
+                && !clean.eq_ignore_ascii_case("main")
+                && !clean.starts_with('.')
+            {
+                if !local_symbols.contains(clean) && seen.insert(clean.to_string()) {
+                    items.push(CompletionItem {
+                        label: clean.to_string(),
+                        kind: Some(CompletionItemKind::FUNCTION),
+                        detail: Some(detail.to_string()),
+                        ..Default::default()
+                    });
+                }
+            }
+        } else if let Some(rest) = code_line.strip_suffix(':') {
+            if let Some(global_name) = rest.strip_prefix("global ") {
+                let clean = global_name.trim();
+                if !clean.is_empty()
+                    && !clean.eq_ignore_ascii_case("main")
+                    && !clean.starts_with('.')
+                {
+                    if !local_symbols.contains(clean) && seen.insert(clean.to_string()) {
+                        items.push(CompletionItem {
+                            label: clean.to_string(),
+                            kind: Some(CompletionItemKind::FUNCTION),
+                            detail: Some(detail.to_string()),
+                            ..Default::default()
+                        });
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn get_global_declaration_completions(doc: &Document) -> Vec<CompletionItem> {
+    let mut items = Vec::new();
+    let mut already_global = HashSet::new();
+    let mut local_labels = Vec::new();
+
+    for line in doc.text.lines() {
+        let code_line = line.split(';').next().unwrap_or("").trim();
+        if code_line.is_empty() {
+            continue;
+        }
+
+        // Top-level or inline `global `
+        if let Some(rest) = code_line.strip_prefix("global ") {
+            let clean = rest.trim().trim_end_matches(':');
+            if !clean.is_empty() {
+                already_global.insert(clean.to_string());
+            }
+            continue;
+        }
+
+        // Local labels ending in `:`
+        if let Some(rest) = code_line.strip_suffix(':') {
+            let clean = rest.trim();
+            if !clean.is_empty() && !clean.eq_ignore_ascii_case("main") && !clean.starts_with('.') {
+                local_labels.push(clean.to_string());
+            }
+        }
+    }
+
+    let mut seen = HashSet::new();
+    for label in local_labels {
+        if !already_global.contains(&label) && seen.insert(label.clone()) {
+            items.push(CompletionItem {
+                label: label.clone(),
+                kind: Some(CompletionItemKind::FUNCTION),
+                detail: Some("Local Label to Export".to_string()),
+                ..Default::default()
+            });
+        }
+    }
+
+    items
 }
 
 fn get_instruction_completions() -> Vec<CompletionItem> {
@@ -1009,7 +1493,7 @@ segment .data
 scores BYTE 10, 20
 
 segment .bss
-buffer BYTE 64
+buffer byte 64
 
 segment .text
 main:
@@ -1022,7 +1506,7 @@ main:
         .to_string();
         let doc = Document::new(uri, 1, text);
 
-        // 1. mvi A, <cursor> -> constants
+        // 1. mvi A, <cursor> -> constants and %len for both data and lowercase BSS variables
         let res_mvi = get_completions(
             &doc,
             &Position {
@@ -1034,6 +1518,7 @@ main:
         if let CompletionResponse::List(list) = res_mvi {
             assert!(list.items.iter().any(|item| item.label == "MAX_LIMIT"));
             assert!(list.items.iter().any(|item| item.label == "%len scores"));
+            assert!(list.items.iter().any(|item| item.label == "%len buffer"));
             // Comments must NOT be suggested as variables
             assert!(
                 !list
@@ -1060,7 +1545,7 @@ main:
             panic!("expected list");
         }
 
-        // 3. lda <cursor> -> variables
+        // 3. lda <cursor> -> variables and constants (no labels)
         let res_lda = get_completions(
             &doc,
             &Position {
@@ -1073,6 +1558,7 @@ main:
             assert!(list.items.iter().any(|item| item.label == "scores"));
             assert!(list.items.iter().any(|item| item.label == "buffer"));
             assert!(list.items.iter().any(|item| item.label == "MAX_LIMIT"));
+            assert!(!list.items.iter().any(|item| item.label == "main"));
             assert!(
                 !list
                     .items
@@ -1083,7 +1569,7 @@ main:
             panic!("expected list");
         }
 
-        // 4. lxi H, <cursor> -> variables & constants
+        // 4. lxi H, <cursor> -> variables & constants (no labels)
         let res_lxi = get_completions(
             &doc,
             &Position {
@@ -1095,12 +1581,167 @@ main:
         if let CompletionResponse::List(list) = res_lxi {
             assert!(list.items.iter().any(|item| item.label == "scores"));
             assert!(list.items.iter().any(|item| item.label == "buffer"));
+            assert!(list.items.iter().any(|item| item.label == "MAX_LIMIT"));
+            assert!(!list.items.iter().any(|item| item.label == "main"));
             assert!(
                 !list
                     .items
                     .iter()
                     .any(|item| item.label.contains("comment_var"))
             );
+        } else {
+            panic!("expected list");
+        }
+    }
+
+    #[test]
+    fn test_duplicate_segment_not_suggested_and_missing_suggested() {
+        let uri = Url::parse("file:///test.e8085").unwrap();
+        let text = r#"
+segment .data
+arr BYTE 10
+
+segment .text
+main:
+    
+"#
+        .to_string();
+        let doc = Document::new(uri, 1, text);
+
+        let res = get_completions(
+            &doc,
+            &Position {
+                line: 6,
+                character: 4,
+            },
+        )
+        .unwrap();
+        if let CompletionResponse::List(list) = res {
+            // .data and .text are already present, so only .bss should be suggested as missing segment
+            assert!(list.items.iter().any(|item| item.label == "segment .bss"));
+            assert!(!list.items.iter().any(|item| item.label == "segment .data"));
+            assert!(!list.items.iter().any(|item| item.label == "segment .text"));
+        } else {
+            panic!("expected list");
+        }
+    }
+
+    #[test]
+    fn test_no_completions_when_instruction_operands_satisfied() {
+        let uri = Url::parse("file:///test.e8085").unwrap();
+        let text = r#"
+segment .text
+main:
+    nop 
+    hlt 
+    add B 
+    mov A, B 
+    lxi HL, 0x1000 
+    jmp main 
+"#
+        .to_string();
+        let doc = Document::new(uri, 1, text);
+
+        // nop <space>
+        let res_nop = get_completions(
+            &doc,
+            &Position {
+                line: 3,
+                character: 8,
+            },
+        )
+        .unwrap();
+        if let CompletionResponse::List(list) = res_nop {
+            assert!(list.items.is_empty(), "expected 0 completions after nop <space>");
+        }
+
+        // mov A, B <space>
+        let res_mov = get_completions(
+            &doc,
+            &Position {
+                line: 6,
+                character: 13,
+            },
+        )
+        .unwrap();
+        if let CompletionResponse::List(list) = res_mov {
+            assert!(list.items.is_empty(), "expected 0 completions after mov A, B <space>");
+        }
+
+        // lxi HL, 0x1000 <space>
+        let res_lxi = get_completions(
+            &doc,
+            &Position {
+                line: 7,
+                character: 19,
+            },
+        )
+        .unwrap();
+        if let CompletionResponse::List(list) = res_lxi {
+            assert!(list.items.is_empty(), "expected 0 completions after lxi HL, addr <space>");
+        }
+    }
+
+    #[test]
+    fn test_extern_completion_suggests_no_instructions() {
+        let uri = Url::parse("file:///test.e8085").unwrap();
+        let text = "extern \nsegment .text\nmain:\n    hlt".to_string();
+        let doc = Document::new(uri, 1, text);
+
+        let res = get_completions(
+            &doc,
+            &Position {
+                line: 0,
+                character: 7,
+            },
+        )
+        .unwrap();
+        if let CompletionResponse::List(list) = res {
+            assert!(!list.items.iter().any(|item| item.label == "mov"));
+            assert!(!list.items.iter().any(|item| item.label == "lxi"));
+            assert!(!list.items.iter().any(|item| item.label == "segment .text"));
+        } else {
+            panic!("expected list");
+        }
+    }
+
+    #[test]
+    fn test_global_completion_suggests_local_labels_not_instructions() {
+        let uri = Url::parse("file:///test.e8085").unwrap();
+        let text = r#"
+global 
+
+segment .text
+helper_fn:
+    ret
+
+calc_sum:
+    ret
+
+global already_exported:
+    ret
+
+main:
+    ret
+"#
+        .to_string();
+        let doc = Document::new(uri, 1, text);
+
+        let res = get_completions(
+            &doc,
+            &Position {
+                line: 1,
+                character: 7,
+            },
+        )
+        .unwrap();
+        if let CompletionResponse::List(list) = res {
+            assert!(list.items.iter().any(|item| item.label == "helper_fn"));
+            assert!(list.items.iter().any(|item| item.label == "calc_sum"));
+            assert!(!list.items.iter().any(|item| item.label == "main"));
+            assert!(!list.items.iter().any(|item| item.label == "already_exported"));
+            assert!(!list.items.iter().any(|item| item.label == "mov"));
+            assert!(!list.items.iter().any(|item| item.label == "segment .text"));
         } else {
             panic!("expected list");
         }
