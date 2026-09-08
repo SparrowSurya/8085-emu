@@ -36,7 +36,8 @@ fn get_present_segments(doc: &Document) -> HashSet<SegmentKind> {
 pub fn get_completions(doc: &Document, position: &Position) -> Option<CompletionResponse> {
     let line = doc.text.lines().nth(position.line as usize).unwrap_or("");
     let char_idx = (position.character as usize).min(line.len());
-    let line_prefix = line[..char_idx].trim_start();
+    let line_prefix = &line[..char_idx];
+    let trimmed_prefix = line_prefix.trim_start();
 
     // 1. Check if typing path inside `%include "..."`
     if let Some(include_items) = get_include_path_completions(doc, position, line, char_idx) {
@@ -46,11 +47,12 @@ pub fn get_completions(doc: &Document, position: &Position) -> Option<Completion
         }));
     }
 
-    let lower_prefix = line_prefix.to_lowercase();
+    let code_line = line_prefix.split(';').next().unwrap_or("").trim_start();
+    let lower_code = code_line.to_lowercase();
 
     // 2. Check if typing after `extern ` (Issue 6: suggest only external symbols, no CPU instructions)
-    if lower_prefix.starts_with("extern ")
-        || (lower_prefix == "extern" && line[..char_idx].ends_with(char::is_whitespace))
+    if lower_code.starts_with("extern ")
+        || (lower_code == "extern" && line[..char_idx].ends_with(char::is_whitespace))
     {
         let extern_items = get_extern_symbol_completions(doc);
         return Some(CompletionResponse::List(CompletionList {
@@ -60,14 +62,125 @@ pub fn get_completions(doc: &Document, position: &Position) -> Option<Completion
     }
 
     // 3. Check if typing after `global ` (Issue 7: suggest only unexported local labels, no CPU instructions)
-    if lower_prefix.starts_with("global ")
-        || (lower_prefix == "global" && line[..char_idx].ends_with(char::is_whitespace))
+    if lower_code.starts_with("global ")
+        || (lower_code == "global" && line[..char_idx].ends_with(char::is_whitespace))
     {
         let global_items = get_global_declaration_completions(doc);
         return Some(CompletionResponse::List(CompletionList {
             is_incomplete: false,
             items: global_items,
         }));
+    }
+
+    // 4. Check if typing after `%define <NAME> ` (suggest other defined constants)
+    if lower_code.starts_with("%define ") {
+        let parts: Vec<&str> = code_line.split_whitespace().collect();
+        if (parts.len() == 2 && line_prefix.ends_with(char::is_whitespace)) || parts.len() > 2 {
+            let current_name = parts[1];
+            let (_, constants) = extract_variables_and_constants(doc);
+            let items: Vec<CompletionItem> = constants
+                .into_iter()
+                .filter(|c| !c.eq_ignore_ascii_case(current_name))
+                .map(|c| CompletionItem {
+                    label: c,
+                    kind: Some(CompletionItemKind::CONSTANT),
+                    detail: Some("Defined Constant".to_string()),
+                    ..Default::default()
+                })
+                .collect();
+            return Some(CompletionResponse::List(CompletionList {
+                is_incomplete: false,
+                items,
+            }));
+        }
+    }
+
+    // 5. Check if typing after `%repeat ` (in data segment or anywhere)
+    if lower_code.contains("%repeat") {
+        if let Some(idx) = lower_code.rfind("%repeat") {
+            let after_repeat = &code_line[idx + 7..];
+            let after_trimmed = after_repeat.trim_start();
+            let rep_tokens: Vec<&str> = after_trimmed.split_whitespace().collect();
+            if rep_tokens.is_empty() {
+                // 1st operand: count -> suggest constants
+                let (_, constants) = extract_variables_and_constants(doc);
+                let items: Vec<CompletionItem> = constants
+                    .into_iter()
+                    .map(|c| CompletionItem {
+                        label: c,
+                        kind: Some(CompletionItemKind::CONSTANT),
+                        detail: Some("Defined Constant".to_string()),
+                        ..Default::default()
+                    })
+                    .collect();
+                return Some(CompletionResponse::List(CompletionList {
+                    is_incomplete: false,
+                    items,
+                }));
+            } else if rep_tokens.len() == 1 {
+                if line_prefix.ends_with(char::is_whitespace) || after_repeat.contains(',') {
+                    // 2nd operand: value -> None
+                    return Some(CompletionResponse::List(CompletionList {
+                        is_incomplete: false,
+                        items: vec![],
+                    }));
+                } else {
+                    // Still typing 1st operand
+                    let (_, constants) = extract_variables_and_constants(doc);
+                    let items: Vec<CompletionItem> = constants
+                        .into_iter()
+                        .map(|c| CompletionItem {
+                            label: c,
+                            kind: Some(CompletionItemKind::CONSTANT),
+                            detail: Some("Defined Constant".to_string()),
+                            ..Default::default()
+                        })
+                        .collect();
+                    return Some(CompletionResponse::List(CompletionList {
+                        is_incomplete: false,
+                        items,
+                    }));
+                }
+            } else {
+                // Both operands satisfied -> None
+                return Some(CompletionResponse::List(CompletionList {
+                    is_incomplete: false,
+                    items: vec![],
+                }));
+            }
+        }
+    }
+
+    // 6. Check if typing after `%len ` anywhere -> suggest variables
+    if lower_code.contains("%len") {
+        if let Some(idx) = lower_code.rfind("%len") {
+            let after_len = &code_line[idx + 4..];
+            let after_trimmed = after_len.trim_start();
+            let len_tokens: Vec<&str> = after_trimmed.split_whitespace().collect();
+            if len_tokens.is_empty()
+                || (len_tokens.len() == 1
+                    && !line_prefix.ends_with(char::is_whitespace)
+                    && !after_len.contains(','))
+            {
+                let (vars, _) = extract_variables_and_constants(doc);
+                let mut items = Vec::new();
+                let mut seen = HashSet::new();
+                for var in vars {
+                    if seen.insert(var.name.clone()) {
+                        items.push(CompletionItem {
+                            label: var.name,
+                            kind: Some(CompletionItemKind::VARIABLE),
+                            detail: Some(var.detail),
+                            ..Default::default()
+                        });
+                    }
+                }
+                return Some(CompletionResponse::List(CompletionList {
+                    is_incomplete: false,
+                    items,
+                }));
+            }
+        }
     }
 
     let active_segment = get_active_segment(doc, position.line as usize);
@@ -78,13 +191,15 @@ pub fn get_completions(doc: &Document, position: &Position) -> Option<Completion
         Some(SegmentKind::Text) => {
             // Check if cursor is inside an instruction operand context
             if let Some(operand_items) =
-                get_instruction_operand_completions(doc, position, line_prefix)
+                get_instruction_operand_completions(doc, position, code_line)
             {
                 items.extend(operand_items);
             } else {
                 // At instruction position (start of line / indentation)
-                if line_prefix.starts_with('%') {
-                    items.extend(get_header_directives(&present_segments));
+                if trimmed_prefix.starts_with('%') {
+                    items.extend(get_percent_directive_completions(Some(SegmentKind::Text)));
+                } else if lower_code.starts_with("segment ") {
+                    items.extend(get_missing_segment_completions(&present_segments));
                 } else {
                     items.extend(get_instruction_completions());
                     items.extend(get_text_directives(&present_segments));
@@ -93,20 +208,82 @@ pub fn get_completions(doc: &Document, position: &Position) -> Option<Completion
             }
         }
         Some(SegmentKind::Data) => {
-            if line_prefix.starts_with('%') {
-                items.extend(get_data_directives());
+            if code_line.is_empty() {
+                // No suggestions for newline in data segment
+                return Some(CompletionResponse::List(CompletionList {
+                    is_incomplete: false,
+                    items: vec![],
+                }));
+            }
+            if trimmed_prefix.starts_with('%') {
+                items.extend(get_percent_directive_completions(Some(SegmentKind::Data)));
+            } else if lower_code.starts_with("segment ") {
+                items.extend(get_missing_segment_completions(&present_segments));
             } else {
-                items.extend(get_data_directives());
-                items.extend(get_data_segment_completions(&present_segments));
-                items.extend(get_constant_and_len_completions(doc));
+                let tokens: Vec<&str> = code_line.split_whitespace().collect();
+                if tokens.len() == 1 {
+                    if line_prefix.ends_with(char::is_whitespace) {
+                        // User typed variable name: suggest BYTE and WORD
+                        items.push(make_snippet_item("BYTE", "BYTE ${1:value}", "8-bit byte allocation"));
+                        items.push(make_snippet_item("WORD", "WORD ${1:value}", "16-bit word allocation"));
+                    }
+                } else if tokens.len() >= 2 {
+                    if tokens[1].eq_ignore_ascii_case("byte") || tokens[1].eq_ignore_ascii_case("word") {
+                        // Value position: suggest %repeat, %len <var>, constants, string
+                        items.push(make_snippet_item(
+                            "%repeat",
+                            "%repeat ${1:count} ${2:value}",
+                            "Repeat a data element multiple times",
+                        ));
+                        items.extend(get_constant_and_len_completions(doc));
+                        if tokens[1].eq_ignore_ascii_case("byte") {
+                            items.push(make_snippet_item(
+                                "string",
+                                "\"${1:text}\"",
+                                "Initialized string literal",
+                            ));
+                        }
+                    }
+                }
             }
         }
         Some(SegmentKind::Bss) => {
-            items.extend(get_bss_segment_completions(&present_segments));
+            if code_line.is_empty() {
+                // No suggestions for newline in bss segment
+                return Some(CompletionResponse::List(CompletionList {
+                    is_incomplete: false,
+                    items: vec![],
+                }));
+            }
+            if trimmed_prefix.starts_with('%') {
+                items.extend(get_percent_directive_completions(Some(SegmentKind::Bss)));
+            } else if lower_code.starts_with("segment ") {
+                items.extend(get_missing_segment_completions(&present_segments));
+            } else {
+                let tokens: Vec<&str> = code_line.split_whitespace().collect();
+                if tokens.len() == 1 {
+                    if line_prefix.ends_with(char::is_whitespace) {
+                        // User typed buffer name: suggest BYTE and WORD
+                        items.push(make_snippet_item("BYTE", "BYTE ${1:size}", "Uninitialized byte buffer"));
+                        items.push(make_snippet_item("WORD", "WORD ${1:size}", "Uninitialized word buffer"));
+                    }
+                } else if tokens.len() >= 2 {
+                    if tokens[1].eq_ignore_ascii_case("byte") || tokens[1].eq_ignore_ascii_case("word") {
+                        // Buffer size position: suggest %len <var> and constants (no %repeat)
+                        items.extend(get_constant_and_len_completions(doc));
+                    }
+                }
+            }
         }
         None => {
             // Before any segment declaration (file header)
-            items.extend(get_header_directives(&present_segments));
+            if trimmed_prefix.starts_with('%') {
+                items.extend(get_percent_directive_completions(None));
+            } else if lower_code.starts_with("segment ") {
+                items.extend(get_missing_segment_completions(&present_segments));
+            } else {
+                items.extend(get_header_directives(&present_segments));
+            }
         }
     }
 
@@ -817,6 +994,62 @@ fn get_constant_and_len_completions(doc: &Document) -> Vec<CompletionItem> {
     items
 }
 
+fn get_percent_directive_completions(seg_kind: Option<SegmentKind>) -> Vec<CompletionItem> {
+    match seg_kind {
+        Some(SegmentKind::Data) => vec![
+            make_snippet_item(
+                "repeat",
+                "repeat ${1:count} ${2:value}",
+                "Repeat a data element multiple times",
+            ),
+            make_snippet_item(
+                "len",
+                "len ${1:var_name}",
+                "Compute byte length of a symbol",
+            ),
+            make_snippet_item(
+                "define",
+                "define ${1:NAME} ${2:value}",
+                "Define a constant value",
+            ),
+            make_snippet_item(
+                "include",
+                "include \"${1}\"",
+                "Include an external source file",
+            ),
+        ],
+        Some(SegmentKind::Bss) => vec![
+            make_snippet_item(
+                "len",
+                "len ${1:var_name}",
+                "Compute byte length of a symbol",
+            ),
+            make_snippet_item(
+                "define",
+                "define ${1:NAME} ${2:value}",
+                "Define a constant value",
+            ),
+            make_snippet_item(
+                "include",
+                "include \"${1}\"",
+                "Include an external source file",
+            ),
+        ],
+        _ => vec![
+            make_snippet_item(
+                "define",
+                "define ${1:NAME} ${2:value}",
+                "Define a constant value",
+            ),
+            make_snippet_item(
+                "include",
+                "include \"${1}\"",
+                "Include an external source file",
+            ),
+        ],
+    }
+}
+
 fn get_header_directives(present: &HashSet<SegmentKind>) -> Vec<CompletionItem> {
     let mut items = vec![
         make_snippet_item(
@@ -826,10 +1059,16 @@ fn get_header_directives(present: &HashSet<SegmentKind>) -> Vec<CompletionItem> 
         ),
         make_snippet_item(
             "%include",
-            "%include \"${1:path/to/file.e8085}\"",
+            "%include \"${1}\"",
             "Include an external source file",
         ),
     ];
+    items.extend(get_missing_segment_completions(present));
+    items
+}
+
+fn get_missing_segment_completions(present: &HashSet<SegmentKind>) -> Vec<CompletionItem> {
+    let mut items = Vec::new();
     if !present.contains(&SegmentKind::Text) {
         items.push(make_snippet_item(
             "segment .text",
@@ -879,86 +1118,6 @@ fn get_text_directives(present: &HashSet<SegmentKind>) -> Vec<CompletionItem> {
             "segment .bss",
             "segment .bss\n$0",
             "Switch to bss segment",
-        ));
-    }
-    items
-}
-
-fn get_data_directives() -> Vec<CompletionItem> {
-    vec![
-        make_snippet_item(
-            "%repeat",
-            "%repeat ${1:count} ${2:value}",
-            "Repeat a data element multiple times",
-        ),
-        make_snippet_item(
-            "%len",
-            "%len ${1:var_name}",
-            "Compute byte length of a symbol",
-        ),
-    ]
-}
-
-fn get_data_segment_completions(present: &HashSet<SegmentKind>) -> Vec<CompletionItem> {
-    let mut items = vec![
-        make_snippet_item(
-            "string variable",
-            "${1:name} \"${2:Hello, World!\\n}\"",
-            "Declare initialized string variable",
-        ),
-        make_snippet_item(
-            "BYTE array",
-            "${1:name} BYTE ${2:10, 20, 30}",
-            "Declare initialized byte array",
-        ),
-        make_snippet_item(
-            "WORD array",
-            "${1:name} WORD ${2:0x1000, 0x2000}",
-            "Declare initialized 16-bit word array",
-        ),
-    ];
-    if !present.contains(&SegmentKind::Text) {
-        items.push(make_snippet_item(
-            "segment .text",
-            "segment .text\n$0",
-            "Switch to text segment",
-        ));
-    }
-    if !present.contains(&SegmentKind::Bss) {
-        items.push(make_snippet_item(
-            "segment .bss",
-            "segment .bss\n$0",
-            "Switch to bss segment",
-        ));
-    }
-    items
-}
-
-fn get_bss_segment_completions(present: &HashSet<SegmentKind>) -> Vec<CompletionItem> {
-    let mut items = vec![
-        make_snippet_item(
-            "BYTE buffer",
-            "${1:name} BYTE ${2:64}",
-            "Allocate uninitialized byte buffer in BSS",
-        ),
-        make_snippet_item(
-            "WORD buffer",
-            "${1:name} WORD ${2:32}",
-            "Allocate uninitialized word buffer in BSS",
-        ),
-    ];
-    if !present.contains(&SegmentKind::Text) {
-        items.push(make_snippet_item(
-            "segment .text",
-            "segment .text\n$0",
-            "Switch to text segment",
-        ));
-    }
-    if !present.contains(&SegmentKind::Data) {
-        items.push(make_snippet_item(
-            "segment .data",
-            "segment .data\n$0",
-            "Switch to data segment",
         ));
     }
     items
@@ -1381,42 +1540,265 @@ mod tests {
     }
 
     #[test]
-    fn test_no_instruction_completions_in_data_or_bss_segment() {
+    fn test_empty_line_and_percent_prefix_directives() {
         let uri = Url::parse("file:///test.e8085").unwrap();
-        let text = "segment .data\n    ".to_string();
-        let doc = Document::new(uri.clone(), 1, text);
+        // 1. Empty line before any segment (header)
+        let text_empty = "".to_string();
+        let doc_empty = Document::new(uri.clone(), 1, text_empty);
+        let res_empty = get_completions(
+            &doc_empty,
+            &Position {
+                line: 0,
+                character: 0,
+            },
+        )
+        .unwrap();
+        if let CompletionResponse::List(list) = res_empty {
+            assert!(list.items.iter().any(|item| item.label == "%define"));
+            assert!(list.items.iter().any(|item| item.label == "%include"));
+            assert!(list.items.iter().any(|item| item.label == "segment .text"));
+            assert!(list.items.iter().any(|item| item.label == "segment .data"));
+            assert!(list.items.iter().any(|item| item.label == "segment .bss"));
+        } else {
+            panic!("expected list");
+        }
+
+        // 2. Typing '%' in header/text
+        let text_pct = "%".to_string();
+        let doc_pct = Document::new(uri.clone(), 1, text_pct);
+        let res_pct = get_completions(
+            &doc_pct,
+            &Position {
+                line: 0,
+                character: 1,
+            },
+        )
+        .unwrap();
+        if let CompletionResponse::List(list) = res_pct {
+            let def_item = list.items.iter().find(|item| item.label == "define").unwrap();
+            assert_eq!(def_item.insert_text.as_deref(), Some("define ${1:NAME} ${2:value}"));
+            let inc_item = list.items.iter().find(|item| item.label == "include").unwrap();
+            assert_eq!(inc_item.insert_text.as_deref(), Some("include \"${1}\""));
+        } else {
+            panic!("expected list");
+        }
+    }
+
+    #[test]
+    fn test_define_value_completion() {
+        let uri = Url::parse("file:///test.e8085").unwrap();
+        let text = "%define BUFFER_SIZE 64\n%define MAX_LIMIT ".to_string();
+        let doc = Document::new(uri, 1, text);
 
         let res = get_completions(
             &doc,
             &Position {
                 line: 1,
-                character: 4,
+                character: 18,
             },
         )
         .unwrap();
         if let CompletionResponse::List(list) = res {
-            assert!(!list.items.iter().any(|item| item.label == "mov"));
-            assert!(!list.items.iter().any(|item| item.label == "lxi"));
-            assert!(list.items.iter().any(|item| item.label == "BYTE array"));
+            assert!(list.items.iter().any(|item| item.label == "BUFFER_SIZE"));
+            assert!(!list.items.iter().any(|item| item.label == "MAX_LIMIT"));
         } else {
-            panic!("expected list of completions");
+            panic!("expected list");
+        }
+    }
+
+    #[test]
+    fn test_len_directive_suggests_variables() {
+        let uri = Url::parse("file:///test.e8085").unwrap();
+        let text = r#"
+segment .data
+scores BYTE 10, 20
+
+segment .bss
+buffer BYTE 64
+
+segment .text
+main:
+    mvi A, %len 
+"#
+        .to_string();
+        let doc = Document::new(uri, 1, text);
+
+        let res = get_completions(
+            &doc,
+            &Position {
+                line: 9,
+                character: 16,
+            },
+        )
+        .unwrap();
+        if let CompletionResponse::List(list) = res {
+            assert!(list.items.iter().any(|item| item.label == "scores"));
+            assert!(list.items.iter().any(|item| item.label == "buffer"));
+            // Shouldn't suggest labels or non-variables
+            assert!(!list.items.iter().any(|item| item.label == "main"));
+        } else {
+            panic!("expected list");
+        }
+    }
+
+    #[test]
+    fn test_repeat_directive_operands() {
+        let uri = Url::parse("file:///test.e8085").unwrap();
+        let text = r#"
+%define COUNT 10
+
+segment .data
+arr BYTE %repeat 
+arr2 BYTE %repeat 10 
+"#
+        .to_string();
+        let doc = Document::new(uri, 1, text);
+
+        // 1. %repeat <cursor> (1st operand: count -> suggest constants)
+        let res_op1 = get_completions(
+            &doc,
+            &Position {
+                line: 4,
+                character: 17,
+            },
+        )
+        .unwrap();
+        if let CompletionResponse::List(list) = res_op1 {
+            assert!(list.items.iter().any(|item| item.label == "COUNT"));
+        } else {
+            panic!("expected list");
         }
 
-        let bss_text = "segment .bss\n    ".to_string();
-        let bss_doc = Document::new(uri, 1, bss_text);
-        let bss_res = get_completions(
-            &bss_doc,
+        // 2. %repeat 10 <cursor> (2nd operand: value -> None)
+        let res_op2 = get_completions(
+            &doc,
             &Position {
-                line: 1,
+                line: 5,
+                character: 21,
+            },
+        )
+        .unwrap();
+        if let CompletionResponse::List(list) = res_op2 {
+            assert!(list.items.is_empty(), "expected no suggestions for repeat 2nd operand");
+        } else {
+            panic!("expected list");
+        }
+    }
+
+    #[test]
+    fn test_data_and_bss_segment_variable_typing_flow() {
+        let uri = Url::parse("file:///test.e8085").unwrap();
+        let text = r#"
+%define MAX_LEN 32
+
+segment .data
+    
+my_var 
+my_var BYTE 
+
+segment .bss
+    
+buf 
+buf BYTE 
+"#
+        .to_string();
+        let doc = Document::new(uri, 1, text);
+
+        // 1. Empty line in .data -> no suggestions
+        let res_data_empty = get_completions(
+            &doc,
+            &Position {
+                line: 4,
                 character: 4,
             },
         )
         .unwrap();
-        if let CompletionResponse::List(list) = bss_res {
-            assert!(!list.items.iter().any(|item| item.label == "mov"));
-            assert!(list.items.iter().any(|item| item.label == "BYTE buffer"));
+        if let CompletionResponse::List(list) = res_data_empty {
+            assert!(list.items.is_empty(), "expected 0 completions on empty line in data");
         } else {
-            panic!("expected list of completions");
+            panic!("expected list");
+        }
+
+        // 2. Variable name provided: "my_var " -> suggest BYTE, WORD
+        let res_data_var = get_completions(
+            &doc,
+            &Position {
+                line: 5,
+                character: 7,
+            },
+        )
+        .unwrap();
+        if let CompletionResponse::List(list) = res_data_var {
+            assert!(list.items.iter().any(|item| item.label == "BYTE"));
+            assert!(list.items.iter().any(|item| item.label == "WORD"));
+        } else {
+            panic!("expected list");
+        }
+
+        // 3. Variable + size: "my_var BYTE " in .data -> suggest %repeat, %len, constants, string
+        let res_data_val = get_completions(
+            &doc,
+            &Position {
+                line: 6,
+                character: 12,
+            },
+        )
+        .unwrap();
+        if let CompletionResponse::List(list) = res_data_val {
+            assert!(list.items.iter().any(|item| item.label == "%repeat"));
+            assert!(list.items.iter().any(|item| item.label == "%len my_var"));
+            assert!(list.items.iter().any(|item| item.label == "MAX_LEN"));
+            assert!(list.items.iter().any(|item| item.label == "string"));
+        } else {
+            panic!("expected list");
+        }
+
+        // 4. Empty line in .bss -> no suggestions
+        let res_bss_empty = get_completions(
+            &doc,
+            &Position {
+                line: 9,
+                character: 4,
+            },
+        )
+        .unwrap();
+        if let CompletionResponse::List(list) = res_bss_empty {
+            assert!(list.items.is_empty(), "expected 0 completions on empty line in bss");
+        } else {
+            panic!("expected list");
+        }
+
+        // 5. Buffer name provided: "buf " -> suggest BYTE, WORD
+        let res_bss_buf = get_completions(
+            &doc,
+            &Position {
+                line: 10,
+                character: 4,
+            },
+        )
+        .unwrap();
+        if let CompletionResponse::List(list) = res_bss_buf {
+            assert!(list.items.iter().any(|item| item.label == "BYTE"));
+            assert!(list.items.iter().any(|item| item.label == "WORD"));
+        } else {
+            panic!("expected list");
+        }
+
+        // 6. Buffer + size: "buf BYTE " in .bss -> suggest %len, constants (NO %repeat)
+        let res_bss_val = get_completions(
+            &doc,
+            &Position {
+                line: 11,
+                character: 9,
+            },
+        )
+        .unwrap();
+        if let CompletionResponse::List(list) = res_bss_val {
+            assert!(list.items.iter().any(|item| item.label == "%len my_var"));
+            assert!(list.items.iter().any(|item| item.label == "MAX_LEN"));
+            assert!(!list.items.iter().any(|item| item.label == "%repeat"));
+        } else {
+            panic!("expected list");
         }
     }
 
@@ -1742,28 +2124,6 @@ main:
             assert!(!list.items.iter().any(|item| item.label == "already_exported"));
             assert!(!list.items.iter().any(|item| item.label == "mov"));
             assert!(!list.items.iter().any(|item| item.label == "segment .text"));
-        } else {
-            panic!("expected list");
-        }
-    }
-
-    #[test]
-    fn test_data_segment_repeat_and_directives() {
-        let uri = Url::parse("file:///test.e8085").unwrap();
-        let text = "segment .data\n    arr BYTE 10 ".to_string();
-        let doc = Document::new(uri, 1, text);
-
-        let res = get_completions(
-            &doc,
-            &Position {
-                line: 1,
-                character: 17,
-            },
-        )
-        .unwrap();
-        if let CompletionResponse::List(list) = res {
-            assert!(list.items.iter().any(|item| item.label == "%repeat"));
-            assert!(list.items.iter().any(|item| item.label == "%len"));
         } else {
             panic!("expected list");
         }
