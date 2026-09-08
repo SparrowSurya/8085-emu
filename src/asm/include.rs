@@ -170,6 +170,15 @@ fn tag_program_spans(program: &mut Program, file_id: u32) {
     for def in &mut program.defines {
         def.span.file_id = file_id;
     }
+    for m in &mut program.macros {
+        m.span.file_id = file_id;
+        for line in &mut m.body_lines {
+            line.span.file_id = file_id;
+            for tok in &mut line.tokens {
+                tok.span.file_id = file_id;
+            }
+        }
+    }
     for seg in &mut program.segments {
         match seg {
             Segment::Data(defs) => {
@@ -192,6 +201,15 @@ fn tag_program_spans(program: &mut Program, file_id: u32) {
                         | TextItem::ExternDecl(_, span) => {
                             span.file_id = file_id;
                         }
+                        TextItem::MacroDef(m) => {
+                            m.span.file_id = file_id;
+                            for line in &mut m.body_lines {
+                                line.span.file_id = file_id;
+                                for tok in &mut line.tokens {
+                                    tok.span.file_id = file_id;
+                                }
+                            }
+                        }
                         TextItem::Instr(ins) => {
                             ins.span.file_id = file_id;
                         }
@@ -208,6 +226,7 @@ fn resolve_program_includes(
     ctx: &mut IncludeContext,
 ) -> Result<Program, AsmError> {
     let mut merged_defines = Vec::new();
+    let mut merged_macros = Vec::new();
     let mut merged_externs = program.externs.clone();
     let mut merged_globals = program.globals.clone();
     let mut merged_data = Vec::new();
@@ -317,6 +336,9 @@ fn resolve_program_includes(
             }
         }
 
+        // Merge macros
+        merged_macros.extend(resolved_inc.macros);
+
         // Merge externs and globals
         merged_externs.extend(resolved_inc.externs);
         merged_globals.extend(resolved_inc.globals);
@@ -344,6 +366,9 @@ fn resolve_program_includes(
             merged_defines.push(d.clone());
         }
     }
+
+    // 2b. Add current program's macros
+    merged_macros.extend(program.macros.clone());
 
     // 3. Add current program's segments
     for seg in &program.segments {
@@ -377,6 +402,7 @@ fn resolve_program_includes(
     Ok(Program {
         includes: Vec::new(), // All includes are resolved
         defines: merged_defines,
+        macros: merged_macros,
         externs: merged_externs,
         globals: merged_globals,
         segments,

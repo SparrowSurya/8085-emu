@@ -202,6 +202,7 @@ pub fn get_completions(doc: &Document, position: &Position) -> Option<Completion
                     items.extend(get_missing_segment_completions(&present_segments));
                 } else {
                     items.extend(get_instruction_completions());
+                    items.extend(get_macro_completions(doc));
                     items.extend(get_text_directives(&present_segments));
                     items.extend(get_label_completions(doc, position));
                 }
@@ -576,7 +577,27 @@ fn get_instruction_operand_completions(
             }
         }
 
-        _ => None,
+        _ => {
+            if let Some(arg_count) = get_macro_arg_count(doc, &mnemonic) {
+                if arg_count == 0 {
+                    Some(vec![])
+                } else {
+                    let current_ops: Vec<&str> = operands_str.split(',').collect();
+                    if current_ops.len() <= arg_count {
+                        let last_op = current_ops.last().map(|s| s.trim()).unwrap_or("");
+                        if is_one_operand_satisfied(last_op) && current_ops.len() == arg_count {
+                            Some(vec![])
+                        } else {
+                            Some(get_macro_operand_completions(doc))
+                        }
+                    } else {
+                        Some(vec![])
+                    }
+                }
+            } else {
+                None
+            }
+        }
     }
 }
 
@@ -994,8 +1015,169 @@ fn get_constant_and_len_completions(doc: &Document) -> Vec<CompletionItem> {
     items
 }
 
+fn get_macro_operand_completions(doc: &Document) -> Vec<CompletionItem> {
+    let mut items = get_memory_symbol_completions(doc);
+    let (vars, _) = extract_variables_and_constants(doc);
+    let mut seen_len = HashSet::new();
+    for var in vars {
+        if seen_len.insert(var.name.clone()) {
+            items.push(CompletionItem {
+                label: format!("%len {}", var.name),
+                kind: Some(CompletionItemKind::FUNCTION),
+                detail: Some(format!("Byte length of {}", var.name)),
+                insert_text: Some(format!("%len {}", var.name)),
+                ..Default::default()
+            });
+        }
+    }
+    items
+}
+
+fn get_macro_arg_count(doc: &Document, macro_name: &str) -> Option<usize> {
+    for line in doc.text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("%macro") {
+            let parts: Vec<&str> = trimmed.split_whitespace().collect();
+            if parts.len() >= 2 && parts[1].eq_ignore_ascii_case(macro_name) {
+                return Some(parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0));
+            }
+        }
+    }
+    for line in doc.text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("%include") {
+            if let Some(start_quote) = line.find('"') {
+                if let Some(end_quote) = line[start_quote + 1..].find('"') {
+                    let rel_path = &line[start_quote + 1..start_quote + 1 + end_quote];
+                    if let Some(target_path) = resolve_relative_path(&doc.uri, rel_path) {
+                        if let Ok(content) = std::fs::read_to_string(&target_path) {
+                            for inc_line in content.lines() {
+                                let inc_trimmed = inc_line.trim();
+                                if inc_trimmed.starts_with("%macro") {
+                                    let parts: Vec<&str> = inc_trimmed.split_whitespace().collect();
+                                    if parts.len() >= 2 && parts[1].eq_ignore_ascii_case(macro_name) {
+                                        return Some(parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+fn get_macro_completions(doc: &Document) -> Vec<CompletionItem> {
+    let mut items = Vec::new();
+    let mut seen = HashSet::new();
+
+    // Local macros
+    for line in doc.text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("%macro") {
+            let parts: Vec<&str> = trimmed.split_whitespace().collect();
+            if parts.len() >= 2 {
+                let name = parts[1];
+                let count: usize = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+                if seen.insert(name.to_lowercase()) {
+                    let insert_text = if count == 0 {
+                        name.to_string()
+                    } else {
+                        let placeholders: Vec<String> = (1..=count)
+                            .map(|i| format!("${{{}:arg{}}}", i, i))
+                            .collect();
+                        format!("{} {}", name, placeholders.join(", "))
+                    };
+                    items.push(CompletionItem {
+                        label: name.to_string(),
+                        kind: Some(CompletionItemKind::FUNCTION),
+                        detail: Some(format!("Macro ({} arg{})", count, if count == 1 { "" } else { "s" })),
+                        insert_text: Some(insert_text),
+                        insert_text_format: Some(InsertTextFormat::SNIPPET),
+                        ..Default::default()
+                    });
+                }
+            }
+        }
+    }
+
+    // Included files
+    for line in doc.text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("%include") {
+            let quote_char = if line.contains('"') {
+                Some('"')
+            } else if line.contains('\'') {
+                Some('\'')
+            } else {
+                None
+            };
+            if let Some(q) = quote_char {
+                if let Some(start_quote) = line.find(q) {
+                    if let Some(end_quote_offset) = line[start_quote + 1..].find(q) {
+                        let rel_path = &line[start_quote + 1..start_quote + 1 + end_quote_offset];
+                        if let Some(target_path) = resolve_relative_path(&doc.uri, rel_path) {
+                            if let Ok(content) = std::fs::read_to_string(&target_path) {
+                                for inc_line in content.lines() {
+                                    let inc_trimmed = inc_line.trim();
+                                    if inc_trimmed.starts_with("%macro") {
+                                        let parts: Vec<&str> = inc_trimmed.split_whitespace().collect();
+                                        if parts.len() >= 2 {
+                                            let name = parts[1];
+                                            let count: usize = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+                                            if seen.insert(name.to_lowercase()) {
+                                                let insert_text = if count == 0 {
+                                                    name.to_string()
+                                                } else {
+                                                    let placeholders: Vec<String> = (1..=count)
+                                                        .map(|i| format!("${{{}:arg{}}}", i, i))
+                                                        .collect();
+                                                    format!("{} {}", name, placeholders.join(", "))
+                                                };
+                                                items.push(CompletionItem {
+                                                    label: name.to_string(),
+                                                    kind: Some(CompletionItemKind::FUNCTION),
+                                                    detail: Some(format!("Macro ({} arg{})", count, if count == 1 { "" } else { "s" })),
+                                                    insert_text: Some(insert_text),
+                                                    insert_text_format: Some(InsertTextFormat::SNIPPET),
+                                                    ..Default::default()
+                                                });
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    items
+}
+
 fn get_percent_directive_completions(seg_kind: Option<SegmentKind>) -> Vec<CompletionItem> {
     match seg_kind {
+        Some(SegmentKind::Text) => vec![
+            make_snippet_item(
+                "len",
+                "len ${1:var_name}",
+                "Compute byte length of a symbol",
+            ),
+            make_snippet_item(
+                "macro",
+                "macro ${1:macro_name} ${2:arg_count}\n\t$0\n%end",
+                "Define a macro with positional arguments",
+            ),
+            make_snippet_item(
+                "end",
+                "end",
+                "End of macro definition",
+            ),
+        ],
         Some(SegmentKind::Data) => vec![
             make_snippet_item(
                 "repeat",
@@ -1042,6 +1224,16 @@ fn get_percent_directive_completions(seg_kind: Option<SegmentKind>) -> Vec<Compl
                 "Define a constant value",
             ),
             make_snippet_item(
+                "macro",
+                "macro ${1:macro_name} ${2:arg_count}\n\t$0\n%end",
+                "Define a macro with positional arguments",
+            ),
+            make_snippet_item(
+                "end",
+                "end",
+                "End of macro definition",
+            ),
+            make_snippet_item(
                 "include",
                 "include \"${1}\"",
                 "Include an external source file",
@@ -1056,6 +1248,16 @@ fn get_header_directives(present: &HashSet<SegmentKind>) -> Vec<CompletionItem> 
             "%define",
             "%define ${1:NAME} ${2:value}",
             "Define a constant value",
+        ),
+        make_snippet_item(
+            "%macro",
+            "%macro ${1:macro_name} ${2:arg_count}\n\t$0\n%end",
+            "Define a macro with positional arguments",
+        ),
+        make_snippet_item(
+            "%end",
+            "%end",
+            "End of macro definition",
         ),
         make_snippet_item(
             "%include",

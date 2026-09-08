@@ -165,6 +165,31 @@ pub enum AsmErrorKind {
         /// The module defining it.
         module: String,
     },
+
+    // ---- macros ----
+    /// A macro was defined more than once.
+    DuplicateMacro(String),
+    /// Macro argument count was not a number literal.
+    InvalidMacroArgCount(String),
+    /// Invalid macro argument index (e.g. %0 or index > arg_count).
+    InvalidMacroArgRef { index: usize, max: usize },
+    /// Macro invocation was given the wrong number of arguments.
+    MacroArgCountMismatch {
+        name: String,
+        expected: usize,
+        found: usize,
+    },
+    /// A macro was started with `%macro` but never ended with `%end`.
+    UnterminatedMacro(String),
+    /// Macro name collides with another symbol or instruction.
+    MacroCollision {
+        name: String,
+        collision_with: String,
+    },
+    /// Invalid argument kind passed to macro (only variables, constants, and literals allowed).
+    InvalidMacroArg(String),
+    /// Macro recursion limit exceeded.
+    MacroRecursionLimitExceeded(String),
 }
 
 impl fmt::Display for AsmErrorKind {
@@ -229,6 +254,14 @@ impl fmt::Display for AsmErrorKind {
             PrivateSymbolAccess { symbol, module } => {
                 write!(f, "symbol {symbol:?} is private to module {module:?}")
             }
+            DuplicateMacro(s) => write!(f, "duplicate macro definition '{s}'"),
+            InvalidMacroArgCount(s) => write!(f, "macro argument count must be a numeric literal, found '{s}'"),
+            InvalidMacroArgRef { index, max } => write!(f, "invalid macro argument reference '%{index}' (macro has {max} parameter(s))"),
+            MacroArgCountMismatch { name, expected, found } => write!(f, "macro '{name}' expects {expected} argument(s) but {found} were given"),
+            UnterminatedMacro(s) => write!(f, "unterminated macro '{s}' (missing %end)"),
+            MacroCollision { name, collision_with } => write!(f, "macro name '{name}' collides with existing {collision_with}"),
+            InvalidMacroArg(s) => write!(f, "invalid macro argument '{s}': only variables, constants, and literals are allowed"),
+            MacroRecursionLimitExceeded(s) => write!(f, "macro expansion depth limit exceeded in macro '{s}'"),
         }
     }
 }

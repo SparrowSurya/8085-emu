@@ -15,6 +15,7 @@
     { "include": "#memory_instructions" },
     { "include": "#mnemonics" },
     { "include": "#var_declarations" },
+    { "include": "#macro_calls" },
     { "include": "#registers" },
     { "include": "#constants" },
     { "include": "#numbers" },
@@ -33,6 +34,22 @@
     },
     "directives": {
       "patterns": [
+        {
+          "match": "(%(?i:macro))\\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\\s+([0-9]+))?",
+          "captures": {
+            "1": { "name": "keyword.control.directive.macro.e8085 keyword.control.directive.e8085" },
+            "2": { "name": "keyword.control.directive.macro.name.e8085 keyword.control.directive.e8085" },
+            "3": { "name": "constant.numeric.decimal.e8085" }
+          }
+        },
+        {
+          "match": "(%(?i:end))\\b",
+          "name": "keyword.control.directive.macro.end.e8085"
+        },
+        {
+          "name": "constant.numeric.decimal.macro.parameter.e8085",
+          "match": "%[0-9]+\\b"
+        },
         {
           "match": "(%(?i:include))\\s+(\"[^\"]*\")",
           "captures": {
@@ -56,7 +73,7 @@
         },
         {
           "name": "keyword.control.directive.e8085",
-          "match": "(?i)%(define|repeat|len|include)\\b"
+          "match": "(?i)%(define|repeat|len|include|macro|end)\\b"
         }
       ]
     },
@@ -150,19 +167,19 @@
         {
           "match": "(?i)\\b(JMP|JZ|JNZ|JC|JNC|JP|JM|JPE|JPO|CALL|CZ|CNZ|CC|CNC|CP|CM|CPE|CPO)\\b\\s+(\\.[a-zA-Z_][a-zA-Z0-9_]*)",
           "captures": {
-            "1": { "name": "keyword.control.flow.mnemonic.e8085" },
+            "1": { "name": "keyword.operator.mnemonic.control.flow.e8085" },
             "2": { "name": "entity.name.function.label.local.target.e8085" }
           }
         },
         {
           "match": "(?i)\\b(JMP|JZ|JNZ|JC|JNC|JP|JM|JPE|JPO|CALL|CZ|CNZ|CC|CNC|CP|CM|CPE|CPO)\\b\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
           "captures": {
-            "1": { "name": "keyword.control.flow.mnemonic.e8085" },
+            "1": { "name": "keyword.operator.mnemonic.control.flow.e8085" },
             "2": { "name": "entity.name.function.label.target.e8085" }
           }
         },
         {
-          "name": "keyword.control.flow.mnemonic.e8085",
+          "name": "keyword.operator.mnemonic.control.flow.e8085",
           "match": "(?i)\\b(JMP|JZ|JNZ|JC|JNC|JP|JM|JPE|JPO|CALL|CZ|CNZ|CC|CNC|CP|CM|CPE|CPO|RET|RZ|RNZ|RC|RNC|RP|RM|RPE|RPO|RST)\\b"
         }
       ]
@@ -201,8 +218,24 @@
           "match": "(?i)\\b(IN|OUT)\\b"
         },
         {
-          "name": "keyword.other.mnemonic.control.e8085",
+          "name": "keyword.operator.mnemonic.control.e8085",
           "match": "(?i)\\b(NOP|HLT|EI|DI|RIM|SIM)\\b"
+        }
+      ]
+    },
+    "macro_calls": {
+      "patterns": [
+        {
+          "match": "(?<=:)\\s*(?!(?i:MOV|MVI|LXI|LDA|STA|LDAX|STAX|LHLD|SHLD|XCHG|XTHL|SPHL|PCHL|ADD|ADI|ADC|ACI|SUB|SUI|SBB|SBI|INR|DCR|INX|DCX|DAD|DAA|ANA|ANI|XRA|XRI|ORA|ORI|CMP|CPI|CMA|CMC|STC|RLC|RRC|RAL|RAR|PUSH|POP|IN|OUT|NOP|HLT|EI|DI|RIM|SIM|JMP|JZ|JNZ|JC|JNC|JP|JM|JPE|JPO|CALL|CZ|CNZ|CC|CNC|CP|CM|CPE|CPO|RET|RZ|RNZ|RC|RNC|RP|RM|RPE|RPO|RST|DB|DW|DS|GLOBAL|EXTERN|SEGMENT|BYTE|WORD)\\b)([a-zA-Z_][a-zA-Z0-9_]*)\\b",
+          "captures": {
+            "1": { "name": "keyword.control.directive.macro.call.e8085 keyword.control.directive.e8085" }
+          }
+        },
+        {
+          "match": "^\\s*(?!(?i:MOV|MVI|LXI|LDA|STA|LDAX|STAX|LHLD|SHLD|XCHG|XTHL|SPHL|PCHL|ADD|ADI|ADC|ACI|SUB|SUI|SBB|SBI|INR|DCR|INX|DCX|DAD|DAA|ANA|ANI|XRA|XRI|ORA|ORI|CMP|CPI|CMA|CMC|STC|RLC|RRC|RAL|RAR|PUSH|POP|IN|OUT|NOP|HLT|EI|DI|RIM|SIM|JMP|JZ|JNZ|JC|JNC|JP|JM|JPE|JPO|CALL|CZ|CNZ|CC|CNC|CP|CM|CPE|CPO|RET|RZ|RNZ|RC|RNC|RP|RM|RPE|RPO|RST|DB|DW|DS|GLOBAL|EXTERN|SEGMENT|BYTE|WORD)\\b)([a-zA-Z_][a-zA-Z0-9_]*)\\b",
+          "captures": {
+            "1": { "name": "keyword.control.directive.macro.call.e8085 keyword.control.directive.e8085" }
+          }
         }
       ]
     },
@@ -280,8 +313,11 @@
     "characters": {
       "patterns": [
         {
-          "name": "constant.numeric.character.e8085 constant.character.literal.e8085",
-          "match": "'([^'\\\\]|\\\\([nrt0\\\\\"'xX]|x[0-9a-fA-F]{2}|.))'"
+          "name": "constant.language.character.literal.e8085",
+          "match": "'([^'\\\\]|(\\\\([nrt0\\\\\"'xX]|x[0-9a-fA-F]{2}|.)))'",
+          "captures": {
+            "2": { "name": "constant.character.escape.e8085" }
+          }
         }
       ]
     },

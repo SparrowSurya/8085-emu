@@ -7,6 +7,7 @@ This extension provides rich syntax highlighting, language configuration, and se
 ## Features
 
 ### 1. Directives & Preprocessor
+- `%macro NAME ARG_COUNT ... %end` — Macro definition with positional argument expansion (`%1`, `%2`, ...).
 - `%define IDENTIFIER VALUE` — 1-byte constant definitions ($\le \text{0xFF}$, 1-byte character literal `'x'`, or 1-byte string).
 - `%repeat COUNT VALUE` — Repeated data expansion in `.data`.
 - `%len IDENTIFIER` — Byte-length evaluation for variables (`%len var`).

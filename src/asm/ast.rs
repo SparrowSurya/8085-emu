@@ -7,19 +7,47 @@
 use super::encode::{AReg8, AReg16};
 use super::error::Span;
 
-/// A whole program: leading `%include`s, `%define`s, `extern`/`global` declarations, and segments.
+/// A whole program: leading `%include`s, `%define`s, `%macro`s, `extern`/`global` declarations, and segments.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Program {
     /// Top-level `%include "path"` directives.
     pub includes: Vec<Include>,
     /// Top-level constant definitions.
     pub defines: Vec<Define>,
+    /// Top-level macro definitions.
+    pub macros: Vec<MacroDef>,
     /// External symbols declared via `extern <name>`.
     pub externs: Vec<String>,
     /// Exported global symbols declared via `global <name>`.
     pub globals: Vec<String>,
     /// Segments in source order.
     pub segments: Vec<Segment>,
+}
+
+/// A `%macro name count ... %end` definition.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MacroDef {
+    /// Macro name.
+    pub name: String,
+    /// Expected argument count (strict non-negative number literal).
+    pub arg_count: usize,
+    /// Macro body lines (unexpanded template text).
+    pub body_lines: Vec<MacroLine>,
+    /// Source position of `%macro`.
+    pub span: Span,
+    /// Doc comments immediately preceding the macro definition.
+    pub doc_comment: Option<String>,
+}
+
+/// One line in a macro body.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MacroLine {
+    /// The raw trimmed line of text.
+    pub text: String,
+    /// The lexed tokens for this line.
+    pub tokens: Vec<crate::asm::token::Token>,
+    /// Source position.
+    pub span: Span,
 }
 
 /// A `%include "path"` directive.
@@ -123,6 +151,8 @@ pub enum TextItem {
     GlobalDecl(String, Span),
     /// Standalone `extern name` declaration.
     ExternDecl(String, Span),
+    /// An inline macro definition inside .text.
+    MacroDef(MacroDef),
     /// An instruction.
     Instr(Instr),
 }

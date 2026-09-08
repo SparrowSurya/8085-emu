@@ -14,5 +14,11 @@
     ["\"", "\""],
     ["'", "'"]
   ],
-  "wordPattern": "(%[a-zA-Z_][a-zA-Z0-9_]*)|(\\.[a-zA-Z_][a-zA-Z0-9_]*)|([a-zA-Z_][a-zA-Z0-9_]*)"
+  "folding": {
+    "markers": {
+      "start": "^\\s*%(?i:macro)\\b",
+      "end": "^\\s*%(?i:end)\\b"
+    }
+  },
+  "wordPattern": "(%[0-9]+)|(%[a-zA-Z_][a-zA-Z0-9_]*)|(\\.[a-zA-Z_][a-zA-Z0-9_]*)|([a-zA-Z_][a-zA-Z0-9_]*)"
 }

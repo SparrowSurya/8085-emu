@@ -142,7 +142,8 @@ pub fn compute_diagnostics_with_externs(
     }
 
     // 2. Static Analysis: CFG Reachability, Halt Check, Unused Variables, Unused Labels
-    if let Some(program) = parsed_program {
+    if let Some(mut program) = parsed_program {
+        let _ = crate::asm::expand_macros(&mut program);
         run_static_analysis(doc, &program, &mut diagnostics);
     }
 
@@ -603,7 +604,8 @@ fn check_cfg_and_halt(doc: &Document, program: &Program, diagnostics: &mut Vec<D
             | TextItem::GlobalLabel(_, _)
             | TextItem::LocalLabel(_, _)
             | TextItem::GlobalDecl(_, _)
-            | TextItem::ExternDecl(_, _) => {
+            | TextItem::ExternDecl(_, _)
+            | TextItem::MacroDef(_) => {
                 // Fall through to next item
                 if idx + 1 < text_items.len() {
                     queue.push_back(idx + 1);

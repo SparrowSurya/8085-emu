@@ -1095,6 +1095,22 @@ fn get_directive_hover(directive: &str) -> Option<&'static str> {
              %define BUFFER_SIZE 64\n\
              ```",
         ),
+        "%macro" => Some(
+            "**Directive** `%macro NAME ARG_COUNT ... %end`\n\n\
+             Defines a reusable code macro with positional arguments `%1`, `%2`, ..., `%N`.\n\n\
+             **Example:**\n\
+             ```e8085\n\
+             %macro mPrint 2\n\
+                 lxi HL, %1\n\
+                 mvi B, %2\n\
+                 call print\n\
+             %end\n\
+             ```",
+        ),
+        "%end" => Some(
+            "**Directive** `%end`\n\n\
+             Marks the end of a `%macro` definition block.",
+        ),
         "%include" => Some(
             "**Directive** `%include \"path/to/file.e8085\"`\n\n\
              Textually embeds and compiles the referenced assembly source file.\n\n\
@@ -1314,6 +1330,33 @@ fn get_user_symbol_hover_in_single_doc(
                 let val = &trimmed[trimmed.find(parts[2]).unwrap_or(0)..];
                 let doc_comment = collect_preceding_comments(lines, i);
                 let mut out = format!("```\n%define {} {}\n```", symbol, val);
+                if !doc_comment.is_empty() {
+                    out.push_str("\n\n");
+                    out.push_str(&doc_comment);
+                }
+                return Some(out);
+            }
+        }
+    }
+
+    // 4b. Check %macro definitions
+    for (i, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("%macro") {
+            let parts: Vec<&str> = trimmed.split_whitespace().collect();
+            if parts.len() >= 2 && parts[1] == symbol {
+                let doc_comment = collect_preceding_comments(lines, i);
+                let mut body = Vec::new();
+                body.push(trimmed.to_string());
+                for next_line in &lines[i + 1..] {
+                    let next_trimmed = next_line.trim();
+                    body.push(next_line.to_string());
+                    if next_trimmed.starts_with("%end") {
+                        break;
+                    }
+                }
+                let body_text = body.join("\n");
+                let mut out = format!("```e8085\n{}\n```", body_text);
                 if !doc_comment.is_empty() {
                     out.push_str("\n\n");
                     out.push_str(&doc_comment);

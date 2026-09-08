@@ -21,6 +21,20 @@ pub fn parse(tokens: Vec<Token>) -> Result<Program, AsmError> {
     .program()
 }
 
+/// Parse a single line's tokens into a [`TextItem`].
+pub fn parse_text_item(mut tokens: Vec<Token>) -> Result<TextItem, AsmError> {
+    let span = tokens.last().map(|t| t.span).unwrap_or_default();
+    tokens.push(Token::new(TokenKind::Newline, span));
+    tokens.push(Token::new(TokenKind::Eof, span));
+    Parser {
+        toks: tokens,
+        pos: 0,
+        seen_globals: std::collections::HashSet::new(),
+        seen_externs: std::collections::HashSet::new(),
+    }
+    .parse_single_text_item()
+}
+
 struct Parser {
     toks: Vec<Token>,
     pos: usize,
@@ -157,17 +171,20 @@ impl Parser {
     fn program(&mut self) -> Result<Program, AsmError> {
         let mut includes = Vec::new();
         let mut defines = Vec::new();
+        let mut macros = Vec::new();
         let mut externs = Vec::new();
         let mut globals = Vec::new();
         let mut segments = Vec::new();
 
-        // Top-level directives: %include, %define, extern, global
+        // Top-level directives: %include, %define, %macro, extern, global
         loop {
             self.skip_newlines();
             if self.is_include_ahead() {
                 includes.push(self.include()?);
             } else if self.is_define_ahead() {
                 defines.push(self.define()?);
+            } else if self.is_macro_ahead() {
+                macros.push(self.parse_macro_def()?);
             } else if self.is_extern_ahead() {
                 let span = self.span();
                 self.bump(); // 'extern'
@@ -203,12 +220,16 @@ impl Parser {
             if self.is_include_ahead() {
                 return Err(self.err(AsmErrorKind::DefineAfterSegment));
             }
+            if self.is_macro_ahead() {
+                return Err(self.err(AsmErrorKind::DefineAfterSegment));
+            }
             segments.push(self.segment(&mut seen_segments)?);
         }
 
         Ok(Program {
             includes,
             defines,
+            macros,
             externs,
             globals,
             segments,
@@ -223,6 +244,16 @@ impl Parser {
     fn is_define_ahead(&self) -> bool {
         matches!(self.peek(), TokenKind::Percent)
             && matches!(self.peek_at(1), TokenKind::Ident(s) if s.eq_ignore_ascii_case("define"))
+    }
+
+    fn is_macro_ahead(&self) -> bool {
+        matches!(self.peek(), TokenKind::Percent)
+            && matches!(self.peek_at(1), TokenKind::Ident(s) if s.eq_ignore_ascii_case("macro"))
+    }
+
+    fn is_end_ahead(&self) -> bool {
+        matches!(self.peek(), TokenKind::Percent)
+            && matches!(self.peek_at(1), TokenKind::Ident(s) if s.eq_ignore_ascii_case("end"))
     }
 
     fn is_extern_ahead(&self) -> bool {
@@ -261,6 +292,88 @@ impl Parser {
         let value = self.value()?;
         self.expect_newline()?;
         Ok(Define { name, value, span })
+    }
+
+    fn parse_macro_def(&mut self) -> Result<MacroDef, AsmError> {
+        let span = self.span();
+        self.bump(); // %
+        self.bump(); // macro
+
+        let (name, nspan) = self.ident()?;
+        if keyword::is_reserved(&name) {
+            return Err(AsmError::new(
+                nspan,
+                AsmErrorKind::MacroCollision {
+                    name,
+                    collision_with: "instruction".to_string(),
+                },
+            ));
+        }
+
+        let arg_count = match self.peek() {
+            TokenKind::Number(n) => {
+                let val = *n as usize;
+                self.bump();
+                val
+            }
+            TokenKind::Ident(s) => {
+                let s_clone = s.clone();
+                let sp = self.span();
+                self.bump();
+                return Err(AsmError::new(sp, AsmErrorKind::InvalidMacroArgCount(s_clone)));
+            }
+            _ => {
+                let sp = self.span();
+                let found = describe(self.peek());
+                self.bump();
+                return Err(AsmError::new(sp, AsmErrorKind::InvalidMacroArgCount(found)));
+            }
+        };
+
+        self.expect_newline()?;
+
+        let mut body_lines = Vec::new();
+        loop {
+            while matches!(self.peek(), TokenKind::Newline) {
+                self.bump();
+            }
+
+            if self.at_eof() {
+                return Err(AsmError::new(span, AsmErrorKind::UnterminatedMacro(name)));
+            }
+
+            if self.is_end_ahead() {
+                self.bump(); // %
+                self.bump(); // end
+                self.expect_newline()?;
+                break;
+            }
+
+            let line_span = self.span();
+            let mut line_tokens = Vec::new();
+            while !matches!(self.peek(), TokenKind::Newline | TokenKind::Eof) {
+                let tok = self.toks[self.pos].clone();
+                self.bump();
+                line_tokens.push(tok);
+            }
+            self.expect_newline()?;
+
+            if !line_tokens.is_empty() {
+                body_lines.push(MacroLine {
+                    text: String::new(),
+                    tokens: line_tokens,
+                    span: line_span,
+                });
+            }
+        }
+
+        Ok(MacroDef {
+            name,
+            arg_count,
+            body_lines,
+            span,
+            doc_comment: None,
+        })
     }
 
     // ── segments ───────────────────────────────────────────────────────────
@@ -375,71 +488,77 @@ impl Parser {
             if self.at_body_end() {
                 break;
             }
-
-            // 1. `extern NAME` declaration
-            if self.is_extern_ahead() {
-                let span = self.span();
-                self.bump(); // 'extern'
-                let (name, nspan) = self.ident()?;
-                self.expect_newline()?;
-                self.declare_extern(&name, nspan)?;
-                items.push(TextItem::ExternDecl(name, span));
-                continue;
-            }
-
-            // 2. `global NAME:` (inline) or `global NAME` (standalone)
-            if self.is_global_ahead() {
-                let span = self.span();
-                self.bump(); // 'global'
-                let (name, nspan) = self.ident()?;
-                self.declare_global(&name, nspan)?;
-                if matches!(self.peek(), TokenKind::Colon) {
-                    self.bump(); // ':'
-                    self.expect_newline()?;
-                    items.push(TextItem::GlobalLabel(name, span));
-                } else {
-                    self.expect_newline()?;
-                    items.push(TextItem::GlobalDecl(name, span));
-                }
-                continue;
-            }
-
-            // 3. Local label: `.NAME:` on its own line
-            if matches!(self.peek(), TokenKind::Period)
-                && matches!(self.peek_at(1), TokenKind::Ident(_))
-                && matches!(self.peek_at(2), TokenKind::Colon)
-            {
-                let span = self.span();
-                self.bump(); // '.'
-                let (name, _) = self.ident()?;
-                self.bump(); // ':'
-                self.expect_newline()?;
-                items.push(TextItem::LocalLabel(name, span));
-                continue;
-            }
-
-            // 4. Standard label: `IDENT ':'` on its own line
-            if matches!(self.peek(), TokenKind::Ident(_))
-                && matches!(self.peek_at(1), TokenKind::Colon)
-            {
-                let (name, span) = self.name()?;
-                self.bump(); // ':'
-                self.expect_newline()?;
-                items.push(TextItem::Label(name, span));
-                continue;
-            }
-
-            // Otherwise an instruction.
-            let (mnemonic, span) = self.ident()?;
-            let operands = self.operands()?;
-            self.expect_newline()?;
-            items.push(TextItem::Instr(Instr {
-                mnemonic,
-                operands,
-                span,
-            }));
+            items.push(self.parse_single_text_item()?);
         }
         Ok(items)
+    }
+
+    fn parse_single_text_item(&mut self) -> Result<TextItem, AsmError> {
+        self.skip_newlines();
+
+        if self.is_macro_ahead() {
+            let m = self.parse_macro_def()?;
+            return Ok(TextItem::MacroDef(m));
+        }
+
+        // 1. `extern NAME` declaration
+        if self.is_extern_ahead() {
+            let span = self.span();
+            self.bump(); // 'extern'
+            let (name, nspan) = self.ident()?;
+            self.expect_newline()?;
+            self.declare_extern(&name, nspan)?;
+            return Ok(TextItem::ExternDecl(name, span));
+        }
+
+        // 2. `global NAME:` (inline) or `global NAME` (standalone)
+        if self.is_global_ahead() {
+            let span = self.span();
+            self.bump(); // 'global'
+            let (name, nspan) = self.ident()?;
+            self.declare_global(&name, nspan)?;
+            if matches!(self.peek(), TokenKind::Colon) {
+                self.bump(); // ':'
+                self.expect_newline()?;
+                return Ok(TextItem::GlobalLabel(name, span));
+            } else {
+                self.expect_newline()?;
+                return Ok(TextItem::GlobalDecl(name, span));
+            }
+        }
+
+        // 3. Local label: `.NAME:` on its own line
+        if matches!(self.peek(), TokenKind::Period)
+            && matches!(self.peek_at(1), TokenKind::Ident(_))
+            && matches!(self.peek_at(2), TokenKind::Colon)
+        {
+            let span = self.span();
+            self.bump(); // '.'
+            let (name, _) = self.ident()?;
+            self.bump(); // ':'
+            self.expect_newline()?;
+            return Ok(TextItem::LocalLabel(name, span));
+        }
+
+        // 4. Standard label: `IDENT ':'` on its own line
+        if matches!(self.peek(), TokenKind::Ident(_))
+            && matches!(self.peek_at(1), TokenKind::Colon)
+        {
+            let (name, span) = self.name()?;
+            self.bump(); // ':'
+            self.expect_newline()?;
+            return Ok(TextItem::Label(name, span));
+        }
+
+        // Otherwise an instruction or macro call.
+        let (mnemonic, span) = self.ident()?;
+        let operands = self.operands()?;
+        self.expect_newline()?;
+        Ok(TextItem::Instr(Instr {
+            mnemonic,
+            operands,
+            span,
+        }))
     }
 
     fn size(&mut self) -> Result<Size, AsmError> {
@@ -466,9 +585,6 @@ impl Parser {
         while matches!(self.peek(), TokenKind::Comma) {
             self.bump();
             ops.push(self.operand()?);
-            if ops.len() > 2 && matches!(self.peek(), TokenKind::Comma) {
-                return Err(self.err(AsmErrorKind::TooManyOperands));
-            }
         }
         Ok(ops)
     }
@@ -641,6 +757,7 @@ mod tests {
             TextItem::LocalLabel(_, s) => *s,
             TextItem::GlobalDecl(_, s) => *s,
             TextItem::ExternDecl(_, s) => *s,
+            TextItem::MacroDef(m) => m.span,
             TextItem::Instr(i) => i.span,
         }
     }

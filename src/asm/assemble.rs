@@ -277,12 +277,13 @@ pub fn assemble_with_full_context(
     let raw_program = parse(lex(src)?)?;
     let cur_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let b_dir = base_dir.unwrap_or(&cur_dir);
-    let program = super::include::resolve_includes_with_main_and_root(
+    let mut program = super::include::resolve_includes_with_main_and_root(
         main_file,
         b_dir,
         project_root,
         &raw_program,
     )?;
+    super::macro_expander::expand_macros(&mut program)?;
 
     let (image, _symbols, _listing) =
         Assembler::new(&program, src, external_symbols.clone(), Vec::new()).run()?;
@@ -309,12 +310,13 @@ pub fn assemble_and_link_with_file(
     let raw_program = parse(lex(src)?)?;
     let cur_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let b_dir = base_dir.unwrap_or(&cur_dir);
-    let program = super::include::resolve_includes_with_main_and_root(
+    let mut program = super::include::resolve_includes_with_main_and_root(
         main_file,
         b_dir,
         project_root,
         &raw_program,
     )?;
+    super::macro_expander::expand_macros(&mut program)?;
 
     let (image, _symbols, _listing) =
         Assembler::new(&program, src, HashMap::new(), linked_containers.to_vec()).run()?;
@@ -343,7 +345,8 @@ pub fn assemble_full_with_file(
     let raw_program = parse(lex(src)?)?;
     let cur_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let b_dir = base_dir.unwrap_or(&cur_dir);
-    let resolved = super::include::resolve_includes_with_sources(main_file, src, b_dir, &raw_program)?;
+    let mut resolved = super::include::resolve_includes_with_sources(main_file, src, b_dir, &raw_program)?;
+    super::macro_expander::expand_macros(&mut resolved.program)?;
 
     let file_table = resolved
         .file_table
@@ -361,7 +364,8 @@ pub fn assemble_full_with_file(
 pub fn assemble_with_symbols(src: &str) -> Result<(LoadImage, BTreeMap<String, u16>), AsmError> {
     let raw_program = parse(lex(src)?)?;
     let cur_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let program = super::include::resolve_includes(&cur_dir, &raw_program)?;
+    let mut program = super::include::resolve_includes(&cur_dir, &raw_program)?;
+    super::macro_expander::expand_macros(&mut program)?;
 
     let (image, symbols, _listing) =
         Assembler::new(&program, src, HashMap::new(), Vec::new()).run()?;
@@ -372,7 +376,8 @@ pub fn assemble_with_symbols(src: &str) -> Result<(LoadImage, BTreeMap<String, u
 pub fn assemble_listing(src: &str) -> Result<(LoadImage, Vec<ListingRow>), AsmError> {
     let raw_program = parse(lex(src)?)?;
     let cur_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let program = super::include::resolve_includes(&cur_dir, &raw_program)?;
+    let mut program = super::include::resolve_includes(&cur_dir, &raw_program)?;
+    super::macro_expander::expand_macros(&mut program)?;
 
     let (image, _symbols, listing) =
         Assembler::new(&program, src, HashMap::new(), Vec::new()).run()?;
@@ -798,6 +803,7 @@ impl<'a> Assembler<'a> {
                                 file_path,
                             });
                         }
+                        TextItem::MacroDef(_) => {}
                         TextItem::Instr(ins) => {
                             let ops =
                                 self.final_operands(ins, &symtab, current_parent_label.as_deref())?;
@@ -1083,6 +1089,7 @@ impl<'a> Assembler<'a> {
                             }
                         }
                         TextItem::ExternDecl(_name, _span) => {}
+                        TextItem::MacroDef(_) => {}
                         TextItem::Instr(ins) => {
                             // Length is value-independent, so encode with zero placeholders.
                             let zero_ops =
@@ -1123,7 +1130,8 @@ impl<'a> Assembler<'a> {
     ) -> Result<Vec<Operand>, AsmError> {
         ins.operands
             .iter()
-            .map(|p| self.operand(p, ins.span, None, parent_label, Some(&ins.mnemonic)))
+            .enumerate()
+            .map(|(i, p)| self.operand(p, ins.span, None, parent_label, Some(&ins.mnemonic), i))
             .collect()
     }
 
@@ -1136,7 +1144,8 @@ impl<'a> Assembler<'a> {
     ) -> Result<Vec<Operand>, AsmError> {
         ins.operands
             .iter()
-            .map(|p| self.operand(p, ins.span, Some(symtab), parent_label, Some(&ins.mnemonic)))
+            .enumerate()
+            .map(|(i, p)| self.operand(p, ins.span, Some(symtab), parent_label, Some(&ins.mnemonic), i))
             .collect()
     }
 
@@ -1149,6 +1158,7 @@ impl<'a> Assembler<'a> {
         symtab: Option<&HashMap<String, u16>>,
         parent_label: Option<&str>,
         mnemonic: Option<&str>,
+        op_idx: usize,
     ) -> Result<Operand, AsmError> {
         if let Some(m) = mnemonic {
             if is_branch_mnemonic(m) {
@@ -1189,6 +1199,123 @@ impl<'a> Assembler<'a> {
                         ));
                     }
                     _ => {}
+                }
+            }
+
+            if is_imm8_operand(m, op_idx) {
+                match p {
+                    POperand::Sym(name) => {
+                        if let Some(dval) = self.defines.get(name) {
+                            match dval {
+                                DVal::Num(n) if *n > 0xFF => {
+                                    return Err(AsmError::new(
+                                        span,
+                                        AsmErrorKind::ImmediateOutOfRange {
+                                            value: *n,
+                                            max: 0xFF,
+                                        },
+                                    ));
+                                }
+                                _ => {}
+                            }
+                        } else if self.data_vars.iter().any(|v| v.name == *name) {
+                            return Err(AsmError::new(
+                                span,
+                                AsmErrorKind::BadOperand {
+                                    mnemonic: m.to_string(),
+                                    detail: format!(
+                                        "expected 8-bit immediate value, found 16-bit variable '{name}'"
+                                    ),
+                                },
+                            ));
+                        } else if self.bss_vars.iter().any(|v| v.name == *name) {
+                            return Err(AsmError::new(
+                                span,
+                                AsmErrorKind::BadOperand {
+                                    mnemonic: m.to_string(),
+                                    detail: format!(
+                                        "expected 8-bit immediate value, found 16-bit variable '{name}'"
+                                    ),
+                                },
+                            ));
+                        } else if self.external_symbols.contains_key(name) {
+                            return Err(AsmError::new(
+                                span,
+                                AsmErrorKind::BadOperand {
+                                    mnemonic: m.to_string(),
+                                    detail: format!(
+                                        "expected 8-bit immediate value, found 16-bit external symbol '{name}'"
+                                    ),
+                                },
+                            ));
+                        } else if let Some(t) = symtab {
+                            if t.contains_key(name)
+                                || parent_label
+                                    .map_or(false, |parent| t.contains_key(&format!("{parent}.{name}")))
+                            {
+                                return Err(AsmError::new(
+                                    span,
+                                    AsmErrorKind::BadOperand {
+                                        mnemonic: m.to_string(),
+                                        detail: format!(
+                                            "expected 8-bit immediate value, found 16-bit label '{name}'"
+                                        ),
+                                    },
+                                ));
+                            }
+                        }
+                    }
+                    POperand::LocalSym(name) => {
+                        return Err(AsmError::new(
+                            span,
+                            AsmErrorKind::BadOperand {
+                                mnemonic: m.to_string(),
+                                detail: format!(
+                                    "expected 8-bit immediate value, found 16-bit local label '.{name}'"
+                                ),
+                            },
+                        ));
+                    }
+                    POperand::Num(n) => {
+                        if *n > 0xFF {
+                            return Err(AsmError::new(
+                                span,
+                                AsmErrorKind::ImmediateOutOfRange {
+                                    value: *n,
+                                    max: 0xFF,
+                                },
+                            ));
+                        }
+                    }
+                    POperand::Len(name) => {
+                        if symtab.is_some() {
+                            let len = self.len_of(name, span)?;
+                            if len > 0xFF {
+                                return Err(AsmError::new(
+                                    span,
+                                    AsmErrorKind::ImmediateOutOfRange {
+                                        value: len,
+                                        max: 0xFF,
+                                    },
+                                ));
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            if is_imm16_operand(m, op_idx) {
+                if let POperand::Num(n) = p {
+                    if *n > 0xFFFF {
+                        return Err(AsmError::new(
+                            span,
+                            AsmErrorKind::ImmediateOutOfRange {
+                                value: *n,
+                                max: 0xFFFF,
+                            },
+                        ));
+                    }
                 }
             }
         }
@@ -1248,6 +1375,38 @@ impl<'a> Assembler<'a> {
                 }
             }
         })
+    }
+}
+
+fn is_imm8_operand(m: &str, op_idx: usize) -> bool {
+    let m_upper = m.to_ascii_uppercase();
+    match (m_upper.as_str(), op_idx) {
+        ("MVI", 1) => true,
+        ("MOV", 1) => true,
+        ("ADI", 0) => true,
+        ("ACI", 0) => true,
+        ("SUI", 0) => true,
+        ("SBI", 0) => true,
+        ("ANI", 0) => true,
+        ("XRI", 0) => true,
+        ("ORI", 0) => true,
+        ("CPI", 0) => true,
+        ("IN", 0) => true,
+        ("OUT", 0) => true,
+        ("RST", 0) => true,
+        _ => false,
+    }
+}
+
+fn is_imm16_operand(m: &str, op_idx: usize) -> bool {
+    let m_upper = m.to_ascii_uppercase();
+    match (m_upper.as_str(), op_idx) {
+        ("LXI", 1) => true,
+        ("LDA", 0) => true,
+        ("STA", 0) => true,
+        ("LHLD", 0) => true,
+        ("SHLD", 0) => true,
+        _ => false,
     }
 }
 

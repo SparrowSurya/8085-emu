@@ -200,6 +200,24 @@ fn find_symbol_definition_in_doc(doc: &Document, symbol: &str) -> Option<Locatio
                 },
             });
         }
+
+        // 4. Check %macro definition
+        if trimmed.starts_with("%macro") && parts.len() >= 2 && parts[1] == symbol {
+            let char_offset = line.find(symbol).unwrap_or(0) as u32;
+            return Some(Location {
+                uri: doc.uri.clone(),
+                range: Range {
+                    start: Position {
+                        line: i as u32,
+                        character: char_offset,
+                    },
+                    end: Position {
+                        line: i as u32,
+                        character: char_offset + symbol.len() as u32,
+                    },
+                },
+            });
+        }
     }
 
     None

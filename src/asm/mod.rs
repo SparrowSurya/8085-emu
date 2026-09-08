@@ -16,6 +16,7 @@ pub mod include;
 pub mod inspect;
 pub mod keyword;
 pub mod lexer;
+pub mod macro_expander;
 pub mod parser;
 pub mod token;
 
@@ -24,7 +25,7 @@ pub use assemble::{
     assemble_full_with_file, assemble_listing, assemble_with_full_context, assemble_with_options,
     assemble_with_symbols, load,
 };
-pub use ast::{BssDecl, DataDef, Define, Instr, POperand, Program, Segment, Size, TextItem, Value};
+pub use ast::{BssDecl, DataDef, Define, Instr, MacroDef, MacroLine, POperand, Program, Segment, Size, TextItem, Value};
 pub use container::{BinaryContainer, ContainerHeader};
 pub use encode::{AReg8, AReg16, Operand, encode};
 pub use error::{AsmError, AsmErrorKind, Span};
@@ -34,6 +35,7 @@ pub use inspect::{
     format_segments, format_strings, format_symbols, get_segments, inspect_container,
 };
 pub use lexer::lex;
+pub use macro_expander::expand_macros;
 pub use parser::parse;
 pub use token::{Token, TokenKind};
 

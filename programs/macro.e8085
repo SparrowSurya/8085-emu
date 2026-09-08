@@ -1,0 +1,27 @@
+%include "../programs/devices/text_io.e8085"
+
+
+extern print
+
+%macro mPrintIm 2
+    lxi HL, %1
+    mvi B, %2
+    call print
+%end
+
+%macro mPrintMm 2
+    lxi HL, %2
+    mov B, M
+    lxi HL, %1
+    call print
+%end
+
+segment .data
+    msg byte "Hello\n"
+    msg_len byte %len msg
+
+segment .text
+main:
+    mPrintIm msg, %len msg
+    mPrintMm msg, msg_len
+    hlt
