@@ -7,7 +7,7 @@ This extension provides rich syntax highlighting, language configuration, and se
 ## Features
 
 ### 1. Directives & Preprocessor
-- `%macro NAME ARG_COUNT ... %end` — Macro definition with positional argument expansion (`%1`, `%2`, ...).
+- `%macro NAME ARG_COUNT ... %end` — Parameterized macro definition with positional argument substitution (`%1`, `%2`, ..., `%N`), nested recursion limit (64), and size validation.
 - `%define IDENTIFIER VALUE` — 1-byte constant definitions ($\le \text{0xFF}$, 1-byte character literal `'x'`, or 1-byte string).
 - `%repeat COUNT VALUE` — Repeated data expansion in `.data`.
 - `%len IDENTIFIER` — Byte-length evaluation for variables (`%len var`).
@@ -65,18 +65,25 @@ Full syntax highlighting support inside Markdown files (`.md`) and the VS Code *
 - **Editor Fenced Blocks**: Embedded `source.e8085` syntax highlighting in `.md` files for ```` ```e8085 ```` code fences.
 - **Markdown Preview Webview**: Built-in `markdown-it` plugin and theme-adaptive preview stylesheet (`markdown.previewStyles`) ensuring rich 8085 color styling in both light and dark preview modes.
 
-### 11. Interactive Cycle-Accurate Debugging (DAP 1.6+)
+### 11. Language Server Protocol (LSP 3.17)
+- **Hover Documentation**: Opcode reference, cycles, register layouts, multi-radix breakdown, `%macro` signatures and definitions, and `%include` module documentation.
+- **Goto Definition**: Instant navigation for labels, local labels, data variables, `%define` constants, `%macro` definitions, and `%include` paths.
+- **Auto-Completion**: Context-aware mnemonic snippets, macro completions with parameter tab-stops, `%` directives, and register filtering.
+- **Live Diagnostics**: Real-time syntax errors, duplicate symbols, unused variables/labels, dead code warnings, and macro validation.
+
+### 12. Interactive Cycle-Accurate Debugging (DAP 1.6+)
 Integrated Debug Adapter Protocol (DAP) server support:
-- **Stepping**: Step In (`F11`), Step Over (`F10`), Step Out (`Shift+F11`), and Time Travel / Step Back (`Ctrl+F10` / reverse continue).
-- **Breakpoints**: Line breakpoints, conditional expressions (e.g., `A == 0x05`, `*0x2000 > 10`), and hit counts (`> 5`, `== 3`).
+- **Stepping**: Step In (`F11`), Step Over (`F10`), Step Out (`Shift+F11`), and Time Travel / Step Back (`Ctrl+F10` / reverse continue) through code, subroutines, and parameterized macro expansions.
+- **Breakpoints**: Line breakpoints, conditional expressions (e.g., `A == 0x05`, `*0x2000 > 10`), hit counts (`> 5`, `== 3`), and multi-address breakpoints on lines inside macro bodies.
 - **Scopes & Variable Inspection**:
+  - **Macro Arguments**: Live inspection of `%1`..`%N` parameters while paused inside a macro body.
   - **CPU Registers**: 8-bit registers (`A`, `B`, `C`, `D`, `E`, `H`, `L`), `SP`, `PC`, and T-States / Cycles.
   - **Register Pairs**: 16-bit views (`BC`, `DE`, `HL`, `PSW`).
   - **Flags (PSW)**: Individual flag bits (`S`, `Z`, `AC`, `P`, `CY`).
-  - **Data Variables**: Live values for variables defined in `.data` and `.bss`.
+  - **Data & BSS Variables**: Live values for variables defined in `.data` and `.bss`.
   - **Peripherals**: Real-time inspection of attached devices (`Terminal`, `Printer`, `Keyboard`).
 - **Live State Mutation**: Edit register and memory values on the fly during debugging.
-- **Debug Console / REPL**: Interactive expression evaluation, memory dereferencing (`*(HL)`, `*0x2000`), and REPL commands (`:mem 0x2000 16`, `:regs`).
+- **Debug Console / REPL**: Interactive expression evaluation (including `%1`..`%N`), memory dereferencing (`*(HL)`, `*0x2000`), and REPL commands (`:mem 0x2000 16`, `:regs`).
 
 ---
 

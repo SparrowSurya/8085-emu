@@ -70,6 +70,8 @@ pub struct MachineSnapshot {
     pub instruction_count: u64,
     /// Copy of the shadow call stack at this execution point.
     pub shadow_stack: Vec<ShadowFrame>,
+    /// Whether the debugger was paused at the macro call site before stepping in.
+    pub macro_call_site_active: bool,
 }
 
 /// Core debugger session controller managing the 8085 virtual machine, breakpoints,
@@ -99,6 +101,8 @@ pub struct DebugSession {
     pub program_path: PathBuf,
     /// Thread-safe queue of captured text emitted by peripheral devices (TextIO, Printer).
     pub output_queue: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    /// Whether paused at a macro call site (before stepping into its body).
+    pub macro_call_site_active: bool,
 }
 
 impl std::fmt::Debug for DebugSession {
@@ -136,6 +140,7 @@ impl DebugSession {
             history: VecDeque::with_capacity(MAX_HISTORY_SNAPSHOTS),
             program_path: PathBuf::new(),
             output_queue: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            macro_call_site_active: false,
         }
     }
 
@@ -184,9 +189,11 @@ impl DebugSession {
                 main_file: path.clone(),
                 addr_to_loc: Default::default(),
                 loc_to_addr: Default::default(),
+                loc_to_addrs: Default::default(),
                 symbols: sym_map.clone(),
                 reverse_symbols: sym_map.iter().map(|(k, v)| (*v, k.clone())).collect(),
                 variables: Vec::new(),
+                macros: Vec::new(),
                 entry_pc: image.entry,
             };
             image
@@ -318,7 +325,11 @@ impl DebugSession {
         self.shadow_stack.clear();
         self.history.clear();
         self.is_terminated = false;
+        self.macro_call_site_active = self.source_map.find_macro_at_start(load_image.entry).is_some();
         self.record_snapshot();
+
+        // Re-verify any pending breakpoints registered before launch against the newly built source map
+        self.breakpoints.reverify_all(&self.source_map);
 
         let stop_on_entry = args.stop_on_entry.unwrap_or(true);
         if stop_on_entry {
@@ -339,6 +350,7 @@ impl DebugSession {
         let saved_breakpoints = self.breakpoints.clone();
         let result = self.launch(args)?;
         self.breakpoints = saved_breakpoints;
+        self.breakpoints.reverify_all(&self.source_map);
         Ok(result)
     }
 
@@ -370,7 +382,19 @@ impl DebugSession {
             return Ok(None);
         }
         self.record_snapshot();
+
+        // If currently paused at a macro call site, step into the macro definition body
+        // without executing machine instructions.
+        if self.macro_call_site_active {
+            self.macro_call_site_active = false;
+            self.stop_reason = Some(StopReason::Step);
+            return Ok(Some(StopReason::Step));
+        }
+
         let step_result = self.execute_single_step()?;
+        let new_pc = self.machine.cpu.regs.pc.0;
+        self.macro_call_site_active = self.source_map.find_macro_at_start(new_pc).is_some();
+
         if let Some(reason) = step_result {
             self.stop_reason = Some(reason.clone());
             Ok(Some(reason))
@@ -393,6 +417,17 @@ impl DebugSession {
             return Ok(None);
         }
         let current_pc = self.machine.cpu.regs.pc.0;
+
+        // If currently paused at a macro call site, step over the entire macro expansion
+        if self.macro_call_site_active {
+            if let Some(m) = self.source_map.find_macro_at_start(current_pc) {
+                if m.end_addr > current_pc {
+                    self.breakpoints.set_temp_breakpoint(m.end_addr);
+                    return self.continue_exec();
+                }
+            }
+        }
+
         let opcode_byte = self.machine.ram.read(Addr(current_pc));
 
         // If CALL or RST, set temporary breakpoint after call instruction
@@ -417,10 +452,19 @@ impl DebugSession {
         if self.is_terminated {
             return Ok(None);
         }
+        let current_pc = self.machine.cpu.regs.pc.0;
+
         if let Some(frame) = self.shadow_stack.last() {
             let ret_addr = frame.return_address;
             self.breakpoints.set_temp_breakpoint(ret_addr);
             self.continue_exec()
+        } else if let Some(m) = self.source_map.find_macro_containing(current_pc) {
+            if m.end_addr > current_pc {
+                self.breakpoints.set_temp_breakpoint(m.end_addr);
+                self.continue_exec()
+            } else {
+                self.continue_exec()
+            }
         } else {
             self.continue_exec()
         }
@@ -440,6 +484,7 @@ impl DebugSession {
             self.elapsed_t_states = snap.elapsed_t_states;
             self.instruction_count = snap.instruction_count;
             self.shadow_stack = snap.shadow_stack;
+            self.macro_call_site_active = snap.macro_call_site_active;
             self.stop_reason = Some(StopReason::Step);
             self.is_terminated = false;
             Ok(Some(StopReason::Step))
@@ -466,13 +511,26 @@ impl DebugSession {
             self.elapsed_t_states = snap.elapsed_t_states;
             self.instruction_count = snap.instruction_count;
             self.shadow_stack = snap.shadow_stack;
+            self.macro_call_site_active = snap.macro_call_site_active;
             self.is_terminated = false;
 
             let pc = self.machine.cpu.regs.pc.0;
             if let Some(hit) = self.breakpoints.check_hit(pc, &self.machine, &self.source_map) {
-                self.stop_reason = Some(StopReason::Breakpoint(hit.id));
+                let reason = if hit.id == 0 {
+                    StopReason::Step
+                } else {
+                    StopReason::Breakpoint(hit.id)
+                };
+                self.stop_reason = Some(reason.clone());
                 self.is_running = false;
-                return Ok(Some(StopReason::Breakpoint(hit.id)));
+                if hit.id == 0 {
+                    self.macro_call_site_active = self.source_map.find_macro_at_start(pc).is_some();
+                } else if let Some(m) = self.source_map.find_macro_at_start(pc) {
+                    self.macro_call_site_active = hit.line == m.call_location.line;
+                } else {
+                    self.macro_call_site_active = false;
+                }
+                return Ok(Some(reason));
             }
 
             if self.history.is_empty() {
@@ -518,9 +576,55 @@ impl DebugSession {
             return Ok(None);
         }
         self.is_running = true;
+
+        let current_pc = self.machine.cpu.regs.pc.0;
+
+        // If currently paused at a macro call site (macro_call_site_active == true):
+        // The first instruction at current_pc has NOT been executed yet.
+        // If there is an active breakpoint on the first instruction inside the macro body:
+        if self.macro_call_site_active {
+            if let Some(hit) = self.breakpoints.check_hit(current_pc, &self.machine, &self.source_map) {
+                if let Some(m) = self.source_map.find_macro_at_start(current_pc) {
+                    if hit.line != m.call_location.line {
+                        // Breakpoint was set inside the macro body at start_addr!
+                        self.is_running = false;
+                        self.macro_call_site_active = false;
+                        let reason = StopReason::Breakpoint(hit.id);
+                        self.stop_reason = Some(reason.clone());
+                        return Ok(Some(reason));
+                    }
+                }
+            }
+        }
+
+        // If paused at entry or after a step, and NOT already stopped at a breakpoint,
+        // check if there's a breakpoint at current_pc that should trigger before executing:
+        let was_at_breakpoint = matches!(self.stop_reason, Some(StopReason::Breakpoint(_)));
+        if !was_at_breakpoint && !self.macro_call_site_active {
+            if let Some(hit) = self.breakpoints.check_hit(current_pc, &self.machine, &self.source_map) {
+                self.is_running = false;
+                let reason = if hit.id == 0 {
+                    StopReason::Step
+                } else {
+                    StopReason::Breakpoint(hit.id)
+                };
+                self.stop_reason = Some(reason.clone());
+                if hit.id == 0 {
+                    self.macro_call_site_active = self.source_map.find_macro_at_start(current_pc).is_some();
+                } else if let Some(m) = self.source_map.find_macro_at_start(current_pc) {
+                    self.macro_call_site_active = hit.line == m.call_location.line;
+                } else {
+                    self.macro_call_site_active = false;
+                }
+                return Ok(Some(reason));
+            }
+        }
+
         self.record_snapshot();
         if let Some(reason) = self.execute_single_step()? {
             self.stop_reason = Some(reason.clone());
+            let current_pc = self.machine.cpu.regs.pc.0;
+            self.macro_call_site_active = self.source_map.find_macro_at_start(current_pc).is_some();
             return Ok(Some(reason));
         }
 
@@ -531,6 +635,8 @@ impl DebugSession {
     pub fn pause(&mut self) -> Result<Option<StopReason>, DapError> {
         self.is_running = false;
         self.stop_reason = Some(StopReason::Pause);
+        let current_pc = self.machine.cpu.regs.pc.0;
+        self.macro_call_site_active = self.source_map.find_macro_at_start(current_pc).is_some();
         Ok(Some(StopReason::Pause))
     }
 
@@ -541,41 +647,160 @@ impl DebugSession {
     pub fn get_stack_trace(&self) -> Vec<StackFrame> {
         let current_pc = self.machine.cpu.regs.pc.0;
         let mut frames = Vec::new();
+        let mut frame_id = 0;
 
-        // Top Frame (0)
-        let top_loc = self.source_map.address_to_location(current_pc);
-        let top_sym = self.source_map.address_to_symbol(current_pc).unwrap_or("main");
-        let (top_file, top_line, top_col) = if let Some(loc) = top_loc {
-            (
-                Some(Source {
-                    name: loc.file_path.file_name().map(|n| n.to_string_lossy().to_string()),
-                    path: Some(loc.file_path.to_string_lossy().to_string()),
+        if self.macro_call_site_active {
+            if let Some(m) = self.source_map.find_macro_at_start(current_pc) {
+                let loc = &m.call_location;
+                let args_summary = m.arguments.iter().map(|a| a.expr.as_str()).collect::<Vec<_>>().join(", ");
+                let frame_name = if args_summary.is_empty() {
+                    format!("{} (macro call @ 0x{current_pc:04X})", m.name)
+                } else {
+                    format!("{} {} (macro call @ 0x{current_pc:04X})", m.name, args_summary)
+                };
+                frames.push(StackFrame {
+                    id: frame_id,
+                    name: frame_name,
+                    source: Some(Source {
+                        name: loc.file_path.file_name().map(|n| n.to_string_lossy().to_string()),
+                        path: Some(loc.file_path.to_string_lossy().to_string()),
+                    }),
+                    line: loc.line,
+                    column: loc.col,
+                    instruction_pointer_reference: Some(format!("0x{current_pc:04X}")),
+                });
+                frame_id += 1;
+            } else {
+                let top_loc = self.source_map.address_to_location(current_pc);
+                let top_sym = self.source_map.address_to_symbol(current_pc).unwrap_or("main");
+                let (top_file, top_line, top_col) = if let Some(loc) = top_loc {
+                    (
+                        Some(Source {
+                            name: loc.file_path.file_name().map(|n| n.to_string_lossy().to_string()),
+                            path: Some(loc.file_path.to_string_lossy().to_string()),
+                        }),
+                        loc.line,
+                        loc.col,
+                    )
+                } else {
+                    (
+                        Some(Source {
+                            name: self.program_path.file_name().map(|n| n.to_string_lossy().to_string()),
+                            path: Some(self.program_path.to_string_lossy().to_string()),
+                        }),
+                        1,
+                        1,
+                    )
+                };
+
+                frames.push(StackFrame {
+                    id: frame_id,
+                    name: format!("{top_sym} (0x{current_pc:04X})"),
+                    source: top_file,
+                    line: top_line,
+                    column: top_col,
+                    instruction_pointer_reference: Some(format!("0x{current_pc:04X}")),
+                });
+                frame_id += 1;
+            }
+        } else if let Some(m) = self.source_map.find_macro_containing(current_pc) {
+            let body_loc = m
+                .body_locations
+                .get(&current_pc)
+                .or_else(|| self.source_map.address_to_location(current_pc));
+            let (body_file, body_line, body_col) = if let Some(loc) = body_loc {
+                (
+                    Some(Source {
+                        name: loc.file_path.file_name().map(|n| n.to_string_lossy().to_string()),
+                        path: Some(loc.file_path.to_string_lossy().to_string()),
+                    }),
+                    loc.line,
+                    loc.col,
+                )
+            } else {
+                (
+                    Some(Source {
+                        name: self.program_path.file_name().map(|n| n.to_string_lossy().to_string()),
+                        path: Some(self.program_path.to_string_lossy().to_string()),
+                    }),
+                    1,
+                    1,
+                )
+            };
+
+            let args_summary = m.arguments.iter().map(|a| a.expr.as_str()).collect::<Vec<_>>().join(", ");
+            let frame0_name = if args_summary.is_empty() {
+                format!("{} (0x{current_pc:04X})", m.name)
+            } else {
+                format!("{}({}) (0x{current_pc:04X})", m.name, args_summary)
+            };
+
+            // Frame 0: Inside macro definition body
+            frames.push(StackFrame {
+                id: frame_id,
+                name: frame0_name,
+                source: body_file,
+                line: body_line,
+                column: body_col,
+                instruction_pointer_reference: Some(format!("0x{current_pc:04X}")),
+            });
+            frame_id += 1;
+
+            // Frame 1: Macro invocation call site
+            let call_loc = &m.call_location;
+            let frame1_name = if args_summary.is_empty() {
+                format!("{} (macro caller @ 0x{:04X})", m.name, m.start_addr)
+            } else {
+                format!("{} {} (macro caller @ 0x{:04X})", m.name, args_summary, m.start_addr)
+            };
+            frames.push(StackFrame {
+                id: frame_id,
+                name: frame1_name,
+                source: Some(Source {
+                    name: call_loc.file_path.file_name().map(|n| n.to_string_lossy().to_string()),
+                    path: Some(call_loc.file_path.to_string_lossy().to_string()),
                 }),
-                loc.line,
-                loc.col,
-            )
+                line: call_loc.line,
+                column: call_loc.col,
+                instruction_pointer_reference: Some(format!("0x{:04X}", m.start_addr)),
+            });
+            frame_id += 1;
         } else {
-            (
-                Some(Source {
-                    name: self.program_path.file_name().map(|n| n.to_string_lossy().to_string()),
-                    path: Some(self.program_path.to_string_lossy().to_string()),
-                }),
-                1,
-                1,
-            )
-        };
+            let top_loc = self.source_map.address_to_location(current_pc);
+            let top_sym = self.source_map.address_to_symbol(current_pc).unwrap_or("main");
+            let (top_file, top_line, top_col) = if let Some(loc) = top_loc {
+                (
+                    Some(Source {
+                        name: loc.file_path.file_name().map(|n| n.to_string_lossy().to_string()),
+                        path: Some(loc.file_path.to_string_lossy().to_string()),
+                    }),
+                    loc.line,
+                    loc.col,
+                )
+            } else {
+                (
+                    Some(Source {
+                        name: self.program_path.file_name().map(|n| n.to_string_lossy().to_string()),
+                        path: Some(self.program_path.to_string_lossy().to_string()),
+                    }),
+                    1,
+                    1,
+                )
+            };
 
-        frames.push(StackFrame {
-            id: 0,
-            name: format!("{top_sym} (0x{current_pc:04X})"),
-            source: top_file,
-            line: top_line,
-            column: top_col,
-            instruction_pointer_reference: Some(format!("0x{current_pc:04X}")),
-        });
+            frames.push(StackFrame {
+                id: frame_id,
+                name: format!("{top_sym} (0x{current_pc:04X})"),
+                source: top_file,
+                line: top_line,
+                column: top_col,
+                instruction_pointer_reference: Some(format!("0x{current_pc:04X}")),
+            });
+            frame_id += 1;
+        }
 
         // Shadow caller frames
-        for (i, frame) in self.shadow_stack.iter().rev().enumerate() {
+        for frame in self.shadow_stack.iter().rev() {
             let caller_loc = self.source_map.address_to_location(frame.call_address);
             let (source, line, col) = if let Some(loc) = caller_loc {
                 (
@@ -591,32 +816,44 @@ impl DebugSession {
             };
 
             frames.push(StackFrame {
-                id: (i + 1) as i64,
+                id: frame_id,
                 name: format!("{} (call @ 0x{:04X})", frame.subroutine_name, frame.call_address),
                 source,
                 line,
                 column: col,
                 instruction_pointer_reference: Some(format!("0x{:04X}", frame.call_address)),
             });
+            frame_id += 1;
         }
 
         frames
     }
 
-    /// Returns the seven specialized variable scopes for the given stack frame ID:
-    /// CPU Registers, Register Pairs, Flags, Data Segment, BSS Segment, Stack Memory, Peripherals & Diagnostics.
+    /// Returns the specialized variable scopes for the given stack frame ID:
+    /// Macro Arguments, CPU Registers, Register Pairs, Flags, Data Segment, BSS Segment, Stack Memory, Peripherals & Diagnostics.
     pub fn get_scopes(&self, frame_id: i64) -> Vec<Scope> {
-        get_scopes(frame_id)
+        let current_pc = self.machine.cpu.regs.pc.0;
+        let active_macro = self
+            .source_map
+            .find_macro_containing(current_pc)
+            .or_else(|| self.source_map.find_macro_at_start(current_pc));
+        get_scopes(frame_id, active_macro)
     }
 
     /// Resolves and formats variables for a given scope or variable reference ID.
     pub fn get_variables(&self, variables_reference: i64) -> Vec<Variable> {
+        let current_pc = self.machine.cpu.regs.pc.0;
+        let active_macro = self
+            .source_map
+            .find_macro_containing(current_pc)
+            .or_else(|| self.source_map.find_macro_at_start(current_pc));
         get_variables(
             variables_reference,
             &self.machine,
             Some(&self.source_map),
             self.elapsed_t_states,
             self.instruction_count,
+            active_macro,
         )
     }
 
@@ -728,8 +965,19 @@ impl DebugSession {
             // Check breakpoint hit
             if let Some(hit) = self.breakpoints.check_hit(current_pc, &self.machine, &self.source_map) {
                 self.is_running = false;
-                let reason = StopReason::Breakpoint(hit.id);
+                let reason = if hit.id == 0 {
+                    StopReason::Step
+                } else {
+                    StopReason::Breakpoint(hit.id)
+                };
                 self.stop_reason = Some(reason.clone());
+                if hit.id == 0 {
+                    self.macro_call_site_active = self.source_map.find_macro_at_start(current_pc).is_some();
+                } else if let Some(m) = self.source_map.find_macro_at_start(current_pc) {
+                    self.macro_call_site_active = hit.line == m.call_location.line;
+                } else {
+                    self.macro_call_site_active = false;
+                }
                 return Ok(Some(reason));
             }
 
@@ -737,9 +985,14 @@ impl DebugSession {
             if let Some(stop) = self.execute_single_step()? {
                 self.is_running = false;
                 self.stop_reason = Some(stop.clone());
+                let current_pc = self.machine.cpu.regs.pc.0;
+                self.macro_call_site_active = self.source_map.find_macro_at_start(current_pc).is_some();
                 return Ok(Some(stop));
             }
         }
+
+        let current_pc = self.machine.cpu.regs.pc.0;
+        self.macro_call_site_active = self.source_map.find_macro_at_start(current_pc).is_some();
 
         if step_limit == 0 {
             self.is_running = false;
@@ -825,6 +1078,7 @@ impl DebugSession {
             elapsed_t_states: self.elapsed_t_states,
             instruction_count: self.instruction_count,
             shadow_stack: self.shadow_stack.clone(),
+            macro_call_site_active: self.macro_call_site_active,
         });
     }
 }

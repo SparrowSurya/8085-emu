@@ -605,7 +605,9 @@ fn check_cfg_and_halt(doc: &Document, program: &Program, diagnostics: &mut Vec<D
             | TextItem::LocalLabel(_, _)
             | TextItem::GlobalDecl(_, _)
             | TextItem::ExternDecl(_, _)
-            | TextItem::MacroDef(_) => {
+            | TextItem::MacroDef(_)
+            | TextItem::MacroCall(_, _, _)
+            | TextItem::MacroEnd => {
                 // Fall through to next item
                 if idx + 1 < text_items.len() {
                     queue.push_back(idx + 1);

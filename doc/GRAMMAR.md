@@ -90,6 +90,69 @@ main:
   hlt
 ```
 
+### `%macro` and `%end` (Parameterized Macros)
+Defines reusable assembly templates with positional argument expansion. Macros can be defined at the global scope (before segments) or inside `segment .text`.
+
+#### Syntax
+```e8085
+%macro <macro_name> <param_count>
+    <instruction_or_label_lines>
+%end
+```
+
+- `<macro_name>`: Case-preserving identifier for the macro. Cannot collide with 8085 instruction mnemonics, keywords, `%define` constants, data/bss variables, or code labels.
+- `<param_count>`: Positive integer decimal literal ($1, 2, 3, \dots$) specifying the exact number of required arguments.
+- `<instruction_or_label_lines>`: Assembly statements inside the macro body referencing positional arguments via `%1`, `%2`, ..., `%N` (where $N =$ `param_count`).
+- `%end`: Terminates the macro definition block.
+
+#### Positional Argument References (`%1` .. `%N`)
+Inside the macro body, `%1` refers to the first passed argument, `%2` to the second, and `%N` to the $N$-th argument.
+
+> **Validation Rules**:
+> - References to `%0` or `%k` where $k > \text{param\_count}$ produce compile-time errors (`InvalidMacroArgRef`).
+> - Macro invocations must supply the exact number of comma-separated arguments declared (`MacroArgCountMismatch`).
+> - Nested macro calls are supported up to a maximum recursion depth of **64** (`MacroRecursionLimitExceeded`).
+> - 16-bit addresses or variable symbols cannot be passed to instructions requiring 8-bit immediate values (e.g. passing `var` into `MVI A, %1` is rejected at compile time).
+
+#### Supported Argument Types
+- **Numeric Literals**: `42`, `0xFF`, `0b1010`, `0o77`.
+- **Character Literals**: `'A'`, `'\n'`, `'\t'`, `'\0'`, `\xHH`.
+- **Variable Identifiers**: `message`, `buffer` (addresses resolved to 16-bit pointers for `LXI`, `LHLD`, `STA`, etc.).
+- **Length Expressions**: `%len variable` (evaluated to the exact byte count of the variable).
+- **`%define` Constants**: `BUFFER_LEN`, `DATA_PORT`.
+
+#### Example
+```e8085
+%include "devices/text_io.e8085"
+
+extern print
+
+; Macro 1: Print immediate string variable with length
+%macro mPrintIm 2
+    lxi HL, %1
+    mvi B, %2
+    call print
+%end
+
+; Macro 2: Print string variable using length stored in a memory variable
+%macro mPrintMm 2
+    lxi HL, %2
+    mov B, M
+    lxi HL, %1
+    call print
+%end
+
+segment .data
+    msg      BYTE "Hello, 8085!\n"
+    msg_len  BYTE %len msg
+
+segment .text
+main:
+    mPrintIm msg, %len msg       ; Expands to: lxi HL, msg; mvi B, 13; call print
+    mPrintMm msg, msg_len        ; Expands to: lxi HL, msg_len; mov B, M; lxi HL, msg; call print
+    hlt
+```
+
 ### `%repeat` (Data Duplication)
 Repeats an expression or string a specified number of times within `segment .data`. Can appear anywhere in data definitions.
 
@@ -117,7 +180,7 @@ main:
 ```
 
 ### `%include` (File Inclusion)
-Imports definitions, global labels, and constants from an external source file. File paths must be enclosed **strictly in double quotes**:
+Imports definitions, global labels, constants, and macros from an external source file. File paths must be enclosed **strictly in double quotes**:
 
 ```e8085
 %include "devices/text_io.e8085"

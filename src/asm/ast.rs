@@ -151,9 +151,13 @@ pub enum TextItem {
     GlobalDecl(String, Span),
     /// Standalone `extern name` declaration.
     ExternDecl(String, Span),
-    /// An inline macro definition inside .text.
+    /// A macro definition (%macro name count ... %end).
     MacroDef(MacroDef),
-    /// An instruction.
+    /// A macro call invocation marker with call-site span and string representations of arguments.
+    MacroCall(String, Vec<String>, Span),
+    /// A macro expansion end marker.
+    MacroEnd,
+    /// An instruction with evaluated/unresolved operands.
     Instr(Instr),
 }
 

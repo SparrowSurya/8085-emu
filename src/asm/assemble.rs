@@ -804,6 +804,28 @@ impl<'a> Assembler<'a> {
                             });
                         }
                         TextItem::MacroDef(_) => {}
+                        TextItem::MacroCall(name, args, span) => {
+                            let (source, file_path) = self.src_line(*span);
+                            let args_json = serde_json::to_string(args).unwrap_or_default();
+                            listing.push(ListingRow {
+                                addr: taddr,
+                                bytes: Vec::new(),
+                                source: format!("%macro_call:{name}|{source}|{args_json}"),
+                                line: span.line as usize,
+                                col: span.col as usize,
+                                file_path,
+                            });
+                        }
+                        TextItem::MacroEnd => {
+                            listing.push(ListingRow {
+                                addr: taddr,
+                                bytes: Vec::new(),
+                                source: "%macro_end".to_string(),
+                                line: 0,
+                                col: 0,
+                                file_path: None,
+                            });
+                        }
                         TextItem::Instr(ins) => {
                             let ops =
                                 self.final_operands(ins, &symtab, current_parent_label.as_deref())?;
@@ -1089,7 +1111,7 @@ impl<'a> Assembler<'a> {
                             }
                         }
                         TextItem::ExternDecl(_name, _span) => {}
-                        TextItem::MacroDef(_) => {}
+                        TextItem::MacroDef(_) | TextItem::MacroCall(_, _, _) | TextItem::MacroEnd => {}
                         TextItem::Instr(ins) => {
                             // Length is value-independent, so encode with zero placeholders.
                             let zero_ops =

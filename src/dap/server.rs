@@ -130,6 +130,28 @@ impl DapServer {
 
                 match self.session.launch(&args) {
                     Ok(reason) => {
+                        let verified_bps: Vec<_> = self.session.breakpoints.file_breakpoints()
+                            .values()
+                            .flat_map(|m| m.values())
+                            .cloned()
+                            .collect();
+                        for bp in verified_bps {
+                            events.push(self.create_event("breakpoint", Some(serde_json::to_value(BreakpointEventBody {
+                                reason: "changed".to_string(),
+                                breakpoint: Breakpoint {
+                                    id: Some(bp.id),
+                                    verified: true,
+                                    message: None,
+                                    source: Some(Source {
+                                        name: bp.source_path.file_name().map(|n| n.to_string_lossy().to_string()),
+                                        path: Some(bp.source_path.to_string_lossy().to_string()),
+                                    }),
+                                    line: Some(bp.line),
+                                    column: Some(1),
+                                    instruction_reference: Some(format!("0x{:04X}", bp.address)),
+                                },
+                            }).unwrap())));
+                        }
                         if let Some(r) = reason {
                             self.handle_stop_reason(r, &mut events);
                         }
@@ -156,6 +178,28 @@ impl DapServer {
 
                 match self.session.restart(&launch_args) {
                     Ok(reason) => {
+                        let verified_bps: Vec<_> = self.session.breakpoints.file_breakpoints()
+                            .values()
+                            .flat_map(|m| m.values())
+                            .cloned()
+                            .collect();
+                        for bp in verified_bps {
+                            events.push(self.create_event("breakpoint", Some(serde_json::to_value(BreakpointEventBody {
+                                reason: "changed".to_string(),
+                                breakpoint: Breakpoint {
+                                    id: Some(bp.id),
+                                    verified: true,
+                                    message: None,
+                                    source: Some(Source {
+                                        name: bp.source_path.file_name().map(|n| n.to_string_lossy().to_string()),
+                                        path: Some(bp.source_path.to_string_lossy().to_string()),
+                                    }),
+                                    line: Some(bp.line),
+                                    column: Some(1),
+                                    instruction_reference: Some(format!("0x{:04X}", bp.address)),
+                                },
+                            }).unwrap())));
+                        }
                         if let Some(r) = reason {
                             self.handle_stop_reason(r, &mut events);
                         }

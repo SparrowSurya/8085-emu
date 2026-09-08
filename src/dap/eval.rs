@@ -125,6 +125,36 @@ pub fn eval_term(
         return eval_term(rest_trimmed, machine, source_map);
     }
 
+    // Macro parameter reference: `%1`, `%2`, etc.
+    if let Some(idx_str) = s.strip_prefix('%') {
+        if let Ok(idx) = idx_str.parse::<usize>() {
+            if let Some(sm) = source_map {
+                let current_pc = machine.cpu.regs.pc.0;
+                let active_macro = sm.find_macro_containing(current_pc).or_else(|| sm.find_macro_at_start(current_pc));
+                if let Some(m) = active_macro {
+                    if idx > 0 && idx <= m.arguments.len() {
+                        let arg_expr = &m.arguments[idx - 1].expr;
+                        return eval_term(arg_expr, machine, source_map);
+                    }
+                }
+            }
+        }
+    }
+
+    // Directive `%len <ident>`
+    if let Some(ident) = s.strip_prefix("%len").or_else(|| s.strip_prefix("%LEN")) {
+        let var_name = ident.trim();
+        if let Some(sm) = source_map {
+            if let Some(var) = sm.variables.iter().find(|v| v.name.eq_ignore_ascii_case(var_name)) {
+                return Ok(var.size_bytes as u16);
+            }
+            if sm.symbols.contains_key(var_name) {
+                // If symbol is found without explicit variable record, fallback to 1 or 0
+                return Ok(1);
+            }
+        }
+    }
+
     // Dereference pointer `*0x2000`, `*(HL)`, `*var`
     if let Some(inner) = s.strip_prefix('*') {
         let addr = eval_term(inner.trim().trim_matches(|c| c == '(' || c == ')'), machine, source_map)?;

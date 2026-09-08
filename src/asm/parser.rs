@@ -758,6 +758,8 @@ mod tests {
             TextItem::GlobalDecl(_, s) => *s,
             TextItem::ExternDecl(_, s) => *s,
             TextItem::MacroDef(m) => m.span,
+            TextItem::MacroCall(_, _, s) => *s,
+            TextItem::MacroEnd => Span::default(),
             TextItem::Instr(i) => i.span,
         }
     }

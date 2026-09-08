@@ -14,9 +14,10 @@ flowchart TD
     Lexer --> Tokens["Token Stream (token.rs)"]
     Tokens --> Parser["2. Parser (parser.rs)"]
     Parser --> AST["Abstract Syntax Tree (ast.rs)"]
-    AST --> Preprocessor["3. Preprocessor & Layout (assemble.rs)"]
-    Preprocessor --> Pass1["4. Pass 1: Symbol Table & Vector Hooks"]
-    Pass1 --> Pass2["5. Pass 2: Instruction Encoding (encode.rs)"]
+    AST --> MacroExpander["3. Macro Expander (macro_expander.rs)"]
+    MacroExpander --> Preprocessor["4. Preprocessor & Layout (assemble.rs)"]
+    Preprocessor --> Pass1["5. Pass 1: Symbol Table & Vector Hooks"]
+    Pass1 --> Pass2["6. Pass 2: Instruction Encoding (encode.rs)"]
     Pass2 --> LoadImage["LoadImage (Executable Machine Code)"]
 ```
 
@@ -27,7 +28,7 @@ flowchart TD
 ### Stage 1: Lexical Analysis (`src/asm/lexer.rs`, `src/asm/token.rs`)
 The lexer scans the raw UTF-8 source string into a stream of tokens, tracking line and column spans for error reporting.
 
-- **Directives**: `%define` (1-byte values), `%include` (strictly double-quoted `"..."`), `%repeat`, `%len`.
+- **Directives**: `%macro`, `%end`, `%define` (1-byte values), `%include` (strictly double-quoted `"..."`), `%repeat`, `%len`.
 - **Segments**: `segment`, `.data`, `.bss`, `.text`.
 - **Data Sizes**: `BYTE`, `WORD`.
 - **Numeric Literals**:
@@ -41,13 +42,23 @@ The lexer scans the raw UTF-8 source string into a stream of tokens, tracking li
 
 ### Stage 2: Parsing & AST Construction (`src/asm/parser.rs`, `src/asm/ast.rs`)
 The recursive-descent parser constructs an Abstract Syntax Tree ([`Program`](../src/asm/ast.rs)) representing:
-- **Global Directives**: `%include` file imports and `%define` 1-byte constants.
+- **Global Directives**: `%include` file imports, `%define` 1-byte constants, and top-level `%macro` definitions.
 - **Declarations**: `global` exported symbols (disallowing `global main`), and `extern` external dependencies.
 - **Data Declarations**: Initialized `BYTE` / `WORD` items with `%repeat` expressions.
 - **BSS Reservations**: Uninitialized `BYTE` / `WORD` reservation counts.
-- **Text Items**: Label definitions and instructions with parsed operands (registers, immediate values, character literals, symbol references, or `%len` queries).
+- **Text Items**: Label definitions, inline `%macro` definitions, instructions with parsed operands (registers, immediate values, character literals, symbol references, or `%len` queries), and macro invocations.
 
-### Stage 3: Preprocessor & Constant Resolution
+### Stage 3: Macro Expansion & Parameter Substitution (`src/asm/macro_expander.rs`)
+Before constant layout, the macro expander processes all macro definitions and call sites:
+- **Definition Gathering**: Collects all `%macro <name> <param_count>` ... `%end` blocks defined globally or within `segment .text`.
+- **Collision Verification**: Ensures macro names do not collide with reserved instruction mnemonics, `%define` constants, `.data` / `.bss` variables, or code labels (`MacroCollision`).
+- **Placeholder Validation**: Validates that all positional parameters `%1`..`%N` within macro bodies are within bounds ($1 \le \text{index} \le \text{param\_count}$) (`InvalidMacroArgRef`).
+- **AST Expansion**: Replaces macro invocation instructions with the expanded sequence of body instructions bracketed by `TextItem::MacroCall(name, args, span)` and `TextItem::MacroEnd`.
+- **Recursive Expansion**: Supports nested macro invocations up to a maximum recursion depth of 64 (`MacroRecursionLimitExceeded`).
+- **Argument & Type Validation**: Rejects register operands where literal/symbol arguments are required (`InvalidMacroArg`), enforces argument counts (`MacroArgCountMismatch`), and validates that 16-bit variables/addresses are not supplied to 8-bit immediate instructions like `MVI`.
+- **Dual Source Tracking**: Preserves both the original call site location and the internal macro body line numbers to support precise DAP stepping and interleaved source listings.
+
+### Stage 4: Preprocessor & Constant Resolution
 Before layout, the assembler resolves preprocessor constants:
 - Validates and substitutes `%define` 1-byte constants into immediate operands and repeat counts.
 - Supports **define chaining** (a `%define` referencing an earlier `%define`).
@@ -55,7 +66,7 @@ Before layout, the assembler resolves preprocessor constants:
 - Merges `%include` files with circular inclusion detection.
 - Validates control flow instructions (`CALL`, `JMP`, condition variants) to ensure they target executable code labels or externs, preventing data variables from being called or jumped to.
 
-### Stage 4: Memory Layout & Vector Table Generation
+### Stage 5: Memory Layout & Vector Table Generation
 The 8085 architecture reserves the first 64 bytes (`0x0000`..`0x003F`) for hardware reset and interrupt vectors. The assembler automatically builds this memory layout:
 
 ```text
@@ -91,14 +102,14 @@ When user source code defines any recognized ISR label names, the assembler auto
 | `0x0038` | Software `RST 7` | `isr_rst7`, `rst7_isr`, `isr_rst_7` |
 | `0x003C` | Hardware `RST 7.5` | `isr_rst75`, `rst75_isr`, `isr_rst_7_5` |
 
-### Stage 5: Pass 1 — Symbol Table Generation
+### Stage 6: Pass 1 — Symbol Table Generation
 The assembler traverses all segments to compute absolute addresses:
 1. `.data` variables are placed starting at `0x0040`.
 2. `.bss` variables are placed immediately following `.data`.
 3. `.text` labels are placed starting after `.bss`.
 4. All variable and label names are recorded in the symbol table (`BTreeMap<String, u16>`).
 
-### Stage 6: Pass 2 — Instruction Encoding (`src/asm/encode.rs`)
+### Stage 7: Pass 2 — Instruction Encoding (`src/asm/encode.rs`)
 The encoder maps each instruction mnemonic and resolved operand into its 1-, 2-, or 3-byte machine code sequence:
 - **1-byte instructions** (e.g. `MOV A, B` → `0x78`, `HLT` → `0x76`, `RET` → `0xC9`).
 - **2-byte instructions** (e.g. `MVI A, 0x55` → `0x3E 0x55`, `IN 0x01` → `0xDB 0x01`).
@@ -128,6 +139,7 @@ pub struct ListingRow {
     pub source: String,     // Original source text
 }
 ```
+- **Macro Expansion Tracking**: During listing generation, expanded macro call sites are recorded with their substituted instructions, preserving the macro invocation signature (`%macro_call`) and body line mappings (`%macro_end`).
 
 ---
 
@@ -340,7 +352,7 @@ strcpy:
 ```
 
 ### 4. `%include` Directive
-Imports `%define` constants, `global` routines, and data declarations from external files:
+Imports `%macro` templates, `%define` constants, `global` routines, and data declarations from external files:
 ```e8085
 %include "devices/text_io.e8085"
 
@@ -356,6 +368,7 @@ main:
 ```
 - Includes are resolved relative to the including file's directory.
 - Features circular include protection (idempotent inclusion).
+- Macros defined in included modules are immediately available for invocation in the main file.
 
 ---
 

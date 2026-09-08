@@ -13,66 +13,82 @@ pub const SCOPE_DATA: i64 = 4000;
 pub const SCOPE_BSS: i64 = 5000;
 pub const SCOPE_STACK: i64 = 6000;
 pub const SCOPE_PERIPHERALS: i64 = 7000;
+pub const SCOPE_MACRO_ARGS: i64 = 8000;
 
-pub fn get_scopes(frame_id: i64) -> Vec<Scope> {
-    vec![
-        Scope {
-            name: "CPU Registers".to_string(),
-            presentation_hint: Some("registers".to_string()),
-            variables_reference: SCOPE_REGISTERS + frame_id,
-            named_variables: Some(10),
-            indexed_variables: None,
-            expensive: false,
-        },
-        Scope {
-            name: "Register Pairs".to_string(),
-            presentation_hint: Some("registers".to_string()),
-            variables_reference: SCOPE_PAIRS + frame_id,
-            named_variables: Some(4),
-            indexed_variables: None,
-            expensive: false,
-        },
-        Scope {
-            name: "Flags (PSW)".to_string(),
-            presentation_hint: Some("status".to_string()),
-            variables_reference: SCOPE_FLAGS + frame_id,
-            named_variables: Some(6),
-            indexed_variables: None,
-            expensive: false,
-        },
-        Scope {
-            name: "Data Segment (.data)".to_string(),
-            presentation_hint: Some("locals".to_string()),
-            variables_reference: SCOPE_DATA + frame_id,
-            named_variables: None,
-            indexed_variables: None,
-            expensive: false,
-        },
-        Scope {
-            name: "BSS Segment (.bss)".to_string(),
-            presentation_hint: Some("locals".to_string()),
-            variables_reference: SCOPE_BSS + frame_id,
-            named_variables: None,
-            indexed_variables: None,
-            expensive: false,
-        },
-        Scope {
-            name: "Stack".to_string(),
-            presentation_hint: Some("locals".to_string()),
-            variables_reference: SCOPE_STACK + frame_id,
-            named_variables: None,
-            indexed_variables: None,
-            expensive: false,
-        },
-        Scope {
-            name: "Peripherals & I/O".to_string(),
-            presentation_hint: Some("globals".to_string()),
-            variables_reference: SCOPE_PERIPHERALS + frame_id,
-            named_variables: Some(3),
-            indexed_variables: None,
-            expensive: false,
-        },
-    ]
+pub fn get_scopes(frame_id: i64, active_macro: Option<&crate::dap::sourcemap::MacroInvocation>) -> Vec<Scope> {
+    let mut scopes = Vec::new();
+
+    if let Some(m) = active_macro {
+        if !m.arguments.is_empty() {
+            scopes.push(Scope {
+                name: format!("Macro Arguments ({})", m.name),
+                presentation_hint: Some("arguments".to_string()),
+                variables_reference: SCOPE_MACRO_ARGS + frame_id,
+                named_variables: Some(m.arguments.len()),
+                indexed_variables: None,
+                expensive: false,
+            });
+        }
+    }
+
+    scopes.push(Scope {
+        name: "CPU Registers".to_string(),
+        presentation_hint: Some("registers".to_string()),
+        variables_reference: SCOPE_REGISTERS + frame_id,
+        named_variables: Some(10),
+        indexed_variables: None,
+        expensive: false,
+    });
+    scopes.push(Scope {
+        name: "Register Pairs".to_string(),
+        presentation_hint: Some("registers".to_string()),
+        variables_reference: SCOPE_PAIRS + frame_id,
+        named_variables: Some(4),
+        indexed_variables: None,
+        expensive: false,
+    });
+    scopes.push(Scope {
+        name: "Flags (PSW)".to_string(),
+        presentation_hint: Some("status".to_string()),
+        variables_reference: SCOPE_FLAGS + frame_id,
+        named_variables: Some(6),
+        indexed_variables: None,
+        expensive: false,
+    });
+    scopes.push(Scope {
+        name: "Data Segment (.data)".to_string(),
+        presentation_hint: Some("locals".to_string()),
+        variables_reference: SCOPE_DATA + frame_id,
+        named_variables: None,
+        indexed_variables: None,
+        expensive: false,
+    });
+    scopes.push(Scope {
+        name: "BSS Segment (.bss)".to_string(),
+        presentation_hint: Some("locals".to_string()),
+        variables_reference: SCOPE_BSS + frame_id,
+        named_variables: None,
+        indexed_variables: None,
+        expensive: false,
+    });
+    scopes.push(Scope {
+        name: "Stack".to_string(),
+        presentation_hint: Some("locals".to_string()),
+        variables_reference: SCOPE_STACK + frame_id,
+        named_variables: None,
+        indexed_variables: None,
+        expensive: false,
+    });
+    scopes.push(Scope {
+        name: "Peripherals & I/O".to_string(),
+        presentation_hint: Some("globals".to_string()),
+        variables_reference: SCOPE_PERIPHERALS + frame_id,
+        named_variables: Some(3),
+        indexed_variables: None,
+        expensive: false,
+    });
+
+    scopes
 }
 
 pub fn get_variables(
@@ -81,11 +97,31 @@ pub fn get_variables(
     source_map: Option<&SourceMap>,
     elapsed_t_states: u64,
     instruction_count: u64,
+    active_macro: Option<&crate::dap::sourcemap::MacroInvocation>,
 ) -> Vec<Variable> {
     // Normalize reference by stripping frame_id modulo
     let base_ref = (variables_reference / 1000) * 1000;
 
     match base_ref {
+        SCOPE_MACRO_ARGS => {
+            let mut list = Vec::new();
+            if let Some(m) = active_macro {
+                for arg in &m.arguments {
+                    list.push(resolve_macro_arg(&arg.name, &arg.expr, machine, source_map));
+                }
+            }
+            if list.is_empty() {
+                list.push(Variable {
+                    name: "(No macro arguments)".to_string(),
+                    value: "".to_string(),
+                    r#type: None,
+                    variables_reference: 0,
+                    evaluate_name: None,
+                    memory_reference: None,
+                });
+            }
+            list
+        }
         SCOPE_REGISTERS => {
             let regs = &machine.cpu.regs;
             let hl_addr = regs.get16(Reg16::HL).0;
@@ -484,3 +520,66 @@ pub fn format_escaped_string(bytes: &[u8]) -> String {
     s.push('"');
     s
 }
+
+pub fn resolve_macro_arg(
+    arg_name: &str,
+    expr: &str,
+    machine: &Machine,
+    source_map: Option<&SourceMap>,
+) -> Variable {
+    let trimmed = expr.trim();
+    let (display_val, type_str, mem_ref) = if let Some(ident) = trimmed.strip_prefix("%len").or_else(|| trimmed.strip_prefix("%LEN")) {
+        let var_name = ident.trim();
+        let len_opt = if let Some(sm) = source_map {
+            sm.variables.iter().find(|v| v.name.eq_ignore_ascii_case(var_name)).map(|v| v.size_bytes)
+        } else {
+            None
+        };
+        if let Some(len) = len_opt {
+            (format!("%len {var_name} ({len} = 0x{len:02X})"), "length".to_string(), None)
+        } else {
+            (trimmed.to_string(), "length".to_string(), None)
+        }
+    } else if let Some(sm) = source_map {
+        if let Some(&addr) = sm.symbols.get(trimmed) {
+            if let Some(var) = sm.variables.iter().find(|v| v.address == addr) {
+                let mut bytes = Vec::new();
+                for i in 0..var.size_bytes {
+                    bytes.push(machine.ram.read(Addr(addr.wrapping_add(i as u16))));
+                }
+                let is_str = var.type_name.starts_with("BYTE") && var.size_bytes > 1;
+                let val_disp = if is_str {
+                    format_escaped_string(&bytes)
+                } else if var.size_bytes == 1 {
+                    format!("0x{:02X} ({})", bytes[0], bytes[0])
+                } else if var.size_bytes == 2 {
+                    let w = ((bytes[1] as u16) << 8) | (bytes[0] as u16);
+                    format!("0x{w:04X} ({w})")
+                } else {
+                    format_escaped_string(&bytes)
+                };
+                (format!("{trimmed} (0x{addr:04X}: {val_disp})"), var.type_name.clone(), Some(format!("0x{addr:04X}")))
+            } else {
+                (format!("{trimmed} (0x{addr:04X})"), "symbol".to_string(), Some(format!("0x{addr:04X}")))
+            }
+        } else if let Ok(val) = eval_term(trimmed, machine, source_map) {
+            (format!("{trimmed} (0x{val:04X})"), "immediate".to_string(), None)
+        } else {
+            (trimmed.to_string(), "operand".to_string(), None)
+        }
+    } else if let Ok(val) = eval_term(trimmed, machine, source_map) {
+        (format!("{trimmed} (0x{val:04X})"), "immediate".to_string(), None)
+    } else {
+        (trimmed.to_string(), "operand".to_string(), None)
+    };
+
+    Variable {
+        name: arg_name.to_string(),
+        value: display_val,
+        r#type: Some(type_str),
+        variables_reference: 0,
+        evaluate_name: Some(arg_name.to_string()),
+        memory_reference: mem_ref,
+    }
+}
+

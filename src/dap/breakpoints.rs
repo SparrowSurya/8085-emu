@@ -12,6 +12,7 @@ use crate::machine::Machine;
 pub struct ActiveBreakpoint {
     pub id: i64,
     pub address: u16,
+    pub addresses: Vec<u16>,
     pub source_path: PathBuf,
     pub line: usize,
     pub condition: Option<String>,
@@ -24,6 +25,8 @@ pub struct ActiveBreakpoint {
 pub struct BreakpointHit {
     pub id: i64,
     pub address: u16,
+    pub line: usize,
+    pub source_path: PathBuf,
     pub message: Option<String>,
 }
 
@@ -36,6 +39,9 @@ pub struct BreakpointManager {
     func_breakpoints: BTreeMap<String, ActiveBreakpoint>,
     // Set of addresses with temporary run-to breakpoints
     temp_breakpoints: HashSet<u16>,
+    // Pending requests for re-verification upon program launch
+    pending_line_breakpoints: BTreeMap<PathBuf, Vec<SourceBreakpoint>>,
+    pending_func_breakpoints: Vec<FunctionBreakpoint>,
 }
 
 impl BreakpointManager {
@@ -45,7 +51,28 @@ impl BreakpointManager {
             file_breakpoints: BTreeMap::new(),
             func_breakpoints: BTreeMap::new(),
             temp_breakpoints: HashSet::new(),
+            pending_line_breakpoints: BTreeMap::new(),
+            pending_func_breakpoints: Vec::new(),
         }
+    }
+
+    pub fn file_breakpoints(&self) -> &BTreeMap<PathBuf, BTreeMap<usize, ActiveBreakpoint>> {
+        &self.file_breakpoints
+    }
+
+    pub fn reverify_all(&mut self, source_map: &SourceMap) -> Vec<Breakpoint> {
+        let mut response_bps = Vec::new();
+        let pending_lines = self.pending_line_breakpoints.clone();
+        for (file, reqs) in &pending_lines {
+            let res = self.set_line_breakpoints(file, reqs, source_map);
+            response_bps.extend(res);
+        }
+        let pending_funcs = self.pending_func_breakpoints.clone();
+        if !pending_funcs.is_empty() {
+            let res = self.set_function_breakpoints(&pending_funcs, source_map);
+            response_bps.extend(res);
+        }
+        response_bps
     }
 
     pub fn set_line_breakpoints(
@@ -55,6 +82,7 @@ impl BreakpointManager {
         source_map: &SourceMap,
     ) -> Vec<Breakpoint> {
         let file_buf = file.to_path_buf();
+        self.pending_line_breakpoints.insert(file_buf.clone(), requested.to_vec());
         let mut new_map = BTreeMap::new();
         let mut response_bps = Vec::new();
 
@@ -62,10 +90,12 @@ impl BreakpointManager {
             let id = self.next_id;
             self.next_id += 1;
 
-            if let Some((actual_line, addr)) = source_map.find_nearest_executable_line(file, req.line) {
+            if let Some((actual_line, addrs)) = source_map.find_nearest_executable_line_all(file, req.line) {
+                let primary_addr = addrs.first().copied().unwrap_or(0);
                 let active = ActiveBreakpoint {
                     id,
-                    address: addr,
+                    address: primary_addr,
+                    addresses: addrs,
                     source_path: file_buf.clone(),
                     line: actual_line,
                     condition: req.condition.clone().filter(|s| !s.trim().is_empty()),
@@ -85,7 +115,7 @@ impl BreakpointManager {
                     }),
                     line: Some(actual_line),
                     column: Some(1),
-                    instruction_reference: Some(format!("0x{addr:04X}")),
+                    instruction_reference: Some(format!("0x{primary_addr:04X}")),
                 });
             } else {
                 response_bps.push(Breakpoint {
@@ -112,6 +142,7 @@ impl BreakpointManager {
         requested: &[FunctionBreakpoint],
         source_map: &SourceMap,
     ) -> Vec<Breakpoint> {
+        self.pending_func_breakpoints = requested.to_vec();
         self.func_breakpoints.clear();
         let mut response_bps = Vec::new();
 
@@ -136,6 +167,7 @@ impl BreakpointManager {
                 let active = ActiveBreakpoint {
                     id,
                     address: addr,
+                    addresses: vec![addr],
                     source_path: loc.map(|l| l.file_path.clone()).unwrap_or_default(),
                     line: line.unwrap_or(0),
                     condition: req.condition.clone().filter(|s| !s.trim().is_empty()),
@@ -190,6 +222,8 @@ impl BreakpointManager {
             return Some(BreakpointHit {
                 id: 0,
                 address: current_pc,
+                line: 0,
+                source_path: PathBuf::new(),
                 message: Some("step target reached".to_string()),
             });
         }
@@ -197,12 +231,14 @@ impl BreakpointManager {
         // 2. Check line breakpoints
         for file_bps in self.file_breakpoints.values_mut() {
             for bp in file_bps.values_mut() {
-                if bp.address == current_pc {
+                if bp.address == current_pc || bp.addresses.contains(&current_pc) {
                     bp.hit_count += 1;
                     if Self::evaluate_breakpoint_conditions(bp, machine, source_map) {
                         return Some(BreakpointHit {
                             id: bp.id,
                             address: current_pc,
+                            line: bp.line,
+                            source_path: bp.source_path.clone(),
                             message: None,
                         });
                     }
@@ -212,12 +248,14 @@ impl BreakpointManager {
 
         // 3. Check function breakpoints
         for bp in self.func_breakpoints.values_mut() {
-            if bp.address == current_pc {
+            if bp.address == current_pc || bp.addresses.contains(&current_pc) {
                 bp.hit_count += 1;
                 if Self::evaluate_breakpoint_conditions(bp, machine, source_map) {
                     return Some(BreakpointHit {
                         id: bp.id,
                         address: current_pc,
+                        line: bp.line,
+                        source_path: bp.source_path.clone(),
                         message: None,
                     });
                 }

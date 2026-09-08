@@ -527,3 +527,419 @@ main:
         diagnostics
     );
 }
+
+#[test]
+fn test_dap_macro_stepping_and_breakpoints() {
+    use std::fs;
+    use emu8085::dap::protocol::{LaunchRequestArguments, SourceBreakpoint};
+    use emu8085::dap::session::DebugSession;
+
+    let tmp_dir = std::env::temp_dir().join("emu8085_test_macro_dap");
+    let _ = fs::create_dir_all(&tmp_dir);
+    let src_path = tmp_dir.join("macro_dap_test.e8085");
+
+    let src = r#"%macro mSetAB 2
+    mvi A, %1
+    mvi B, %2
+%end
+
+segment .text
+main:
+    mvi C, 99
+    mSetAB 10, 20
+    hlt
+"#;
+    fs::write(&src_path, src).unwrap();
+
+    let args = LaunchRequestArguments {
+        program: src_path.to_string_lossy().to_string(),
+        stop_on_entry: Some(true),
+        libraries: None,
+        t_state_limit: None,
+        step_mode: None,
+        console: Some("internalConsole".to_string()),
+        terminal_port: None,
+    };
+
+    // --- Case 1: Stepping Into Macro Body ---
+    let mut session1 = DebugSession::new();
+    session1.launch(&args).expect("DAP session launch should succeed");
+
+    // 1. Initial stop on entry -> Line 8 (mvi C, 99)
+    let frames0 = session1.get_stack_trace();
+    assert_eq!(frames0[0].line, 8, "initial stop on entry should pause at Line 8");
+
+    // 2. StepOver on Line 8 -> should land at Line 9 (macro call site: mSetAB)
+    let step1 = session1.step_over().unwrap();
+    assert!(step1.is_some());
+    assert_eq!(session1.machine.cpu.regs.c, 99);
+    let frames_call = session1.get_stack_trace();
+    assert_eq!(frames_call[0].line, 9, "should pause at macro call site (Line 9)");
+
+    // 3. StepIn on macro call site (Line 9) -> enters macro body at Line 2
+    let step2 = session1.step_in().unwrap();
+    assert!(step2.is_some());
+    let frames_in1 = session1.get_stack_trace();
+    assert_eq!(frames_in1[0].line, 2, "StepIn on macro call should enter macro body at Line 2");
+    assert_eq!(frames_in1[1].line, 9, "Caller frame should be macro call site Line 9");
+
+    // 4. StepIn on Line 2 -> executes mvi A, 10 and moves to Line 3 (mvi B, 20)
+    let step3 = session1.step_in().unwrap();
+    assert!(step3.is_some());
+    assert_eq!(session1.machine.cpu.regs.a, 10);
+    let frames_in2 = session1.get_stack_trace();
+    assert_eq!(frames_in2[0].line, 3, "StepIn inside macro should advance to Line 3");
+    assert_eq!(frames_in2[1].line, 9, "Caller frame should still be Line 9");
+
+    // 5. StepIn on Line 3 -> executes mvi B, 20 and advances out to Line 10 (hlt)
+    let step4 = session1.step_in().unwrap();
+    assert!(step4.is_some());
+    assert_eq!(session1.machine.cpu.regs.b, 20);
+    let frames_out = session1.get_stack_trace();
+    assert_eq!(frames_out[0].line, 10, "StepIn out of macro should land on Line 10 (hlt)");
+
+    // 6. Test StepBack (time-travel debugging through macros)
+    session1.step_back().unwrap();
+    assert_eq!(session1.get_stack_trace()[0].line, 3);
+    session1.step_back().unwrap();
+    assert_eq!(session1.get_stack_trace()[0].line, 2);
+    session1.step_back().unwrap();
+    assert_eq!(session1.get_stack_trace()[0].line, 9, "StepBack should return to macro call site Line 9");
+    session1.step_back().unwrap();
+    assert_eq!(session1.get_stack_trace()[0].line, 8, "StepBack should return to initial Line 8");
+
+    // --- Case 2: Stepping Over Macro Call ---
+    let mut session2 = DebugSession::new();
+    session2.launch(&args).unwrap();
+    session2.step_over().unwrap(); // From Line 8 to Line 9 (macro call site)
+    assert_eq!(session2.get_stack_trace()[0].line, 9);
+
+    // StepOver on macro call site (Line 9) -> steps over entire macro to Line 10 (hlt)
+    let step_over_macro = session2.step_over().unwrap();
+    assert!(step_over_macro.is_some());
+    assert_eq!(session2.machine.cpu.regs.a, 10);
+    assert_eq!(session2.machine.cpu.regs.b, 20);
+    let frames_stepped_over = session2.get_stack_trace();
+    assert_eq!(frames_stepped_over[0].line, 10, "StepOver on macro call should skip to Line 10 (hlt)");
+
+    // --- Case 3: Breakpoints ---
+    let mut session_bp = DebugSession::new();
+    session_bp.launch(&args).unwrap();
+    let bps = session_bp.set_line_breakpoints(
+        &src_path,
+        &[SourceBreakpoint {
+            line: 9,
+            column: None,
+            condition: None,
+            hit_condition: None,
+            log_message: None,
+        }],
+    );
+    assert_eq!(bps.len(), 1);
+    assert!(bps[0].verified, "breakpoint on macro call site should be verified");
+
+    let bps_body = session_bp.set_line_breakpoints(
+        &src_path,
+        &[SourceBreakpoint {
+            line: 3,
+            column: None,
+            condition: None,
+            hit_condition: None,
+            log_message: None,
+        }],
+    );
+    assert_eq!(bps_body.len(), 1);
+    assert!(bps_body[0].verified, "breakpoint inside macro body should be verified");
+
+    let _ = fs::remove_dir_all(&tmp_dir);
+}
+
+#[test]
+fn test_dap_macro_programs_file_scenario() {
+    use std::path::PathBuf;
+    use emu8085::dap::protocol::LaunchRequestArguments;
+    use emu8085::dap::session::DebugSession;
+
+    let macro_prog_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("programs/macro.e8085");
+    assert!(macro_prog_path.exists(), "programs/macro.e8085 must exist");
+
+    let args = LaunchRequestArguments {
+        program: macro_prog_path.to_string_lossy().to_string(),
+        stop_on_entry: Some(true),
+        libraries: None,
+        t_state_limit: None,
+        step_mode: None,
+        console: Some("internalConsole".to_string()),
+        terminal_port: None,
+    };
+
+    // --- Scenario: Stop on Line 25 (mPrintIm) -> StepIn to Line 7 -> StepOver through macro -> Line 26 (mPrintMm) -> StepIn to Line 13 -> StepOut to Line 27 (hlt) ---
+    let mut session = DebugSession::new();
+    session.launch(&args).expect("launch should succeed");
+
+    // 1. Initial stop on entry -> Line 25 (mPrintIm macro call site)
+    let frames0 = session.get_stack_trace();
+    assert_eq!(frames0[0].line, 25, "Initial pause at line 25");
+
+    // 2. StepIn on line 25 -> jumps into macro body at line 7 (lxi HL, %1)
+    let step_in_macro = session.step_in().unwrap();
+    assert!(step_in_macro.is_some());
+    let frames_in = session.get_stack_trace();
+    assert_eq!(frames_in[0].line, 7, "StepIn jumps to line 7 inside macro body");
+    assert!(frames_in[0].name.contains("mPrintIm(msg, %len msg)"), "Frame 0 should contain macro name and args: {}", frames_in[0].name);
+    assert_eq!(frames_in[1].line, 25, "Frame 1 points to line 25 caller");
+
+    // Inspect Macro Arguments Scope while inside mPrintIm
+    let scopes_m1 = session.get_scopes(0);
+    assert_eq!(scopes_m1[0].name, "Macro Arguments (mPrintIm)");
+    let vars_m1 = session.get_variables(scopes_m1[0].variables_reference);
+    assert_eq!(vars_m1.len(), 2);
+    assert_eq!(vars_m1[0].name, "%1");
+    assert!(vars_m1[0].value.contains("msg"), "value should contain msg: {}", vars_m1[0].value);
+    assert!(vars_m1[0].value.contains("0x0040"), "value should contain msg address: {}", vars_m1[0].value);
+    assert_eq!(vars_m1[1].name, "%2");
+    assert!(vars_m1[1].value.contains("%len msg"), "value should contain %len msg: {}", vars_m1[1].value);
+    assert!(vars_m1[1].value.contains("6"), "value should contain length 6: {}", vars_m1[1].value);
+
+    // Evaluate macro arguments %1 and %2 in debug console / watch / hover
+    let eval1 = session.evaluate("%1").unwrap();
+    assert_eq!(eval1.raw_value, Some(b'H' as u16), "evaluating %1 (msg) evaluates to byte at msg");
+    let eval2 = session.evaluate("%2").unwrap();
+    assert_eq!(eval2.raw_value, Some(6), "evaluating %2 (%len msg) resolves to len 6");
+
+    // 3. StepOver on line 7 -> advances to line 8 (mvi B, %2)
+    session.step_over().unwrap();
+    let frames_in_l8 = session.get_stack_trace();
+    assert_eq!(frames_in_l8[0].line, 8, "Line 8 inside macro body");
+
+    // 4. StepOver on line 8 -> advances to line 9 (call print)
+    session.step_over().unwrap();
+    let frames_in_l9 = session.get_stack_trace();
+    assert_eq!(frames_in_l9[0].line, 9, "Line 9 inside macro body");
+
+    // 5. StepOver on line 9 (call print) -> steps over subroutine call and advances to line 26 (mPrintMm macro call site)
+    session.step_over().unwrap();
+    let frames_macro2 = session.get_stack_trace();
+    assert_eq!(frames_macro2[0].line, 26, "Pauses at line 26 (mPrintMm macro call site)");
+
+    // StepIn to mPrintMm macro at line 13
+    session.step_in().unwrap();
+    let frames_in_m2 = session.get_stack_trace();
+    assert_eq!(frames_in_m2[0].line, 13, "Inside mPrintMm at line 13");
+    assert!(frames_in_m2[0].name.contains("mPrintMm(msg, msg_len)"), "Frame 0 should contain mPrintMm args: {}", frames_in_m2[0].name);
+
+    let scopes_m2 = session.get_scopes(0);
+    assert_eq!(scopes_m2[0].name, "Macro Arguments (mPrintMm)");
+    let vars_m2 = session.get_variables(scopes_m2[0].variables_reference);
+    assert_eq!(vars_m2.len(), 2);
+    assert_eq!(vars_m2[0].name, "%1");
+    assert!(vars_m2[0].value.contains("msg"));
+    assert_eq!(vars_m2[1].name, "%2");
+    assert!(vars_m2[1].value.contains("msg_len"));
+
+    // 6. StepOut on rest of macro to line 27 (hlt)
+    session.step_out().unwrap();
+    let frames_hlt = session.get_stack_trace();
+    assert_eq!(frames_hlt[0].line, 27, "Pauses at line 27 (hlt)");
+}
+
+#[test]
+fn test_dap_macro_breakpoint_inside_macro_body_hit_on_continue() {
+    use std::path::PathBuf;
+    use emu8085::dap::protocol::{LaunchRequestArguments, SourceBreakpoint};
+    use emu8085::dap::session::{DebugSession, StopReason};
+
+    let macro_prog_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("programs/macro.e8085");
+    assert!(macro_prog_path.exists(), "programs/macro.e8085 must exist");
+
+    let args = LaunchRequestArguments {
+        program: macro_prog_path.to_string_lossy().to_string(),
+        stop_on_entry: Some(true),
+        libraries: None,
+        t_state_limit: None,
+        step_mode: None,
+        console: Some("internalConsole".to_string()),
+        terminal_port: None,
+    };
+
+    // Test 1: Breakpoint on Line 7 (first instruction inside mPrintIm)
+    {
+        let mut session = DebugSession::new();
+        session.launch(&args).expect("launch should succeed");
+        let bps = session.set_line_breakpoints(
+            &macro_prog_path,
+            &[SourceBreakpoint {
+                line: 7,
+                column: None,
+                condition: None,
+                hit_condition: None,
+                log_message: None,
+            }],
+        );
+        assert!(bps[0].verified);
+
+        let stop = session.continue_exec().unwrap();
+        assert_eq!(stop, Some(StopReason::Breakpoint(bps[0].id.unwrap())));
+        let frames = session.get_stack_trace();
+        assert_eq!(frames[0].line, 7, "Paused at Line 7 inside macro body");
+        assert_eq!(frames[1].line, 25, "Caller frame is Line 25");
+        let scopes = session.get_scopes(0);
+        assert_eq!(scopes[0].name, "Macro Arguments (mPrintIm)");
+    }
+
+    // Test 2: Breakpoint on Line 8 (second instruction inside mPrintIm)
+    {
+        let mut session = DebugSession::new();
+        session.launch(&args).expect("launch should succeed");
+        let bps = session.set_line_breakpoints(
+            &macro_prog_path,
+            &[SourceBreakpoint {
+                line: 8,
+                column: None,
+                condition: None,
+                hit_condition: None,
+                log_message: None,
+            }],
+        );
+        assert!(bps[0].verified);
+
+        let stop = session.continue_exec().unwrap();
+        assert_eq!(stop, Some(StopReason::Breakpoint(bps[0].id.unwrap())));
+        let frames = session.get_stack_trace();
+        assert_eq!(frames[0].line, 8, "Paused at Line 8 inside macro body");
+        assert_eq!(frames[1].line, 25, "Caller frame is Line 25");
+    }
+
+    // Test 3: Breakpoint on Line 14 (inside second macro mPrintMm)
+    {
+        let mut session = DebugSession::new();
+        session.launch(&args).expect("launch should succeed");
+        let bps = session.set_line_breakpoints(
+            &macro_prog_path,
+            &[SourceBreakpoint {
+                line: 14,
+                column: None,
+                condition: None,
+                hit_condition: None,
+                log_message: None,
+            }],
+        );
+        assert!(bps[0].verified);
+
+        let stop = session.continue_exec().unwrap();
+        assert_eq!(stop, Some(StopReason::Breakpoint(bps[0].id.unwrap())));
+        let frames = session.get_stack_trace();
+        assert_eq!(frames[0].line, 14, "Paused at Line 14 inside mPrintMm");
+        assert_eq!(frames[1].line, 26, "Caller frame is Line 26");
+        let scopes = session.get_scopes(0);
+        assert_eq!(scopes[0].name, "Macro Arguments (mPrintMm)");
+    }
+
+    // Test 4: Breakpoints on Line 7, Line 8, and Line 14 hit sequentially
+    {
+        let mut session = DebugSession::new();
+        session.launch(&args).expect("launch should succeed");
+        let bps = session.set_line_breakpoints(
+            &macro_prog_path,
+            &[
+                SourceBreakpoint { line: 7, column: None, condition: None, hit_condition: None, log_message: None },
+                SourceBreakpoint { line: 8, column: None, condition: None, hit_condition: None, log_message: None },
+                SourceBreakpoint { line: 14, column: None, condition: None, hit_condition: None, log_message: None },
+            ],
+        );
+        assert!(bps.iter().all(|b| b.verified));
+
+        // Hit 1 -> Line 7
+        let stop1 = session.continue_exec().unwrap();
+        assert_eq!(stop1, Some(StopReason::Breakpoint(bps[0].id.unwrap())));
+        assert_eq!(session.get_stack_trace()[0].line, 7);
+
+        // Hit 2 -> Line 8
+        let stop2 = session.continue_exec().unwrap();
+        assert_eq!(stop2, Some(StopReason::Breakpoint(bps[1].id.unwrap())));
+        assert_eq!(session.get_stack_trace()[0].line, 8);
+
+        // Hit 3 -> Line 14
+        let stop3 = session.continue_exec().unwrap();
+        assert_eq!(stop3, Some(StopReason::Breakpoint(bps[2].id.unwrap())));
+        assert_eq!(session.get_stack_trace()[0].line, 14);
+
+        // Hit 4 -> Program termination (Halt)
+        let stop4 = session.continue_exec().unwrap();
+        assert_eq!(stop4, Some(StopReason::Halt));
+    }
+}
+
+#[test]
+fn test_dap_macro_multi_call_site_breakpoints() {
+    use std::fs;
+    use emu8085::dap::protocol::{LaunchRequestArguments, SourceBreakpoint};
+    use emu8085::dap::session::{DebugSession, StopReason};
+
+    let tmp_dir = std::env::temp_dir().join("emu8085_test_macro_multi_bp");
+    let _ = fs::create_dir_all(&tmp_dir);
+    let src_path = tmp_dir.join("multi_bp.e8085");
+
+    let src = r#"%macro mIncA 1
+    adi %1
+%end
+
+segment .text
+main:
+    mvi A, 0
+    mIncA 5
+    mIncA 10
+    hlt
+"#;
+    fs::write(&src_path, src).unwrap();
+
+    let args = LaunchRequestArguments {
+        program: src_path.to_string_lossy().to_string(),
+        stop_on_entry: Some(true),
+        libraries: None,
+        t_state_limit: None,
+        step_mode: None,
+        console: Some("internalConsole".to_string()),
+        terminal_port: None,
+    };
+
+    let mut session = DebugSession::new();
+    session.launch(&args).unwrap();
+
+    // Set breakpoint on Line 2 inside mIncA (adi %1)
+    let bps = session.set_line_breakpoints(
+        &src_path,
+        &[SourceBreakpoint {
+            line: 2,
+            column: None,
+            condition: None,
+            hit_condition: None,
+            log_message: None,
+        }],
+    );
+    assert!(bps[0].verified);
+
+    // Hit 1: First invocation of mIncA at line 8 (adding 5)
+    let stop1 = session.continue_exec().unwrap();
+    assert_eq!(stop1, Some(StopReason::Breakpoint(bps[0].id.unwrap())));
+    let frames1 = session.get_stack_trace();
+    assert_eq!(frames1[0].line, 2);
+    assert_eq!(frames1[1].line, 8, "Caller frame is first call site at Line 8");
+    assert_eq!(session.machine.cpu.regs.a, 0);
+
+    // Hit 2: Second invocation of mIncA at line 9 (adding 10)
+    let stop2 = session.continue_exec().unwrap();
+    assert_eq!(stop2, Some(StopReason::Breakpoint(bps[0].id.unwrap())));
+    let frames2 = session.get_stack_trace();
+    assert_eq!(frames2[0].line, 2);
+    assert_eq!(frames2[1].line, 9, "Caller frame is second call site at Line 9");
+    assert_eq!(session.machine.cpu.regs.a, 5);
+
+    // Hit 3: Halt
+    let stop3 = session.continue_exec().unwrap();
+    assert_eq!(stop3, Some(StopReason::Halt));
+    assert_eq!(session.machine.cpu.regs.a, 15);
+
+    let _ = fs::remove_dir_all(&tmp_dir);
+}
+

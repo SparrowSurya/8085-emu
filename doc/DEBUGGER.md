@@ -56,17 +56,31 @@ flowchart TB
 - **Accurate Line & Column Mapping**: The Assembler generates an AST-level `SourceMap` that records the origin file path, line number, and column for every single assembled instruction byte.
 - **Shadow Call Stack**: Tracks nested subroutine calls (`CALL`, `CZ`, `CNZ`, `CC`, `CNC`...) and returns (`RET`, `RZ`, `RNZ`...), displaying the full caller hierarchy in the Call Stack panel with symbolic subroutine names and return addresses.
 
+#### Macro Stepping & Lifecycle
+Parameterized macros defined with `%macro` / `%end` behave like pseudo-subroutines during debugging:
+- **Call Site Pause**: When stepping forward hits a line containing a macro invocation (e.g. `mPrintIm msg, %len msg`), execution pauses at the call site line with Frame 0 pointing to the call site.
+- **Step In (`F11`)**: Jumps into the macro definition body at the first expanded instruction. The Call Stack panel updates:
+  - **Frame 0**: Displays the active macro name and passed argument expressions (e.g. `mPrintIm(msg, %len msg)`) positioned on the corresponding line within the `%macro` definition.
+  - **Frame 1**: Displays the caller frame positioned at the macro call site line in `segment .text`.
+- **Step Over (`F10`)**:
+  - When paused at the **macro call site**, steps over the entire expanded macro block in one go, stopping on the next instruction outside the macro.
+  - When paused **inside the macro body**, steps line-by-line through each expanded instruction in the macro.
+- **Step Out (`Shift+F11`)**: When paused inside a macro body, executes the remainder of the macro expansion and stops at the line immediately following the macro call.
+- **Step Back (Time Travel / Reverse Stepping)**: Rewinds execution backwards through individual instructions in the macro expansion, and back to the macro call site and prior instructions.
+
 ### 2.2 Breakpoint Management
 - **Line Breakpoints**: Set by clicking the editor margin or pressing `F9`. Breakpoints are automatically resolved and verified to the first instruction byte of the target line.
+- **Macro Body Breakpoints**: Setting a breakpoint on any line inside a `%macro ... %end` definition block automatically resolves and verifies across all memory addresses where that macro is instantiated. When hit during execution, Frame 0 highlights the macro definition line and Frame 1 highlights the specific call site that triggered the breakpoint.
 - **Function Breakpoints**: Break directly on global subroutines or local labels (e.g. `print`, `main`, `.loop`).
 - **Conditional Breakpoints**: Break only when a user-defined expression evaluates to `true` (e.g. `A == 0x05`, `flags.Z == 1`, `size > 10`).
 - **Hit Count Breakpoints**: Break after a line has been hit a specified number of times (e.g. `>= 5`, `== 10`, `% 2 == 0`).
 
 ### 2.3 Comprehensive Variables & Scope Inspection
-The Variables panel exposes seven specialized scopes:
+The Variables panel exposes specialized scopes:
 
 | Scope | Content & Details |
 |---|---|
+| **Macro Arguments** *(active when inside a macro)* | Displays positional parameters (`%1`, `%2`, ..., `%N`) for the current macro invocation, showing argument expression text, resolved values, variable memory addresses, and evaluated lengths. |
 | **CPU Registers** | Individual 8-bit registers (`A`, `B`, `C`, `D`, `E`, `H`, `L`, `M`), 16-bit register pairs (`BC`, `DE`, `HL`, `SP`), and `PC`. Shows formatted Hex, Decimal, Binary, and ASCII character previews. |
 | **Register Pairs** | 16-bit CPU register pairs (`BC`, `DE`, `HL`, `SP`, `PC`) with 16-bit values formatted as `0xADDR (symbol_or_decimal)` (e.g. `HL: 0x0017 (askSize)` or `BC: 0x0005 (5)`). |
 | **Flags** | Individual flag bits (`Sign [S]`, `Zero [Z]`, `Auxiliary Carry [AC]`, `Parity [P]`, `Carry [CY]`) along with the full 8-bit **`Flags Byte (PSW)`** formatted as `0x56 (0b01010110)`. |
@@ -322,3 +336,56 @@ main:
    *
    ```
 9. **Halt & Clean Exit**: The program hits `hlt`. Pressing **Continue (`F5`)** cleanly ends the debug session.
+
+---
+
+## 7. Macro Debugging Walkthrough
+
+Let's walk through debugging [`programs/macro.e8085`](../programs/macro.e8085):
+
+```e8085
+%include "../programs/devices/text_io.e8085"
+
+extern print
+
+%macro mPrintIm 2
+    lxi HL, %1
+    mvi B, %2
+    call print
+%end
+
+%macro mPrintMm 2
+    lxi HL, %2
+    mov B, M
+    lxi HL, %1
+    call print
+%end
+
+segment .data
+    msg byte "Hello\n"
+    msg_len byte %len msg
+
+segment .text
+main:
+    mPrintIm msg, %len msg
+    mPrintMm msg, msg_len
+    hlt
+```
+
+### Step-by-Step Macro Stepping:
+1. **Launch (F5)**: The debugger starts with `stopOnEntry: true` and pauses at line 25 (`mPrintIm msg, %len msg`).
+2. **Step Into (`F11`)**: Jumps into the macro definition body at line 7 (`lxi HL, %1`).
+   - The Call Stack displays:
+     - `Frame 0: mPrintIm(msg, %len msg)` at line 7.
+     - `Frame 1: main` at line 25.
+   - The **Macro Arguments (mPrintIm)** scope appears in the Variables view:
+     - `%1: msg (0x0040)`
+     - `%2: %len msg (6)`
+   - Evaluating `%1` in the Debug Console returns `0x48 ('H')`; evaluating `%2` returns `6`.
+3. **Step Over (`F10`)**: Advances from line 7 (`lxi HL, msg`) to line 8 (`mvi B, 6`).
+4. **Step Over (`F10`)**: Advances from line 8 to line 9 (`call print`).
+5. **Step Over (`F10`)**: Executes `call print` and exits the macro, stopping on line 26 (`mPrintMm msg, msg_len`).
+6. **Step Into (`F11`)**: Enters `mPrintMm` at line 13 (`lxi HL, %2`). The Call Stack updates to `Frame 0: mPrintMm(msg, msg_len)` at line 13 with `Frame 1: main` at line 26.
+7. **Step Out (`Shift+F11`)**: Executes the rest of `mPrintMm` and stops at line 27 (`hlt`).
+8. **Setting Breakpoints in Macro Bodies**: If you place a breakpoint on line 8 (`mvi B, %2`) or line 14 (`mov B, M`) and hit **Continue (`F5`)**, execution stops directly on that line with the active macro parameters and caller frame displayed.
+9. **Reverse Stepping (`Step Back`)**: Rewinds backwards through each instruction inside the macro expansion, verifying register and variable states at every step.

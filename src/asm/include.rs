@@ -198,7 +198,8 @@ fn tag_program_spans(program: &mut Program, file_id: u32) {
                         | TextItem::GlobalLabel(_, span)
                         | TextItem::LocalLabel(_, span)
                         | TextItem::GlobalDecl(_, span)
-                        | TextItem::ExternDecl(_, span) => {
+                        | TextItem::ExternDecl(_, span)
+                        | TextItem::MacroCall(_, _, span) => {
                             span.file_id = file_id;
                         }
                         TextItem::MacroDef(m) => {
@@ -213,6 +214,7 @@ fn tag_program_spans(program: &mut Program, file_id: u32) {
                         TextItem::Instr(ins) => {
                             ins.span.file_id = file_id;
                         }
+                        TextItem::MacroEnd => {}
                     }
                 }
             }

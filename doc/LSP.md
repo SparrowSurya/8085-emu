@@ -11,6 +11,7 @@ It provides real-time semantic analysis, documentation hover tooltips, definitio
 ### 1.1 Documentation on Hover (`textDocument/hover`)
 Hovering over tokens in an `.e8085` source file displays rich markdown documentation:
 - **8085 Instructions**: Shows opcode summary, byte size, hardware T-state execution cycles (e.g. `MOV` $\rightarrow$ `4T`, `CALL` $\rightarrow$ `18T`), flags affected (`Z, S, P, CY, AC`), and operation pseudocode.
+- **Macros & Invocations**: Hovering over a macro call (e.g. `mPrintIm msg, %len msg`) or macro name displays the full `%macro <name> <param_count>` signature, leading doc-comments, declared argument count, and the template definition body.
 - **Registers**: Documents 8-bit registers (`A`, `B`, `C`, `D`, `E`, `H`, `L`, `M`), 16-bit register pairs (`BC`, `DE`, `HL`, `SP`), and Program Status Word (`PSW` flags `[S Z 0 AC 0 P 1 CY]`).
 - **Numeric & Character Literals**: Hovering over numbers (`0x41`, `65`, `0b1000001`, `0o101`) or character literals (`'A'`, `'\n'`, `'\t'`, `'\0'`, `'\\'`) displays a multi-radix breakdown:
   ```text
@@ -20,12 +21,13 @@ Hovering over tokens in an `.e8085` source file displays rich markdown documenta
   Octal:       0o101
   ASCII:       'A'
   ```
-- **Directives & Segments**: Documents `%define`, `%include`, `%repeat`, `%len`, `segment .text/.data/.bss`, `global`, `extern`, `BYTE`, and `WORD`.
+- **Directives & Segments**: Documents `%macro`, `%end`, `%define`, `%include`, `%repeat`, `%len`, `segment .text/.data/.bss`, `global`, `extern`, `BYTE`, and `WORD`.
 - **`%include` Directives & Modules**: Hovering over `%include "..."` displays module documentation extracted from doc-comments at the top of the imported file.
 - **User Symbols**: Displays symbol kind (Global Subroutine, Local Code Label, Variable), memory segment, definition line/col, and doc-comments written with `;` preceding the definition (including symbols imported across `%include` files).
 
 ### 1.2 Goto Definition (`textDocument/definition`)
 Pressing `F12` or `Ctrl+Click` on an identifier navigates directly to its definition:
+- **Macro Invocations**: `mPrintIm msg, %len msg` $\rightarrow$ jumps directly to the `%macro mPrintIm 2` definition line (including macros defined in external `%include` modules).
 - **Global Labels**: `call print` $\rightarrow$ jumps to `print:` / `global print:`.
 - **Scoped Local Labels**: `jnz .loop` $\rightarrow$ jumps to `.loop:` within the enclosing parent subroutine without name collisions.
 - **Variables**: `lxi HL, prompt` $\rightarrow$ jumps to `prompt "..."` in `segment .data` or `prompt BYTE 32` in `.bss`.
@@ -35,6 +37,8 @@ Pressing `F12` or `Ctrl+Click` on an identifier navigates directly to its defini
 
 ### 1.3 Auto-Completion (`textDocument/completion`)
 Context-aware suggestions and snippet expansions:
+- **Macro Suggestions**: Inside `segment .text`, suggests defined macro names with parameter snippet tab-stops (e.g. `mPrintIm ${1:msg}, ${2:%len msg}`).
+- **Preprocessor Directives**: Typing `%` suggests `%macro`, `%end`, `%define`, `%include`, `%repeat`, and `%len`.
 - **Instruction Mnemonics**: Suggested only inside `segment .text`. Expands mnemonics with tab-stops (e.g. `lxi` $\rightarrow$ `lxi ${1:pair}, ${2:addr16}`, `mvi` $\rightarrow$ `mvi ${1:dest}, ${2:byte}`).
 - **Data Segment Completions**: Inside `segment .data` and `segment .bss`, instructions are suppressed; only data types (`BYTE`, `WORD`), `%repeat ${1:count} ${2:value}`, `%len ${1:var_name}`, string templates, and defined constants are suggested.
 - **`%include` Path Suggestions**: When typing inside `%include "..."`, suggests relative directories and `.e8085` / `.inc` files, suppressing unrelated keywords.
@@ -57,8 +61,8 @@ Pressing `F2` safely renames a symbol across all definitions and call/jump refer
 
 ### 1.5 Live Diagnostics & Static Analysis (`textDocument/publishDiagnostics`)
 Real-time compiler feedback and semantic checks as you type (no need to save):
-- **Assembler Syntax Errors**: Spans exact line and column locations for syntax and semantic mistakes.
-- **Duplicate Definition Tracking**: When a symbol is defined more than once, diagnostics report the duplicate definition and attach `DiagnosticRelatedInformation` pointing directly to where the symbol was first defined.
+- **Assembler Syntax & Macro Errors**: Spans exact line and column locations for syntax errors, missing macro definitions, argument count mismatches, invalid parameter references (`%0` or `%k`), recursion depth limits, and operand type/size mismatches (e.g. 16-bit variable in 8-bit immediate instruction).
+- **Duplicate Definition Tracking**: When a symbol or macro is defined more than once, diagnostics report the duplicate definition and attach `DiagnosticRelatedInformation` pointing directly to where the symbol was first defined.
 - **Unused Variable Warnings**: Flags variables declared in `segment .data` or `segment .bss` that are never referenced across `.text`, `.data`, or `%define` as `DiagnosticSeverity::WARNING` (`DiagnosticTag::UNNECESSARY`).
 - **Unused Label Warnings**: Flags unreferenced local labels.
 - **CFG Reachability Analysis**: Flags dead/unreachable code following unconditional branch instructions (`HLT`, `RET`, `JMP`) as `DiagnosticTag::UNNECESSARY`.

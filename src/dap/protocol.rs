@@ -442,3 +442,10 @@ pub struct OutputEventBody {
 pub struct ExitedEventBody {
     pub exit_code: i64,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BreakpointEventBody {
+    pub reason: String, // "changed" | "new" | "removed"
+    pub breakpoint: Breakpoint,
+}

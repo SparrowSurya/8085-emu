@@ -404,4 +404,83 @@ async fn stack_word_and_parent_child_labels_format_in_call_stack() {
     assert!(!stack_body.variables.is_empty());
 }
 
+#[tokio::test]
+async fn test_dap_macro_breakpoints_set_before_launch() {
+    let (client_stream, server_stream_client) = tokio::io::duplex(64 * 1024);
+    let (server_stream_server, client_stream_server) = tokio::io::duplex(64 * 1024);
+
+    let mut client = MockDapClient {
+        reader: BufReader::new(client_stream_server),
+        writer: client_stream,
+        seq: 1,
+    };
+
+    tokio::spawn(async move {
+        let mut server = DapServer::new();
+        server.run(server_stream_client, server_stream_server).await.unwrap();
+    });
+
+    // 1. Initialize
+    let (init_resp, _) = client.send_request("initialize", Some(serde_json::json!({
+        "adapterID": "e8085",
+    }))).await;
+    assert!(init_resp.success);
+
+    // 2. VS Code sends setBreakpoints BEFORE launch
+    let macro_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("programs/macro.e8085");
+    let (bp_resp, _) = client.send_request("setBreakpoints", Some(serde_json::json!({
+        "source": {
+            "path": macro_path.to_string_lossy().to_string()
+        },
+        "lines": [7, 8, 14]
+    }))).await;
+    assert!(bp_resp.success);
+
+    // 3. Launch
+    let (launch_resp, launch_events) = client.send_request("launch", Some(serde_json::json!({
+        "program": macro_path.to_string_lossy().to_string(),
+        "stopOnEntry": true
+    }))).await;
+    assert!(launch_resp.success);
+    assert!(launch_events.iter().any(|e| e.event == "stopped"));
+    // Verify that breakpoint events with reason: changed were emitted
+    assert!(launch_events.iter().any(|e| e.event == "breakpoint"));
+
+    // 4. Continue -> Should hit breakpoint on Line 7 (inside mPrintIm)
+    let (cont_resp1, cont_events1) = client.send_request("continue", Some(serde_json::json!({ "threadId": 1 }))).await;
+    assert!(cont_resp1.success);
+    let stopped1 = cont_events1.iter().find(|e| e.event == "stopped").expect("should emit stopped event");
+    let stopped_body1: StoppedEventBody = serde_json::from_value(stopped1.body.clone().unwrap()).unwrap();
+    assert_eq!(stopped_body1.reason, "breakpoint");
+
+    let (st_resp1, _) = client.send_request("stackTrace", Some(serde_json::json!({ "threadId": 1 }))).await;
+    assert!(st_resp1.success);
+    let st_body1: StackTraceResponseBody = serde_json::from_value(st_resp1.body.unwrap()).unwrap();
+    assert_eq!(st_body1.stack_frames[0].line, 7, "Frame 0 should be Line 7 inside macro definition");
+    assert_eq!(st_body1.stack_frames[1].line, 25, "Frame 1 should be Line 25 macro call site");
+
+    // 5. Continue -> Should hit breakpoint on Line 8 (inside mPrintIm)
+    let (cont_resp2, cont_events2) = client.send_request("continue", Some(serde_json::json!({ "threadId": 1 }))).await;
+    assert!(cont_resp2.success);
+    let stopped2 = cont_events2.iter().find(|e| e.event == "stopped").expect("should emit stopped event");
+    let stopped_body2: StoppedEventBody = serde_json::from_value(stopped2.body.clone().unwrap()).unwrap();
+    assert_eq!(stopped_body2.reason, "breakpoint");
+
+    let (st_resp2, _) = client.send_request("stackTrace", Some(serde_json::json!({ "threadId": 1 }))).await;
+    let st_body2: StackTraceResponseBody = serde_json::from_value(st_resp2.body.unwrap()).unwrap();
+    assert_eq!(st_body2.stack_frames[0].line, 8);
+
+    // 6. Continue -> Should hit breakpoint on Line 14 (inside mPrintMm)
+    let (cont_resp3, cont_events3) = client.send_request("continue", Some(serde_json::json!({ "threadId": 1 }))).await;
+    assert!(cont_resp3.success);
+    let stopped3 = cont_events3.iter().find(|e| e.event == "stopped").expect("should emit stopped event");
+    let stopped_body3: StoppedEventBody = serde_json::from_value(stopped3.body.clone().unwrap()).unwrap();
+    assert_eq!(stopped_body3.reason, "breakpoint");
+
+    let (st_resp3, _) = client.send_request("stackTrace", Some(serde_json::json!({ "threadId": 1 }))).await;
+    let st_body3: StackTraceResponseBody = serde_json::from_value(st_resp3.body.unwrap()).unwrap();
+    assert_eq!(st_body3.stack_frames[0].line, 14);
+    assert_eq!(st_body3.stack_frames[1].line, 26);
+}
+
 

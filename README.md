@@ -129,6 +129,7 @@ emu8085/
 │   ├── devices/text_io.e8085   # TextIO subroutine library (print, input, putch, endl)
 │   ├── greet.e8085             # Interactive greeting using extern subroutine linking
 │   ├── hello_world.e8085       # TextIO device string display
+│   ├── macro.e8085             # Parameterized macros (%macro / %end) with %len
 │   ├── array_sum.e8085         # Array traversal & summation (ADD M)
 │   ├── directives.e8085        # %define, %repeat, %len, and .bss
 │   ├── hardware_trap.e8085     # Hardware TRAP exception handling
@@ -181,6 +182,7 @@ emu8085/
 │   │   └── code_actions.rs     # Quick fixes & linter optimizations
 │   ├── asm/                    # Two-pass 8085 Assembler & Static Linker toolchain
 │   │   ├── assemble.rs         # Layout, vector table, static linking, and image generation
+│   │   ├── macro_expander.rs   # Macro definition collection, collision check & expansion
 │   │   ├── include.rs          # Source preprocessor for %include resolution
 │   │   ├── container.rs        # .8085.bin binary container encoding/decoding
 │   │   ├── lexer.rs            # Lexical tokenizer (4 number bases, strings, directives)
@@ -203,6 +205,7 @@ emu8085/
 │   └── lib.rs                  # Crate root and documentation
 │
 ├── tests/              # Integration and verification test suites
+│   ├── macro_integration.rs    # Parameterized macros and DAP/LSP macro test suite
 │   ├── linking_integration.rs  # Static linking, local labels, %include & extern tests
 │   ├── programs_integration.rs # Tests all programs/ files end-to-end
 │   ├── interrupt_software_and_hardware.rs # Software RST and Hardware TRAP tests
@@ -235,7 +238,7 @@ emu8085/
   - Software interrupts: **RST 0** (`0x0000`) through **RST 7** (`0x0038`) with automatic Interrupt Vector Table mapping to `isr_rst<n>` subroutines.
 - **Direct Memory Access (DMA)**: Hardware `HOLD` / `HLDA` bus-master handshake allowing peripherals like `USBDevice` to stream directly to/from memory.
 - **Modular Assembler & Static Linker**:
-  - Two-pass assembler supporting 1-byte `%define`, `%repeat`, `%len` (space-separated), segments (`.data`, `.bss`, `.text`), 4 number bases, single-quoted 1-byte character literals (`'x'`), and escape sequences (`\n`, `\t`, `\r`, `\0`, `\'`, `\"`, `\\`, `\xHH`).
+  - Two-pass assembler supporting parameterized macros (`%macro` / `%end` with `%1`..`%N` positional substitution, nested recursion checks, and operand size validation), 1-byte `%define`, `%repeat`, `%len` (space-separated), segments (`.data`, `.bss`, `.text`), 4 number bases, single-quoted 1-byte character literals (`'x'`), and escape sequences (`\n`, `\t`, `\r`, `\0`, `\'`, `\"`, `\\`, `\xHH`).
   - Strict double-quoted source inclusion with `%include "file.e8085"`.
   - Subroutine-scoped local labels (`.name:` and `jz .name`).
   - Modular library export (`global`) with export symbol tables (disallowing `global main`).
@@ -244,12 +247,12 @@ emu8085/
   - Entry-point verification: non-executable library binaries (without `main`) are rejected from standalone execution.
 - **Language Server Protocol (`e8085-lsp`)**:
   - Asynchronous LSP 3.17 server (`tower-lsp` + `tokio`).
-  - Rich hover documentation (including multi-radix numeric/character breakdown and `%include` module docstrings), Goto Definition across files, contextual auto-completion, workspace symbol renaming, live compiler diagnostics with CFG reachability analysis & unused symbol warnings, hardware cycle inlay hints, and quick fixes.
+  - Rich hover documentation (including macro signatures, multi-radix numeric/character breakdown and `%include` module docstrings), Goto Definition across files and macros, contextual auto-completion (with macro snippets and `%` directives), workspace symbol renaming, live compiler diagnostics with CFG reachability analysis, macro validation & unused symbol warnings, hardware cycle inlay hints, and quick fixes.
 - **Debug Adapter Protocol (`e8085-dap`)**:
   - Full DAP 1.51+ compliance supporting VS Code, Neovim, and other DAP-enabled IDEs.
-  - Multi-file source mapping and stepping across `%include` imports and libraries.
-  - Conditional breakpoints (`A == 0x05`, `flags.Z == 1`) and hit-count breakpoints.
-  - 5-scope variable inspection: CPU registers, individual flags & 8-bit PSW byte, data & BSS variables, hardware diagnostics (T-states, cycles), and peripherals.
+  - Multi-file source mapping and stepping across `%include` imports, libraries, and parameterized macro bodies (`stepIn`, `stepOver`, `stepOut`, and time-travel `stepBack`).
+  - Conditional breakpoints (`A == 0x05`, `flags.Z == 1`), hit-count breakpoints, and multi-address breakpoints on lines inside macro bodies.
+  - 6-scope variable inspection: CPU registers, register pairs, individual flags & 8-bit PSW byte, macro arguments (`%1`..`%N`), data & BSS variables, hardware diagnostics (T-states, cycles), and peripherals.
   - Live register and memory mutation (`setVariable`).
   - Interactive `"8085 Terminal"` tab backed by a bidirectional TCP socket bridge for terminal and printer peripherals.
 - **Rich Peripheral Set**:

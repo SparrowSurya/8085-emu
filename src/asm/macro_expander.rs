@@ -229,15 +229,17 @@ fn expand_text_items(
                     for line in &macro_def.body_lines {
                         let sub_tokens =
                             substitute_tokens(&line.tokens, &ins.operands, ins.span)?;
-                        let mut parsed_item = parser::parse_text_item(sub_tokens)?;
-                        tag_item_span(&mut parsed_item, ins.span);
+                        let parsed_item = parser::parse_text_item(sub_tokens)?;
                         unexpanded_body_items.push(parsed_item);
                     }
 
                     // Recursively expand nested macro calls
                     let expanded_items =
                         expand_text_items(unexpanded_body_items, macro_table, depth + 1)?;
+                    let raw_args: Vec<String> = ins.operands.iter().map(operand_to_text).collect();
+                    out.push(TextItem::MacroCall(ins.mnemonic.clone(), raw_args, ins.span));
                     out.extend(expanded_items);
+                    out.push(TextItem::MacroEnd);
                 } else {
                     out.push(TextItem::Instr(ins));
                 }
@@ -254,7 +256,7 @@ fn expand_text_items(
 fn substitute_tokens(
     tokens: &[Token],
     args: &[POperand],
-    call_span: Span,
+    _call_span: Span,
 ) -> Result<Vec<Token>, AsmError> {
     let mut out = Vec::new();
     let mut i = 0;
@@ -272,14 +274,13 @@ fn substitute_tokens(
                     ));
                 }
                 let arg_op = &args[idx - 1];
-                let arg_tokens = operand_to_tokens(arg_op, call_span);
+                let arg_tokens = operand_to_tokens(arg_op, tokens[i].span);
                 out.extend(arg_tokens);
                 i += 2;
                 continue;
             }
         }
-        let mut t = tokens[i].clone();
-        t.span = call_span;
+        let t = tokens[i].clone();
         out.push(t);
         i += 1;
     }
@@ -305,14 +306,15 @@ fn operand_to_tokens(op: &POperand, span: Span) -> Vec<Token> {
     }
 }
 
-fn tag_item_span(item: &mut TextItem, span: Span) {
-    match item {
-        TextItem::Instr(ins) => ins.span = span,
-        TextItem::Label(_, s) => *s = span,
-        TextItem::GlobalLabel(_, s) => *s = span,
-        TextItem::LocalLabel(_, s) => *s = span,
-        TextItem::GlobalDecl(_, s) => *s = span,
-        TextItem::ExternDecl(_, s) => *s = span,
-        TextItem::MacroDef(m) => m.span = span,
+fn operand_to_text(op: &POperand) -> String {
+    match op {
+        POperand::Num(n) => format!("{n}"),
+        POperand::Char(c) => format!("'{c}'"),
+        POperand::Sym(s) => s.clone(),
+        POperand::Len(s) => format!("%len {s}"),
+        POperand::LocalSym(s) => format!(".{s}"),
+        POperand::Reg8(r) => format!("{r:?}"),
+        POperand::Reg16(r) => format!("{r:?}"),
     }
 }
+
