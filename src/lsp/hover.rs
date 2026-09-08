@@ -1112,11 +1112,11 @@ fn get_directive_hover(directive: &str) -> Option<&'static str> {
              ```",
         ),
         "%len" => Some(
-            "**Directive** `%len(VAR_NAME)`\n\n\
+            "**Directive** `%len VAR_NAME`\n\n\
              Evaluates to the byte length of the referenced data variable or string.\n\n\
              **Example:**\n\
              ```e8085\n\
-             mvi B, %len(prompt)\n\
+             mvi B, %len prompt\n\
              ```",
         ),
         "global" => Some(
