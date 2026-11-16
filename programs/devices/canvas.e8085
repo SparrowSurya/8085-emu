@@ -1,0 +1,827 @@
+; ==============================================================================
+; Canvas Device Library for Intel 8085 Microprocessor
+;
+; Provides hardware definitions, resolution presets, color definitions, key codes,
+; and macros for 2D graphics rendering, text display, and keyboard input on CanvasDevice.
+;
+; The CanvasDevice operates in an 8-bit logical coordinate space (0-255).
+; Physical output is scaled 4x4 into a host window (fixed at initialization).
+; Colors are represented in 16-bit RGBA4444 (4-bit depth per channel).
+; ==============================================================================
+
+; --- Hardware I/O Ports ---
+%define CANVAS_CMD_PORT       0x10
+%define CANVAS_DATA_PORT      0x11
+%define CANVAS_STATUS_PORT    0x12
+
+; --- Status Register Bit Flags (Port 0x12) ---
+%define STATUS_WINDOW_OPEN    0x01
+%define STATUS_FRAME_READY    0x02
+%define STATUS_KEY_AVAILABLE  0x04
+%define STATUS_MOUSE_DOWN     0x08
+
+; --- Command Identifiers (Port 0x10) ---
+; Lifecycle & Metadata
+%define CMD_INIT_CANVAS       0x01
+%define CMD_DISPOSE_CANVAS    0x02
+%define CMD_GET_CANVAS_SIZE   0x03
+%define CMD_GET_CANVAS_TITLE  0x05
+%define CMD_SET_CANVAS_TITLE  0x06
+
+; GameLoop & Timing
+%define CMD_UPDATE_CANVAS     0x07
+%define CMD_IS_CANVAS_OPEN    0x08
+%define CMD_GET_FPS           0x09
+%define CMD_SET_FPS           0x0A
+%define CMD_GET_DELTA         0x0B
+
+; 2D Drawing Primitives
+%define CMD_CLEAR             0x10
+%define CMD_SET_PIXEL         0x11
+%define CMD_GET_PIXEL         0x12
+%define CMD_LINE              0x13
+%define CMD_FILL_RECT         0x14
+%define CMD_STROKE_RECT       0x15
+%define CMD_FILL_ELLIPSE      0x16
+%define CMD_STROKE_ELLIPSE    0x17
+
+; Text Rendering
+%define CMD_FILL_TEXT         0x20
+%define CMD_TEXT_WIDTH        0x21
+%define CMD_STROKE_TEXT       0x22
+
+; Keyboard Input
+%define CMD_KEY_PRESS         0x30
+%define CMD_KEY_DOWN          0x31
+%define CMD_KEY_RELEASE       0x32
+%define CMD_KEY_INPUT         0x33
+
+; Mouse Input
+%define CMD_MOUSE_PRESS       0x40
+%define CMD_MOUSE_DOWN        0x41
+%define CMD_MOUSE_RELEASE     0x42
+%define CMD_MOUSE_POS         0x43
+
+; Mouse Buttons
+%define MOUSE_BUTTON_LEFT     0
+%define MOUSE_BUTTON_RIGHT    1
+%define MOUSE_BUTTON_MIDDLE   2
+
+; --- Standard 16-bit RGBA4444 Colors (8-bit High & Low components) ---
+%define COLOR_BLACK_HI        0x00
+%define COLOR_BLACK_LO        0x0F
+%define COLOR_WHITE_HI        0xFF
+%define COLOR_WHITE_LO        0xFF
+%define COLOR_RED_HI          0xF0
+%define COLOR_RED_LO          0x0F
+%define COLOR_GREEN_HI        0x0F
+%define COLOR_GREEN_LO        0x0F
+%define COLOR_BLUE_HI         0x00
+%define COLOR_BLUE_LO         0xFF
+%define COLOR_YELLOW_HI       0xFF
+%define COLOR_YELLOW_LO       0x0F
+%define COLOR_CYAN_HI         0x0F
+%define COLOR_CYAN_LO         0xFF
+%define COLOR_MAGENTA_HI      0xF0
+%define COLOR_MAGENTA_LO      0xFF
+%define COLOR_GRAY_HI         0x88
+%define COLOR_GRAY_LO         0x8F
+%define COLOR_TRANSPARENT_HI  0x00
+%define COLOR_TRANSPARENT_LO  0x00
+
+; --- Recommended 1-Byte Game Resolution Presets ---
+; Default Widescreen (16:9) -> 640 x 360 physical
+%define RES_DEFAULT_W         160
+%define RES_DEFAULT_H         90
+
+; PICO-8 Fantasy Console (1:1) -> 512 x 512 physical
+%define RES_PICO8_W           128
+%define RES_PICO8_H           128
+
+; Retro CRT / QQVGA (4:3) -> 640 x 480 physical
+%define RES_CRT_W             160
+%define RES_CRT_H             120
+
+; Nintendo Game Boy (10:9) -> 640 x 576 physical
+%define RES_GAMEBOY_W         160
+%define RES_GAMEBOY_H         144
+
+; TIC-80 Widescreen (~16:9) -> 960 x 544 physical
+%define RES_WIDESCREEN_W      240
+%define RES_WIDESCREEN_H      136
+
+; ZX Spectrum / MSX (4:3) -> 1024 x 768 physical (0 encodes 256 in 8-bit)
+%define RES_SPECTRUM_W        0
+%define RES_SPECTRUM_H        192
+
+; NES / SNES (8:7) -> 1024 x 896 physical (0 encodes 256 in 8-bit)
+%define RES_NES_W             0
+%define RES_NES_H             224
+
+; --- Keyboard Scancodes ---
+; Letters
+%define K_A                   0x41
+%define K_B                   0x42
+%define K_C                   0x43
+%define K_D                   0x44
+%define K_E                   0x45
+%define K_F                   0x46
+%define K_G                   0x47
+%define K_H                   0x48
+%define K_I                   0x49
+%define K_J                   0x4A
+%define K_K                   0x4B
+%define K_L                   0x4C
+%define K_M                   0x4D
+%define K_N                   0x4E
+%define K_O                   0x4F
+%define K_P                   0x50
+%define K_Q                   0x51
+%define K_R                   0x52
+%define K_S                   0x53
+%define K_T                   0x54
+%define K_U                   0x55
+%define K_V                   0x56
+%define K_W                   0x57
+%define K_X                   0x58
+%define K_Y                   0x59
+%define K_Z                   0x5A
+
+; Digits
+%define K_0                   0x30
+%define K_1                   0x31
+%define K_2                   0x32
+%define K_3                   0x33
+%define K_4                   0x34
+%define K_5                   0x35
+%define K_6                   0x36
+%define K_7                   0x37
+%define K_8                   0x38
+%define K_9                   0x39
+
+; Function Keys
+%define K_F1                  0x81
+%define K_F2                  0x82
+%define K_F3                  0x83
+%define K_F4                  0x84
+%define K_F5                  0x85
+%define K_F6                  0x86
+%define K_F7                  0x87
+%define K_F8                  0x88
+%define K_F9                  0x89
+%define K_F10                 0x8A
+%define K_F11                 0x8B
+%define K_F12                 0x8C
+
+; Navigation & Arrows
+%define K_ARROW_UP            0x90
+%define K_ARROW_DOWN          0x91
+%define K_ARROW_LEFT          0x92
+%define K_ARROW_RIGHT         0x93
+%define K_HOME                0x94
+%define K_END                 0x95
+%define K_PAGE_UP             0x96
+%define K_PAGE_DOWN           0x97
+
+; Controls & Modifiers
+%define K_ESCAPE              0x1B
+%define K_ENTER               0x0D
+%define K_SPACE               0x20
+%define K_BACKSPACE           0x08
+%define K_TAB                 0x09
+%define K_DELETE              0x7F
+%define K_SHIFT               0xA0
+%define K_CTRL                0xA1
+%define K_ALT                 0xA2
+%define K_CAPS_LOCK           0xA3
+
+; Punctuation & Symbols
+%define K_MINUS               0x2D
+%define K_EQUALS              0x3D
+%define K_LEFT_BRACKET        0x5B
+%define K_RIGHT_BRACKET       0x5D
+%define K_BACKSLASH           0x5C
+%define K_SEMICOLON           0x3B
+%define K_QUOTE               0x27
+%define K_GRAVE               0x60
+%define K_COMMA               0x2C
+%define K_PERIOD              0x2E
+%define K_SLASH               0x2F
+
+; ==============================================================================
+; Canvas Macros
+; ==============================================================================
+
+; --- Lifecycle & Metadata Macros ---
+
+; Initializes canvas window with logical dimensions and title buffer
+%macro InitCanvas 3
+    mvi A, CMD_INIT_CANVAS
+    out CANVAS_CMD_PORT
+    mvi A, %1
+    out CANVAS_DATA_PORT
+    mvi A, %2
+    out CANVAS_DATA_PORT
+    lxi HL, %3
+    call canvas_stream_str
+%end
+
+; Closes the canvas window and releases resources
+%macro DisposeCanvas 0
+    mvi A, CMD_DISPOSE_CANVAS
+    out CANVAS_CMD_PORT
+%end
+
+; Reads active logical canvas dimensions into B (width) and C (height)
+%macro GetCanvasSize 0
+    mvi A, CMD_GET_CANVAS_SIZE
+    out CANVAS_CMD_PORT
+    in CANVAS_DATA_PORT
+    mov B, A
+    in CANVAS_DATA_PORT
+    mov C, A
+%end
+
+; Reads window title into memory buffer pointed to by %1 (HL)
+%macro GetCanvasTitle 1
+    mvi A, CMD_GET_CANVAS_TITLE
+    out CANVAS_CMD_PORT
+    lxi HL, %1
+    call canvas_read_str
+%end
+
+; Updates window title from null-terminated string at %1
+%macro SetCanvasTitle 1
+    mvi A, CMD_SET_CANVAS_TITLE
+    out CANVAS_CMD_PORT
+    lxi HL, %1
+    call canvas_stream_str
+%end
+
+; --- GameLoop & Timing Macros ---
+
+; Swaps backbuffer to window, polls OS events, and throttles frame rate
+%macro UpdateCanvas 0
+    mvi A, CMD_UPDATE_CANVAS
+    out CANVAS_CMD_PORT
+%end
+
+; Queries if canvas window is still open. Returns 1 in A (and Z=0) if open, 0 if closed
+%macro IsCanvasOpen 0
+    mvi A, CMD_IS_CANVAS_OPEN
+    out CANVAS_CMD_PORT
+    in CANVAS_DATA_PORT
+    cpi 0
+%end
+
+; Reads target FPS into register A
+%macro GetFPS 0
+    mvi A, CMD_GET_FPS
+    out CANVAS_CMD_PORT
+    in CANVAS_DATA_PORT
+%end
+
+; Sets target FPS to %1
+%macro SetFPS 1
+    mvi A, CMD_SET_FPS
+    out CANVAS_CMD_PORT
+    mvi A, %1
+    out CANVAS_DATA_PORT
+%end
+
+; Reads elapsed frame delta in milliseconds into register A
+%macro GetDelta 0
+    mvi A, CMD_GET_DELTA
+    out CANVAS_CMD_PORT
+    in CANVAS_DATA_PORT
+%end
+
+; --- 2D Drawing Macros ---
+
+; Clears entire canvas with 16-bit RGBA4444 color (%1 = hi, %2 = lo)
+%macro Clear 2
+    mvi A, CMD_CLEAR
+    out CANVAS_CMD_PORT
+    mvi A, %1
+    out CANVAS_DATA_PORT
+    mvi A, %2
+    out CANVAS_DATA_PORT
+%end
+
+; Sets logical pixel (%1, %2) to 16-bit RGBA4444 color (%3 = hi, %4 = lo)
+%macro SetPixel 4
+    mvi A, CMD_SET_PIXEL
+    out CANVAS_CMD_PORT
+    mvi A, %1
+    out CANVAS_DATA_PORT
+    mvi A, %2
+    out CANVAS_DATA_PORT
+    mvi A, %3
+    out CANVAS_DATA_PORT
+    mvi A, %4
+    out CANVAS_DATA_PORT
+%end
+
+; Reads 16-bit RGBA4444 color of pixel (%1, %2) into B (color_hi) and C (color_lo)
+%macro GetPixel 2
+    mvi A, CMD_GET_PIXEL
+    out CANVAS_CMD_PORT
+    mvi A, %1
+    out CANVAS_DATA_PORT
+    mvi A, %2
+    out CANVAS_DATA_PORT
+    in CANVAS_DATA_PORT
+    mov B, A
+    in CANVAS_DATA_PORT
+    mov C, A
+%end
+
+; Draws straight line from (%1, %2) to (%3, %4) with thickness %5 and color (%6 = hi, %7 = lo)
+%macro Line 7
+    mvi A, CMD_LINE
+    out CANVAS_CMD_PORT
+    mvi A, %1
+    out CANVAS_DATA_PORT
+    mvi A, %2
+    out CANVAS_DATA_PORT
+    mvi A, %3
+    out CANVAS_DATA_PORT
+    mvi A, %4
+    out CANVAS_DATA_PORT
+    mvi A, %5
+    out CANVAS_DATA_PORT
+    mvi A, %6
+    out CANVAS_DATA_PORT
+    mvi A, %7
+    out CANVAS_DATA_PORT
+%end
+
+; Draws filled rectangle at (%1, %2) with size (%3, %4) and color (%5 = hi, %6 = lo)
+%macro FillRectangle 6
+    mvi A, CMD_FILL_RECT
+    out CANVAS_CMD_PORT
+    mvi A, %1
+    out CANVAS_DATA_PORT
+    mvi A, %2
+    out CANVAS_DATA_PORT
+    mvi A, %3
+    out CANVAS_DATA_PORT
+    mvi A, %4
+    out CANVAS_DATA_PORT
+    mvi A, %5
+    out CANVAS_DATA_PORT
+    mvi A, %6
+    out CANVAS_DATA_PORT
+%end
+
+; Draws outlined rectangle at (%1, %2) with size (%3, %4), thickness %5 and color (%6 = hi, %7 = lo)
+%macro StrokeRectangle 7
+    mvi A, CMD_STROKE_RECT
+    out CANVAS_CMD_PORT
+    mvi A, %1
+    out CANVAS_DATA_PORT
+    mvi A, %2
+    out CANVAS_DATA_PORT
+    mvi A, %3
+    out CANVAS_DATA_PORT
+    mvi A, %4
+    out CANVAS_DATA_PORT
+    mvi A, %5
+    out CANVAS_DATA_PORT
+    mvi A, %6
+    out CANVAS_DATA_PORT
+    mvi A, %7
+    out CANVAS_DATA_PORT
+%end
+
+; Draws filled ellipse centered at (%1, %2) with radii (%3, %4) and color (%5 = hi, %6 = lo)
+%macro FillEllipse 6
+    mvi A, CMD_FILL_ELLIPSE
+    out CANVAS_CMD_PORT
+    mvi A, %1
+    out CANVAS_DATA_PORT
+    mvi A, %2
+    out CANVAS_DATA_PORT
+    mvi A, %3
+    out CANVAS_DATA_PORT
+    mvi A, %4
+    out CANVAS_DATA_PORT
+    mvi A, %5
+    out CANVAS_DATA_PORT
+    mvi A, %6
+    out CANVAS_DATA_PORT
+%end
+
+; Draws outlined ellipse centered at (%1, %2) with radii (%3, %4), thickness %5 and color (%6 = hi, %7 = lo)
+%macro StrokeEllipse 7
+    mvi A, CMD_STROKE_ELLIPSE
+    out CANVAS_CMD_PORT
+    mvi A, %1
+    out CANVAS_DATA_PORT
+    mvi A, %2
+    out CANVAS_DATA_PORT
+    mvi A, %3
+    out CANVAS_DATA_PORT
+    mvi A, %4
+    out CANVAS_DATA_PORT
+    mvi A, %5
+    out CANVAS_DATA_PORT
+    mvi A, %6
+    out CANVAS_DATA_PORT
+    mvi A, %7
+    out CANVAS_DATA_PORT
+%end
+
+; --- Text Rendering Macros ---
+
+; Renders solid text %1 at (%2, %3) with scale %4 and color (%5 = hi, %6 = lo)
+%macro FillText 6
+    mvi A, CMD_FILL_TEXT
+    out CANVAS_CMD_PORT
+    mvi A, %2
+    out CANVAS_DATA_PORT
+    mvi A, %3
+    out CANVAS_DATA_PORT
+    mvi A, %4
+    out CANVAS_DATA_PORT
+    mvi A, %5
+    out CANVAS_DATA_PORT
+    mvi A, %6
+    out CANVAS_DATA_PORT
+    lxi HL, %1
+    call canvas_stream_str
+%end
+
+; Renders outlined text %1 at (%2, %3) with scale %4, thickness %5 and color (%6 = hi, %7 = lo)
+%macro StrokeText 7
+    mvi A, CMD_STROKE_TEXT
+    out CANVAS_CMD_PORT
+    mvi A, %2
+    out CANVAS_DATA_PORT
+    mvi A, %3
+    out CANVAS_DATA_PORT
+    mvi A, %4
+    out CANVAS_DATA_PORT
+    mvi A, %5
+    out CANVAS_DATA_PORT
+    mvi A, %6
+    out CANVAS_DATA_PORT
+    mvi A, %7
+    out CANVAS_DATA_PORT
+    lxi HL, %1
+    call canvas_stream_str
+%end
+
+; Calculates rendered width of text %1 at scale %2; returns width in register A
+%macro TextWidth 2
+    mvi A, CMD_TEXT_WIDTH
+    out CANVAS_CMD_PORT
+    mvi A, %2
+    out CANVAS_DATA_PORT
+    lxi HL, %1
+    call canvas_stream_str
+    in CANVAS_DATA_PORT
+%end
+
+; --- Keyboard Macros ---
+
+; Checks if key %1 was pressed this frame; returns 1 in A (Z=0) if pressed, 0 otherwise
+%macro KeyPress 1
+    mvi A, CMD_KEY_PRESS
+    out CANVAS_CMD_PORT
+    mvi A, %1
+    out CANVAS_DATA_PORT
+    in CANVAS_DATA_PORT
+    cpi 0
+%end
+
+; Checks if key %1 is currently held down; returns 1 in A (Z=0) if down, 0 otherwise
+%macro KeyDown 1
+    mvi A, CMD_KEY_DOWN
+    out CANVAS_CMD_PORT
+    mvi A, %1
+    out CANVAS_DATA_PORT
+    in CANVAS_DATA_PORT
+    cpi 0
+%end
+
+; Checks if key %1 was released this frame; returns 1 in A (Z=0) if released, 0 otherwise
+%macro KeyRelease 1
+    mvi A, CMD_KEY_RELEASE
+    out CANVAS_CMD_PORT
+    mvi A, %1
+    out CANVAS_DATA_PORT
+    in CANVAS_DATA_PORT
+    cpi 0
+%end
+
+; Pops next key code from event queue into register A; updates Z flag
+%macro KeyInput 0
+    mvi A, CMD_KEY_INPUT
+    out CANVAS_CMD_PORT
+    in CANVAS_DATA_PORT
+    cpi 0
+%end
+
+; --- Mouse Macros ---
+
+; Checks if mouse button %1 was pressed this frame; returns 1 in A (Z=0) if pressed, 0 otherwise
+%macro MousePress 1
+    mvi A, CMD_MOUSE_PRESS
+    out CANVAS_CMD_PORT
+    mvi A, %1
+    out CANVAS_DATA_PORT
+    in CANVAS_DATA_PORT
+    cpi 0
+%end
+
+; Checks if mouse button %1 is currently held down; returns 1 in A (Z=0) if down, 0 otherwise
+%macro MouseDown 1
+    mvi A, CMD_MOUSE_DOWN
+    out CANVAS_CMD_PORT
+    mvi A, %1
+    out CANVAS_DATA_PORT
+    in CANVAS_DATA_PORT
+    cpi 0
+%end
+
+; Checks if mouse button %1 was released this frame; returns 1 in A (Z=0) if released, 0 otherwise
+%macro MouseRelease 1
+    mvi A, CMD_MOUSE_RELEASE
+    out CANVAS_CMD_PORT
+    mvi A, %1
+    out CANVAS_DATA_PORT
+    in CANVAS_DATA_PORT
+    cpi 0
+%end
+
+; Reads current logical mouse position into B (X) and C (Y)
+%macro MousePosition 0
+    mvi A, CMD_MOUSE_POS
+    out CANVAS_CMD_PORT
+    in CANVAS_DATA_PORT
+    mov B, A
+    in CANVAS_DATA_PORT
+    mov C, A
+%end
+
+; ==============================================================================
+; Canvas Subroutines
+; ==============================================================================
+
+segment .text
+
+; Streams a null-terminated string at HL to CANVAS_DATA_PORT with leading length
+; Alters: A, flags (preserves B, C, D, E, H, L)
+global canvas_stream_str:
+    push BC
+    push HL
+
+    ; First pass: count length
+    mvi B, 0
+.count_loop:
+    mov A, M
+    cpi 0
+    jz .count_done
+    inr B
+    inx HL
+    jmp .count_loop
+
+.count_done:
+    pop HL
+    push HL
+
+    ; Send length
+    mov A, B
+    out CANVAS_DATA_PORT
+    cpi 0
+    jz .exit
+
+    ; Second pass: stream characters
+.send_loop:
+    mov A, M
+    out CANVAS_DATA_PORT
+    inx HL
+    dcr B
+    jnz .send_loop
+
+.exit:
+    pop HL
+    pop BC
+    ret
+
+; Reads a string from CANVAS_DATA_PORT into memory at HL with null terminator
+; Alters: A, flags (preserves B, C, D, E, H, L)
+global canvas_read_str:
+    push BC
+    push HL
+
+    in CANVAS_DATA_PORT
+    mov B, A
+    cpi 0
+    jz .read_done
+
+.read_loop:
+    in CANVAS_DATA_PORT
+    mov M, A
+    inx HL
+    dcr B
+    jnz .read_loop
+
+.read_done:
+    mvi M, 0
+    pop HL
+    pop BC
+    ret
+
+; Checks if key in register A is currently held down
+; Inputs: A = Key code
+; Outputs: A = 1 (true) or 0 (false), Zero flag updated
+global canvas_key_down:
+    push BC
+    mov B, A
+    mvi A, CMD_KEY_DOWN
+    out CANVAS_CMD_PORT
+    mov A, B
+    out CANVAS_DATA_PORT
+    in CANVAS_DATA_PORT
+    cpi 0
+    pop BC
+    ret
+
+; Checks if key in register A transitioned to pressed this frame
+; Inputs: A = Key code
+; Outputs: A = 1 (true) or 0 (false), Zero flag updated
+global canvas_key_press:
+    push BC
+    mov B, A
+    mvi A, CMD_KEY_PRESS
+    out CANVAS_CMD_PORT
+    mov A, B
+    out CANVAS_DATA_PORT
+    in CANVAS_DATA_PORT
+    cpi 0
+    pop BC
+    ret
+
+; Checks if key in register A was released this frame
+; Inputs: A = Key code
+; Outputs: A = 1 (true) or 0 (false), Zero flag updated
+global canvas_key_release:
+    push BC
+    mov B, A
+    mvi A, CMD_KEY_RELEASE
+    out CANVAS_CMD_PORT
+    mov A, B
+    out CANVAS_DATA_PORT
+    in CANVAS_DATA_PORT
+    cpi 0
+    pop BC
+    ret
+
+; Reads next key event from input queue
+; Outputs: A = Key code (0 if none), Zero flag updated
+global canvas_key_input:
+    mvi A, CMD_KEY_INPUT
+    out CANVAS_CMD_PORT
+    in CANVAS_DATA_PORT
+    cpi 0
+    ret
+
+; Checks if mouse button in register A transitioned to pressed this frame
+; Inputs: A = Mouse button (MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT, MOUSE_BUTTON_MIDDLE)
+; Outputs: A = 1 (true) or 0 (false), Zero flag updated
+global canvas_mouse_press:
+    push BC
+    mov B, A
+    mvi A, CMD_MOUSE_PRESS
+    out CANVAS_CMD_PORT
+    mov A, B
+    out CANVAS_DATA_PORT
+    in CANVAS_DATA_PORT
+    cpi 0
+    pop BC
+    ret
+
+; Checks if mouse button in register A is currently held down
+; Inputs: A = Mouse button
+; Outputs: A = 1 (true) or 0 (false), Zero flag updated
+global canvas_mouse_down:
+    push BC
+    mov B, A
+    mvi A, CMD_MOUSE_DOWN
+    out CANVAS_CMD_PORT
+    mov A, B
+    out CANVAS_DATA_PORT
+    in CANVAS_DATA_PORT
+    cpi 0
+    pop BC
+    ret
+
+; Checks if mouse button in register A was released this frame
+; Inputs: A = Mouse button
+; Outputs: A = 1 (true) or 0 (false), Zero flag updated
+global canvas_mouse_release:
+    push BC
+    mov B, A
+    mvi A, CMD_MOUSE_RELEASE
+    out CANVAS_CMD_PORT
+    mov A, B
+    out CANVAS_DATA_PORT
+    in CANVAS_DATA_PORT
+    cpi 0
+    pop BC
+    ret
+
+; Reads current logical mouse position
+; Outputs: B = X coordinate, C = Y coordinate
+global canvas_mouse_pos:
+    mvi A, CMD_MOUSE_POS
+    out CANVAS_CMD_PORT
+    in CANVAS_DATA_PORT
+    mov B, A
+    in CANVAS_DATA_PORT
+    mov C, A
+    ret
+
+; Draws a filled rectangle with register parameters
+; Inputs: B = x, C = y, D = w, E = h, H = color_hi, L = color_lo
+global canvas_draw_rect:
+    mvi A, CMD_FILL_RECT
+    out CANVAS_CMD_PORT
+    mov A, B
+    out CANVAS_DATA_PORT
+    mov A, C
+    out CANVAS_DATA_PORT
+    mov A, D
+    out CANVAS_DATA_PORT
+    mov A, E
+    out CANVAS_DATA_PORT
+    mov A, H
+    out CANVAS_DATA_PORT
+    mov A, L
+    out CANVAS_DATA_PORT
+    ret
+
+; Draws an outlined rectangle with register parameters
+; Inputs: B = x, C = y, D = w, E = h, H = color_hi, L = color_lo, Stack/A = thickness
+global canvas_stroke_rect:
+    push PSW
+    mvi A, CMD_STROKE_RECT
+    out CANVAS_CMD_PORT
+    mov A, B
+    out CANVAS_DATA_PORT
+    mov A, C
+    out CANVAS_DATA_PORT
+    mov A, D
+    out CANVAS_DATA_PORT
+    mov A, E
+    out CANVAS_DATA_PORT
+    pop PSW
+    out CANVAS_DATA_PORT
+    mov A, H
+    out CANVAS_DATA_PORT
+    mov A, L
+    out CANVAS_DATA_PORT
+    ret
+
+; Draws a filled ellipse with register parameters
+; Inputs: B = cx, C = cy, D = rx, E = ry, H = color_hi, L = color_lo
+global canvas_draw_ellipse:
+    mvi A, CMD_FILL_ELLIPSE
+    out CANVAS_CMD_PORT
+    mov A, B
+    out CANVAS_DATA_PORT
+    mov A, C
+    out CANVAS_DATA_PORT
+    mov A, D
+    out CANVAS_DATA_PORT
+    mov A, E
+    out CANVAS_DATA_PORT
+    mov A, H
+    out CANVAS_DATA_PORT
+    mov A, L
+    out CANVAS_DATA_PORT
+    ret
+
+; Draws an outlined ellipse with register parameters
+; Inputs: B = cx, C = cy, D = rx, E = ry, H = color_hi, L = color_lo, Stack/A = thickness
+global canvas_stroke_ellipse:
+    push PSW
+    mvi A, CMD_STROKE_ELLIPSE
+    out CANVAS_CMD_PORT
+    mov A, B
+    out CANVAS_DATA_PORT
+    mov A, C
+    out CANVAS_DATA_PORT
+    mov A, D
+    out CANVAS_DATA_PORT
+    mov A, E
+    out CANVAS_DATA_PORT
+    pop PSW
+    out CANVAS_DATA_PORT
+    mov A, H
+    out CANVAS_DATA_PORT
+    mov A, L
+    out CANVAS_DATA_PORT
+    ret

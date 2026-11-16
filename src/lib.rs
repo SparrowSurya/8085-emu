@@ -51,7 +51,9 @@ pub use cpu::interrupts::{VEC_RST_5_5, VEC_RST_6_5, VEC_RST_7_5, VEC_TRAP};
 pub use cpu::registers::{Reg8, Reg16};
 pub use cpu::{Cpu, MachineCycle};
 pub use dap::DapError;
-pub use device::{Device, DeviceManager, KeyboardDevice, PrinterDevice, TextIODevice, USBDevice};
+pub use device::{
+    CanvasDevice, Device, DeviceManager, KeyboardDevice, PrinterDevice, TextIODevice, USBDevice,
+};
 pub use error::EmuError;
 pub use instruction::opcode::Opcode;
 pub use instruction::{

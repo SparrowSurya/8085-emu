@@ -1,0 +1,164 @@
+; ==============================================================================
+; Canvas Demo Program for Intel 8085 Microprocessor
+;
+; Demonstrates interactive 2D graphics rendering, text display, shape drawing,
+; and real-time keyboard interaction using the Canvas Device.
+;
+; Controls:
+;   - Up Arrow / W: Move paddle up
+;   - Down Arrow / S: Move paddle down
+;   - Escape: Exit program
+; ==============================================================================
+
+%include "devices/canvas.e8085"
+
+segment .data
+title_str byte "8085 Canvas Interactive Demo\0"
+score_lbl byte "EMU8085 CANVAS\0"
+exit_msg  byte "Press ESC to Exit\0"
+
+segment .bss
+paddle_y byte 1
+ball_x   byte 1
+ball_y   byte 1
+ball_dx  byte 1
+ball_dy  byte 1
+
+segment .text
+main:
+    ; 1. Initialize canvas (160x90 logical, automatically scaled 4x4 to 640x360 window)
+    InitCanvas RES_DEFAULT_W, RES_DEFAULT_H, title_str
+    SetFPS 30
+
+    ; Initial state
+    mvi A, 35
+    sta paddle_y
+
+    mvi A, 80
+    sta ball_x
+    mvi A, 45
+    sta ball_y
+    mvi A, 1
+    sta ball_dx
+    sta ball_dy
+
+game_loop:
+    ; 2. Check if user closed the window
+    IsCanvasOpen
+    jz game_exit
+
+    ; 3. Check for Escape key to exit
+    KeyDown K_ESCAPE
+    jnz game_exit
+
+    ; 4. Check Keyboard Input (Paddle Movement)
+    KeyDown K_ARROW_UP
+    jnz .move_up
+    KeyDown K_W
+    jz .check_down
+
+.move_up:
+    lda paddle_y
+    cpi 5
+    jz .check_down
+    dcr A
+    sta paddle_y
+
+.check_down:
+    KeyDown K_ARROW_DOWN
+    jnz .move_down
+    KeyDown K_S
+    jz .update_ball
+
+.move_down:
+    lda paddle_y
+    cpi 65
+    jz .update_ball
+    inr A
+    sta paddle_y
+
+.update_ball:
+    ; Move Ball X
+    lda ball_dx
+    cpi 1
+    jz .ball_right
+    jmp .ball_left
+
+.ball_left:
+    lda ball_x
+    dcr A
+    sta ball_x
+    cpi 18
+    jnz .update_ball_y
+    ; Bounce right
+    mvi A, 1
+    sta ball_dx
+    jmp .update_ball_y
+
+.ball_right:
+    lda ball_x
+    inr A
+    sta ball_x
+    cpi 150
+    jnz .update_ball_y
+    ; Bounce left
+    xra A
+    sta ball_dx
+
+.update_ball_y:
+    ; Move Ball Y
+    lda ball_dy
+    cpi 1
+    jz .ball_down
+    jmp .ball_up
+
+.ball_up:
+    lda ball_y
+    dcr A
+    sta ball_y
+    cpi 5
+    jnz .render
+    mvi A, 1
+    sta ball_dy
+    jmp .render
+
+.ball_down:
+    lda ball_y
+    inr A
+    sta ball_y
+    cpi 82
+    jnz .render
+    xra A
+    sta ball_dy
+
+.render:
+    ; 5. Clear background (Dark Navy Blue)
+    Clear 0x00, 0x2F
+
+    ; 6. Draw Field Center Line (White, thickness 1)
+    Line 80, 0, 80, 90, 1, COLOR_GRAY_HI, COLOR_GRAY_LO
+
+    ; 7. Draw Field Border (Yellow Outline)
+    StrokeRectangle 2, 2, 156, 86, 1, COLOR_YELLOW_HI, COLOR_YELLOW_LO
+
+    ; 8. Draw Paddle (Green Filled Rectangle)
+    lda paddle_y
+    ; x=10, y=paddle_y, w=4, h=20, color=GREEN
+    FillRectangle 10, 35, 4, 20, COLOR_GREEN_HI, COLOR_GREEN_LO
+
+    ; 9. Draw Ball (Cyan Filled Ellipse: rx=3, ry=3)
+    FillEllipse 80, 45, 3, 3, COLOR_CYAN_HI, COLOR_CYAN_LO
+
+    ; 10. Render Score / Header Text
+    FillText score_lbl, 25, 6, 1, COLOR_WHITE_HI, COLOR_WHITE_LO
+
+    ; 11. Render Exit Instructions
+    FillText exit_msg, 25, 78, 1, COLOR_GRAY_HI, COLOR_GRAY_LO
+
+    ; 12. Swap backbuffer to physical window, poll events, sync to 30 FPS
+    UpdateCanvas
+    jmp game_loop
+
+game_exit:
+    DisposeCanvas
+    hlt

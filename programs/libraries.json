@@ -7,6 +7,23 @@
       "expected_symbols": ["print", "input", "putch", "endl"]
     },
     {
+      "name": "canvas",
+      "dir": "devices",
+      "file": "devices/canvas.e8085",
+      "expected_symbols": [
+        "canvas_stream_str",
+        "canvas_read_str",
+        "canvas_key_down",
+        "canvas_key_press",
+        "canvas_key_release",
+        "canvas_key_input",
+        "canvas_draw_rect",
+        "canvas_stroke_rect",
+        "canvas_draw_ellipse",
+        "canvas_stroke_ellipse"
+      ]
+    },
+    {
       "name": "math",
       "dir": "lib",
       "file": "lib/math.e8085",

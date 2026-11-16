@@ -8,7 +8,7 @@ use clap::{Parser, Subcommand};
 use emu8085::asm::assemble_and_link_with_file;
 use emu8085::asm::container::{BinaryContainer, CONTAINER_MAGIC};
 use emu8085::asm::load;
-use emu8085::{Addr, DisassembleOptions, InspectOptions, Machine, TextIODevice};
+use emu8085::{Addr, CanvasDevice, DisassembleOptions, InspectOptions, Machine, TextIODevice};
 
 /// Maximum 8085 RAM capacity (64 KB).
 const MAX_RAM_SIZE: usize = 65536;
@@ -428,6 +428,14 @@ fn run_file(path: &str, link: &[String]) {
     });
 
     machine.attach_device(Box::new(text_io), &[TEXTIO_DATA_PORT, TEXTIO_CMD_PORT]);
+    machine.attach_device(
+        Box::new(CanvasDevice::default()),
+        &[
+            emu8085::device::canvas::CANVAS_CMD_PORT,
+            emu8085::device::canvas::CANVAS_DATA_PORT,
+            emu8085::device::canvas::CANVAS_STATUS_PORT,
+        ],
+    );
     machine.run();
 
     if let Some(fault) = &machine.cpu.fault {

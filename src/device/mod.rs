@@ -9,11 +9,13 @@ pub mod keyboard;
 pub mod printer;
 pub mod text_io;
 pub mod usb;
+pub mod canvas;
 
 pub use keyboard::KeyboardDevice;
 pub use printer::PrinterDevice;
 pub use text_io::TextIODevice;
 pub use usb::USBDevice;
+pub use canvas::CanvasDevice;
 
 use crate::bus::SystemBus;
 use std::collections::HashMap;
