@@ -138,6 +138,7 @@ pub fn compute_diagnostics_with_externs(
         });
 
         // Fatal compilation error: stop further static analysis
+        check_inactive_conditionals(doc, base_ref, &mut diagnostics);
         return diagnostics;
     }
 
@@ -147,7 +148,50 @@ pub fn compute_diagnostics_with_externs(
         run_static_analysis(doc, &program, &mut diagnostics);
     }
 
+    // 3. Conditional compilation: dead code dimming for inactive branches
+    check_inactive_conditionals(doc, base_ref, &mut diagnostics);
+
     diagnostics
+}
+
+fn check_inactive_conditionals(
+    doc: &Document,
+    base_dir: &Path,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let inactive_ranges = crate::asm::find_inactive_ranges(&doc.text, Some(base_dir));
+    let doc_lines: Vec<&str> = doc.text.lines().collect();
+
+    for (start_line, end_line) in inactive_ranges {
+        let s_line = start_line.saturating_sub(1);
+        let e_line = end_line.saturating_sub(1);
+        let end_char = if (e_line as usize) < doc_lines.len() {
+            doc_lines[e_line as usize].len() as u32
+        } else {
+            0
+        };
+
+        diagnostics.push(Diagnostic {
+            range: Range {
+                start: Position {
+                    line: s_line,
+                    character: 0,
+                },
+                end: Position {
+                    line: e_line,
+                    character: end_char,
+                },
+            },
+            severity: Some(DiagnosticSeverity::HINT),
+            code: None,
+            code_description: None,
+            source: Some("e8085".to_string()),
+            message: "Conditional block is inactive (evaluated to false)".to_string(),
+            related_information: None,
+            tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+            data: None,
+        });
+    }
 }
 
 fn validate_top_level_includes(

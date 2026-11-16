@@ -31,6 +31,35 @@ pub fn preprocess_with_defines(
     Preprocessor::new(tokens, base_dir, defines, visited_includes).run()
 }
 
+/// Preprocess tokens and also collect inactive source line ranges `(start_line, end_line)` (1-based).
+pub fn preprocess_with_inactive_ranges(
+    tokens: Vec<Token>,
+    base_dir: Option<&Path>,
+) -> Result<(Vec<Token>, Vec<(u32, u32)>), AsmError> {
+    let mut defines = HashMap::new();
+    let mut visited_includes = HashSet::new();
+    let mut inactive_ranges = Vec::new();
+    let res_tokens = Preprocessor::new_with_collector(
+        tokens,
+        base_dir,
+        &mut defines,
+        &mut visited_includes,
+        Some(&mut inactive_ranges),
+    )
+    .run()?;
+    Ok((res_tokens, inactive_ranges))
+}
+
+/// Helper to find all inactive source line ranges for an assembly source string (1-based).
+pub fn find_inactive_ranges(source: &str, base_dir: Option<&Path>) -> Vec<(u32, u32)> {
+    if let Ok(tokens) = lex(source) {
+        if let Ok((_, ranges)) = preprocess_with_inactive_ranges(tokens, base_dir) {
+            return ranges;
+        }
+    }
+    Vec::new()
+}
+
 #[derive(Debug, Clone)]
 struct CondFrame {
     span: Span,
@@ -38,6 +67,7 @@ struct CondFrame {
     branch_taken: bool,
     currently_active: bool,
     has_else: bool,
+    inactive_start_line: Option<u32>,
 }
 
 #[derive(Debug)]
@@ -53,6 +83,7 @@ struct Preprocessor<'a> {
     defines: &'a mut HashMap<String, i64>,
     visited_includes: &'a mut HashSet<PathBuf>,
     block_stack: Vec<BlockKind>,
+    inactive_ranges: Option<&'a mut Vec<(u32, u32)>>,
 }
 
 impl<'a> Preprocessor<'a> {
@@ -69,6 +100,25 @@ impl<'a> Preprocessor<'a> {
             defines,
             visited_includes,
             block_stack: Vec::new(),
+            inactive_ranges: None,
+        }
+    }
+
+    fn new_with_collector(
+        tokens: Vec<Token>,
+        base_dir: Option<&Path>,
+        defines: &'a mut HashMap<String, i64>,
+        visited_includes: &'a mut HashSet<PathBuf>,
+        inactive_ranges: Option<&'a mut Vec<(u32, u32)>>,
+    ) -> Self {
+        Self {
+            tokens,
+            pos: 0,
+            base_dir: base_dir.map(|p| p.to_path_buf()),
+            defines,
+            visited_includes,
+            block_stack: Vec::new(),
+            inactive_ranges,
         }
     }
 
@@ -304,17 +354,19 @@ impl<'a> Preprocessor<'a> {
         invert: bool,
     ) -> Result<(), AsmError> {
         let parent_active = self.parent_cond_active();
-        let cond_val = if parent_active {
-            if is_def_check {
+        let (cond_val, inactive_start) = if parent_active {
+            let active = if is_def_check {
                 let name = extract_ident_name(cond_tokens, span)?;
                 let is_def = self.defines.contains_key(&name.to_ascii_lowercase());
                 if invert { !is_def } else { is_def }
             } else {
                 let raw_val = eval_condition(cond_tokens, self.defines, span)?;
                 raw_val != 0
-            }
+            };
+            let inact = if !active { Some(span.line + 1) } else { None };
+            (active, inact)
         } else {
-            false
+            (false, None)
         };
 
         let frame = CondFrame {
@@ -323,6 +375,7 @@ impl<'a> Preprocessor<'a> {
             branch_taken: cond_val,
             currently_active: parent_active && cond_val,
             has_else: false,
+            inactive_start_line: inactive_start,
         };
 
         self.block_stack.push(BlockKind::If(frame));
@@ -330,18 +383,35 @@ impl<'a> Preprocessor<'a> {
     }
 
     fn handle_elif(&mut self, cond_tokens: &[Token], span: Span) -> Result<(), AsmError> {
-        let (parent_active, branch_taken, has_else) = {
+        let (parent_active, branch_taken, has_else, prev_inactive_start) = {
             let frame = self.get_innermost_if_mut(span, AsmErrorKind::ElifWithoutIf)?;
-            (frame.parent_active, frame.branch_taken, frame.has_else)
+            (
+                frame.parent_active,
+                frame.branch_taken,
+                frame.has_else,
+                frame.inactive_start_line,
+            )
         };
         if has_else {
             return Err(AsmError::new(span, AsmErrorKind::ElifAfterElse));
         }
 
-        let cond_val = if parent_active && !branch_taken {
-            eval_condition(cond_tokens, self.defines, span)? != 0
+        if let Some(start) = prev_inactive_start {
+            if span.line > start {
+                if let Some(ref mut ranges) = self.inactive_ranges {
+                    ranges.push((start, span.line - 1));
+                }
+            }
+        }
+
+        let (cond_val, new_inactive_start) = if parent_active && !branch_taken {
+            let active = eval_condition(cond_tokens, self.defines, span)? != 0;
+            let inact = if !active { Some(span.line + 1) } else { None };
+            (active, inact)
+        } else if parent_active {
+            (false, Some(span.line + 1))
         } else {
-            false
+            (false, None)
         };
 
         let frame = self.get_innermost_if_mut(span, AsmErrorKind::ElifWithoutIf)?;
@@ -351,23 +421,49 @@ impl<'a> Preprocessor<'a> {
         } else {
             frame.currently_active = false;
         }
+        frame.inactive_start_line = new_inactive_start;
 
         Ok(())
     }
 
     fn handle_else(&mut self, span: Span) -> Result<(), AsmError> {
-        let frame = self.get_innermost_if_mut(span, AsmErrorKind::ElseWithoutIf)?;
-        if frame.has_else {
-            return Err(AsmError::new(span, AsmErrorKind::DuplicateElse));
-        }
-        frame.has_else = true;
+        let (parent_active, branch_taken, prev_inactive_start) = {
+            let frame = self.get_innermost_if_mut(span, AsmErrorKind::ElseWithoutIf)?;
+            if frame.has_else {
+                return Err(AsmError::new(span, AsmErrorKind::DuplicateElse));
+            }
+            frame.has_else = true;
+            (
+                frame.parent_active,
+                frame.branch_taken,
+                frame.inactive_start_line,
+            )
+        };
 
-        if frame.parent_active && !frame.branch_taken {
+        if let Some(start) = prev_inactive_start {
+            if span.line > start {
+                if let Some(ref mut ranges) = self.inactive_ranges {
+                    ranges.push((start, span.line - 1));
+                }
+            }
+        }
+
+        let (is_active, new_inactive_start) = if parent_active && !branch_taken {
+            (true, None)
+        } else if parent_active {
+            (false, Some(span.line + 1))
+        } else {
+            (false, None)
+        };
+
+        let frame = self.get_innermost_if_mut(span, AsmErrorKind::ElseWithoutIf)?;
+        if is_active {
             frame.branch_taken = true;
             frame.currently_active = true;
         } else {
             frame.currently_active = false;
         }
+        frame.inactive_start_line = new_inactive_start;
 
         Ok(())
     }
@@ -375,7 +471,16 @@ impl<'a> Preprocessor<'a> {
     fn handle_endif(&mut self, span: Span) -> Result<(), AsmError> {
         // Must pop innermost BlockKind::If
         match self.block_stack.pop() {
-            Some(BlockKind::If(_)) => Ok(()),
+            Some(BlockKind::If(frame)) => {
+                if let Some(start) = frame.inactive_start_line {
+                    if span.line > start {
+                        if let Some(ref mut ranges) = self.inactive_ranges {
+                            ranges.push((start, span.line - 1));
+                        }
+                    }
+                }
+                Ok(())
+            }
             Some(BlockKind::Macro { .. }) => {
                 Err(AsmError::new(span, AsmErrorKind::UnexpectedEnd))
             }
@@ -385,7 +490,16 @@ impl<'a> Preprocessor<'a> {
 
     fn handle_end(&mut self, span: Span) -> Result<ClosedBlock, AsmError> {
         match self.block_stack.pop() {
-            Some(BlockKind::If(_)) => Ok(ClosedBlock::If),
+            Some(BlockKind::If(frame)) => {
+                if let Some(start) = frame.inactive_start_line {
+                    if span.line > start {
+                        if let Some(ref mut ranges) = self.inactive_ranges {
+                            ranges.push((start, span.line - 1));
+                        }
+                    }
+                }
+                Ok(ClosedBlock::If)
+            }
             Some(BlockKind::Macro { active }) => Ok(ClosedBlock::Macro(active)),
             None => Err(AsmError::new(span, AsmErrorKind::UnexpectedEnd)),
         }
@@ -716,5 +830,66 @@ impl<'a> CondExprParser<'a> {
                 AsmErrorKind::InvalidCondition(format!("unexpected token '{other:?}'")),
             )),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_find_inactive_ranges_simple_if_else() {
+        let src = r#"%define DEBUG 0
+%if DEBUG
+    mov a, 1
+    mov b, 2
+%else
+    mov a, 3
+%end"#;
+        let ranges = find_inactive_ranges(src, None);
+        assert_eq!(ranges, vec![(3, 4)]);
+    }
+
+    #[test]
+    fn test_find_inactive_ranges_elif() {
+        let src = r#"%define MODE 2
+%if MODE == 1
+    mov a, 1
+%elif MODE == 2
+    mov a, 2
+%else
+    mov a, 3
+%end"#;
+        let ranges = find_inactive_ranges(src, None);
+        assert_eq!(ranges, vec![(3, 3), (7, 7)]);
+    }
+
+    #[test]
+    fn test_find_inactive_ranges_valueless_define() {
+        let src = r#"%define FEATURE
+%if FEATURE
+    mov a, 10
+%else
+    mov a, 20
+%end"#;
+        let ranges = find_inactive_ranges(src, None);
+        assert_eq!(ranges, vec![(5, 5)]);
+    }
+
+    #[test]
+    fn test_find_inactive_ranges_nested() {
+        let src = r#"%define OUTER 1
+%define INNER 0
+%if OUTER
+    mov a, 1
+    %if INNER
+        mov b, 2
+    %end
+    mov c, 3
+%else
+    mov d, 4
+%end"#;
+        let ranges = find_inactive_ranges(src, None);
+        assert_eq!(ranges, vec![(6, 6), (10, 10)]);
     }
 }

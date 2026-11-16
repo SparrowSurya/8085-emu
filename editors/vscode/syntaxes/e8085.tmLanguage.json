@@ -43,8 +43,19 @@
           }
         },
         {
-          "match": "(%(?i:end))\\b",
+          "match": "(%(?i:end|endif))\\b",
           "name": "keyword.control.directive.macro.end.e8085"
+        },
+        {
+          "match": "(%(?i:ifdef|ifndef))\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.control.directive.conditional.e8085 keyword.control.directive.e8085" },
+            "2": { "name": "entity.name.constant.e8085" }
+          }
+        },
+        {
+          "match": "(%(?i:if|elif|else))\\b",
+          "name": "keyword.control.directive.conditional.e8085 keyword.control.directive.e8085"
         },
         {
           "name": "constant.numeric.decimal.macro.parameter.e8085",
@@ -73,7 +84,7 @@
         },
         {
           "name": "keyword.control.directive.e8085",
-          "match": "(?i)%(define|repeat|len|include|macro|end)\\b"
+          "match": "(?i)%(define|repeat|len|include|macro|end|endif|if|elif|else|ifdef|ifndef)\\b"
         }
       ]
     },
@@ -81,7 +92,7 @@
       "patterns": [
         {
           "name": "keyword.control.segment.e8085",
-          "match": "(?i)\\bsegment\\b"
+          "match": "(?i)\\b(segment|section)\\b"
         },
         {
           "name": "entity.name.section.segment.e8085 storage.type.section.e8085",
@@ -339,6 +350,14 @@
     },
     "punctuation": {
       "patterns": [
+        {
+          "name": "keyword.operator.comparison.e8085",
+          "match": "(==|!=|<=|>=|<|>)"
+        },
+        {
+          "name": "keyword.operator.logical.e8085",
+          "match": "(&&|\\|\\||!)"
+        },
         {
           "name": "punctuation.separator.comma.e8085",
           "match": ","

@@ -18,7 +18,8 @@ fn get_present_segments(doc: &Document) -> HashSet<SegmentKind> {
     let mut present = HashSet::new();
     for line in doc.text.lines() {
         let code_line = line.split(';').next().unwrap_or("").trim();
-        if code_line.to_lowercase().starts_with("segment ") {
+        let lower = code_line.to_lowercase();
+        if lower.starts_with("segment ") || lower.starts_with("section ") {
             let seg_name = code_line[8..].trim().to_lowercase();
             if seg_name == ".text" || seg_name == "text" {
                 present.insert(SegmentKind::Text);
@@ -93,6 +94,28 @@ pub fn get_completions(doc: &Document, position: &Position) -> Option<Completion
                 items,
             }));
         }
+    }
+
+    // 4b. Check if typing after `%if `, `%elif `, `%ifdef `, or `%ifndef ` (suggest defined constants)
+    if lower_code.starts_with("%if ")
+        || lower_code.starts_with("%elif ")
+        || lower_code.starts_with("%ifdef ")
+        || lower_code.starts_with("%ifndef ")
+    {
+        let (_, constants) = extract_variables_and_constants(doc);
+        let items: Vec<CompletionItem> = constants
+            .into_iter()
+            .map(|c| CompletionItem {
+                label: c,
+                kind: Some(CompletionItemKind::CONSTANT),
+                detail: Some("Defined Constant".to_string()),
+                ..Default::default()
+            })
+            .collect();
+        return Some(CompletionResponse::List(CompletionList {
+            is_incomplete: false,
+            items,
+        }));
     }
 
     // 5. Check if typing after `%repeat ` (in data segment or anywhere)
@@ -803,7 +826,7 @@ fn extract_variables_and_constants(doc: &Document) -> (Vec<VariableInfo>, Vec<St
             continue;
         }
 
-        if code_line.to_lowercase().starts_with("segment ") {
+        if code_line.to_lowercase().starts_with("segment ") || code_line.to_lowercase().starts_with("section ") {
             let seg_name = code_line[8..].trim().to_lowercase();
             if seg_name == ".text" || seg_name == "text" {
                 current_segment = Some(SegmentKind::Text);
@@ -884,7 +907,9 @@ fn extract_variables_and_constants(doc: &Document) -> (Vec<VariableInfo>, Vec<St
                                     if inc_code.is_empty() {
                                         continue;
                                     }
-                                    if inc_code.to_lowercase().starts_with("segment ") {
+                                    if inc_code.to_lowercase().starts_with("segment ")
+                                        || inc_code.to_lowercase().starts_with("section ")
+                                    {
                                         let seg_name = inc_code[8..].trim().to_lowercase();
                                         if seg_name == ".text" || seg_name == "text" {
                                             inc_seg = Some(SegmentKind::Text);
@@ -1160,7 +1185,7 @@ fn get_macro_completions(doc: &Document) -> Vec<CompletionItem> {
 }
 
 fn get_percent_directive_completions(seg_kind: Option<SegmentKind>) -> Vec<CompletionItem> {
-    match seg_kind {
+    let mut items = match seg_kind {
         Some(SegmentKind::Text) => vec![
             make_snippet_item(
                 "len",
@@ -1175,7 +1200,7 @@ fn get_percent_directive_completions(seg_kind: Option<SegmentKind>) -> Vec<Compl
             make_snippet_item(
                 "end",
                 "end",
-                "End of macro definition",
+                "End of macro or conditional block",
             ),
         ],
         Some(SegmentKind::Data) => vec![
@@ -1231,7 +1256,7 @@ fn get_percent_directive_completions(seg_kind: Option<SegmentKind>) -> Vec<Compl
             make_snippet_item(
                 "end",
                 "end",
-                "End of macro definition",
+                "End of macro or conditional block",
             ),
             make_snippet_item(
                 "include",
@@ -1239,7 +1264,42 @@ fn get_percent_directive_completions(seg_kind: Option<SegmentKind>) -> Vec<Compl
                 "Include an external source file",
             ),
         ],
-    }
+    };
+
+    items.extend(vec![
+        make_snippet_item(
+            "if",
+            "if ${1:condition}\n\t$0\n%end",
+            "Conditional compilation block",
+        ),
+        make_snippet_item(
+            "ifdef",
+            "ifdef ${1:NAME}\n\t$0\n%end",
+            "Conditional compilation if defined",
+        ),
+        make_snippet_item(
+            "ifndef",
+            "ifndef ${1:NAME}\n\t$0\n%end",
+            "Conditional compilation if not defined",
+        ),
+        make_snippet_item(
+            "elif",
+            "elif ${1:condition}",
+            "Alternative conditional branch",
+        ),
+        make_snippet_item(
+            "else",
+            "else",
+            "Fallback conditional branch",
+        ),
+        make_snippet_item(
+            "endif",
+            "endif",
+            "End conditional block",
+        ),
+    ]);
+
+    items
 }
 
 fn get_header_directives(present: &HashSet<SegmentKind>) -> Vec<CompletionItem> {
@@ -1257,12 +1317,42 @@ fn get_header_directives(present: &HashSet<SegmentKind>) -> Vec<CompletionItem> 
         make_snippet_item(
             "%end",
             "%end",
-            "End of macro definition",
+            "End of macro or conditional block",
         ),
         make_snippet_item(
             "%include",
             "%include \"${1}\"",
             "Include an external source file",
+        ),
+        make_snippet_item(
+            "%if",
+            "%if ${1:condition}\n\t$0\n%end",
+            "Conditional compilation block",
+        ),
+        make_snippet_item(
+            "%ifdef",
+            "%ifdef ${1:NAME}\n\t$0\n%end",
+            "Conditional compilation if defined",
+        ),
+        make_snippet_item(
+            "%ifndef",
+            "%ifndef ${1:NAME}\n\t$0\n%end",
+            "Conditional compilation if not defined",
+        ),
+        make_snippet_item(
+            "%elif",
+            "%elif ${1:condition}",
+            "Alternative conditional branch",
+        ),
+        make_snippet_item(
+            "%else",
+            "%else",
+            "Fallback conditional branch",
+        ),
+        make_snippet_item(
+            "%endif",
+            "%endif",
+            "End conditional block",
         ),
     ];
     items.extend(get_missing_segment_completions(present));
@@ -1277,6 +1367,11 @@ fn get_missing_segment_completions(present: &HashSet<SegmentKind>) -> Vec<Comple
             "segment .text\n$0",
             "Executable code segment",
         ));
+        items.push(make_snippet_item(
+            "section .text",
+            "section .text\n$0",
+            "Executable code section",
+        ));
     }
     if !present.contains(&SegmentKind::Data) {
         items.push(make_snippet_item(
@@ -1284,12 +1379,22 @@ fn get_missing_segment_completions(present: &HashSet<SegmentKind>) -> Vec<Comple
             "segment .data\n$0",
             "Initialized data segment",
         ));
+        items.push(make_snippet_item(
+            "section .data",
+            "section .data\n$0",
+            "Initialized data section",
+        ));
     }
     if !present.contains(&SegmentKind::Bss) {
         items.push(make_snippet_item(
             "segment .bss",
             "segment .bss\n$0",
             "Uninitialized memory buffer segment",
+        ));
+        items.push(make_snippet_item(
+            "section .bss",
+            "section .bss\n$0",
+            "Uninitialized memory buffer section",
         ));
     }
     items
@@ -1307,6 +1412,36 @@ fn get_text_directives(present: &HashSet<SegmentKind>) -> Vec<CompletionItem> {
             "extern ${1:function_name}",
             "Declare external linked symbol",
         ),
+        make_snippet_item(
+            "%if",
+            "%if ${1:condition}\n\t$0\n%end",
+            "Conditional compilation block",
+        ),
+        make_snippet_item(
+            "%ifdef",
+            "%ifdef ${1:NAME}\n\t$0\n%end",
+            "Conditional compilation if defined",
+        ),
+        make_snippet_item(
+            "%ifndef",
+            "%ifndef ${1:NAME}\n\t$0\n%end",
+            "Conditional compilation if not defined",
+        ),
+        make_snippet_item(
+            "%elif",
+            "%elif ${1:condition}",
+            "Alternative conditional branch",
+        ),
+        make_snippet_item(
+            "%else",
+            "%else",
+            "Fallback conditional branch",
+        ),
+        make_snippet_item(
+            "%endif",
+            "%endif",
+            "End conditional block",
+        ),
     ];
     if !present.contains(&SegmentKind::Data) {
         items.push(make_snippet_item(
@@ -1314,12 +1449,22 @@ fn get_text_directives(present: &HashSet<SegmentKind>) -> Vec<CompletionItem> {
             "segment .data\n$0",
             "Switch to data segment",
         ));
+        items.push(make_snippet_item(
+            "section .data",
+            "section .data\n$0",
+            "Switch to data section",
+        ));
     }
     if !present.contains(&SegmentKind::Bss) {
         items.push(make_snippet_item(
             "segment .bss",
             "segment .bss\n$0",
             "Switch to bss segment",
+        ));
+        items.push(make_snippet_item(
+            "section .bss",
+            "section .bss\n$0",
+            "Switch to bss section",
         ));
     }
     items
@@ -2326,6 +2471,56 @@ main:
             assert!(!list.items.iter().any(|item| item.label == "already_exported"));
             assert!(!list.items.iter().any(|item| item.label == "mov"));
             assert!(!list.items.iter().any(|item| item.label == "segment .text"));
+        } else {
+            panic!("expected list");
+        }
+    }
+
+    #[test]
+    fn test_conditional_directives_and_defined_constant_completions() {
+        let uri = Url::parse("file:///cond_comp.e8085").unwrap();
+        let text = r#"%define DEBUG
+%define BUFFER_SIZE 64
+
+%if 
+%
+"#
+        .to_string();
+        let doc = Document::new(uri, 1, text);
+
+        // 1. Typing after `%if ` on line 3
+        let res_if = get_completions(
+            &doc,
+            &Position {
+                line: 3,
+                character: 4,
+            },
+        )
+        .unwrap();
+        if let CompletionResponse::List(list) = res_if {
+            assert!(list.items.iter().any(|item| item.label == "DEBUG"));
+            assert!(list.items.iter().any(|item| item.label == "BUFFER_SIZE"));
+        } else {
+            panic!("expected list");
+        }
+
+        // 2. Typing after `%` on line 4
+        let res_pct = get_completions(
+            &doc,
+            &Position {
+                line: 4,
+                character: 1,
+            },
+        )
+        .unwrap();
+        if let CompletionResponse::List(list) = res_pct {
+            assert!(list.items.iter().any(|item| item.label == "if"));
+            assert!(list.items.iter().any(|item| item.label == "elif"));
+            assert!(list.items.iter().any(|item| item.label == "else"));
+            assert!(list.items.iter().any(|item| item.label == "endif"));
+            assert!(list.items.iter().any(|item| item.label == "ifdef"));
+            assert!(list.items.iter().any(|item| item.label == "ifndef"));
+            assert!(list.items.iter().any(|item| item.label == "define"));
         } else {
             panic!("expected list");
         }

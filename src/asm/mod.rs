@@ -38,6 +38,6 @@ pub use inspect::{
 pub use lexer::lex;
 pub use macro_expander::expand_macros;
 pub use parser::parse;
-pub use preprocessor::preprocess;
+pub use preprocessor::{find_inactive_ranges, preprocess, preprocess_with_inactive_ranges};
 pub use token::{Token, TokenKind};
 

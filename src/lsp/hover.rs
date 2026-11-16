@@ -1088,11 +1088,70 @@ fn get_register_hover(reg: &str) -> Option<String> {
 fn get_directive_hover(directive: &str) -> Option<&'static str> {
     match directive.to_lowercase().as_str() {
         "%define" => Some(
-            "**Directive** `%define NAME VALUE`\n\n\
-             Defines a compile-time numeric, character, or string constant.\n\n\
-             **Example:**\n\
+            "**Directive** `%define NAME [VALUE]`\n\n\
+             Defines a compile-time numeric, character, or string constant. If VALUE is omitted, it defaults to 1.\n\n\
+             **Example 1:** With explicit value\n\
              ```e8085\n\
              %define BUFFER_SIZE 64\n\
+             ```\n\n\
+             **Example 2:** Flag (defaults to 1)\n\
+             ```e8085\n\
+             %define DEBUG\n\
+             ```",
+        ),
+        "%if" => Some(
+            "**Directive** `%if <condition>`\n\n\
+             Begins a conditional compilation block. The enclosed block is compiled only if `<condition>` evaluates to non-zero (true).\n\n\
+             **Supported Operators:** `==`, `!=`, `<`, `<=`, `>`, `>=`, `&&`, `||`, `!`, `(...)`, and `defined(NAME)`.\n\n\
+             **Example:**\n\
+             ```e8085\n\
+             %if DEBUG && BUFFER_SIZE > 32\n\
+                 mov a, 1\n\
+             %end\n\
+             ```",
+        ),
+        "%elif" => Some(
+            "**Directive** `%elif <condition>`\n\n\
+             Alternative conditional branch evaluated when preceding `%if` or `%elif` conditions evaluated to false.\n\n\
+             **Example:**\n\
+             ```e8085\n\
+             %if MODE == 1\n\
+                 mvi a, 1\n\
+             %elif MODE == 2\n\
+                 mvi a, 2\n\
+             %end\n\
+             ```",
+        ),
+        "%else" => Some(
+            "**Directive** `%else`\n\n\
+             Fallback branch executed when all preceding `%if` and `%elif` conditions evaluated to false.\n\n\
+             **Example:**\n\
+             ```e8085\n\
+             %if DEBUG\n\
+                 mvi a, 1\n\
+             %else\n\
+                 mvi a, 0\n\
+             %end\n\
+             ```",
+        ),
+        "%ifdef" => Some(
+            "**Directive** `%ifdef <NAME>`\n\n\
+             Compiles the following block only if the constant `<NAME>` has been defined via `%define`.\n\n\
+             **Example:**\n\
+             ```e8085\n\
+             %ifdef DEBUG\n\
+                 call trace_log\n\
+             %end\n\
+             ```",
+        ),
+        "%ifndef" => Some(
+            "**Directive** `%ifndef <NAME>`\n\n\
+             Compiles the following block only if the constant `<NAME>` has NOT been defined.\n\n\
+             **Example:**\n\
+             ```e8085\n\
+             %ifndef BUFFER_SIZE\n\
+             %define BUFFER_SIZE 64\n\
+             %end\n\
              ```",
         ),
         "%macro" => Some(
@@ -1109,7 +1168,11 @@ fn get_directive_hover(directive: &str) -> Option<&'static str> {
         ),
         "%end" => Some(
             "**Directive** `%end`\n\n\
-             Marks the end of a `%macro` definition block.",
+             Marks the end of a `%macro` definition or conditional compilation block (`%if`, `%ifdef`, `%ifndef`).",
+        ),
+        "%endif" => Some(
+            "**Directive** `%endif`\n\n\
+             Marks the end of a conditional compilation block (`%if`, `%ifdef`, `%ifndef`). Synonym for `%end`.",
         ),
         "%include" => Some(
             "**Directive** `%include \"path/to/file.e8085\"`\n\n\
@@ -1169,6 +1232,22 @@ fn get_directive_hover(directive: &str) -> Option<&'static str> {
              **Example 3:** BSS Segment\n\
              ```e8085\n\
              segment .bss\n\
+             ```",
+        ),
+        "section" => Some(
+            "**Keyword** `section`\n\n\
+             Specifies the active memory segment for subsequent declarations and code. (Synonym for `segment`).\n\n\
+             **Example 1:** Text Section\n\
+             ```e8085\n\
+             section .text\n\
+             ```\n\n\
+             **Example 2:** Data Section\n\
+             ```e8085\n\
+             section .data\n\
+             ```\n\n\
+             **Example 3:** BSS Section\n\
+             ```e8085\n\
+             section .bss\n\
              ```",
         ),
         ".text" | "text" => Some(
@@ -1325,9 +1404,16 @@ fn get_user_symbol_hover_in_single_doc(
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
         if trimmed.starts_with("%define") {
-            let parts: Vec<&str> = trimmed.split_whitespace().collect();
-            if parts.len() >= 3 && parts[1] == symbol {
-                let val = &trimmed[trimmed.find(parts[2]).unwrap_or(0)..];
+            let without_comment = trimmed.split(';').next().unwrap_or("").trim();
+            let parts: Vec<&str> = without_comment.split_whitespace().collect();
+            if parts.len() >= 2 && parts[1] == symbol {
+                let val = if parts.len() == 2 {
+                    "1".to_string()
+                } else {
+                    without_comment[without_comment.find(parts[2]).unwrap_or(0)..]
+                        .trim()
+                        .to_string()
+                };
                 let doc_comment = collect_preceding_comments(lines, i);
                 let mut out = format!("```\n%define {} {}\n```", symbol, val);
                 if !doc_comment.is_empty() {
@@ -1813,7 +1899,7 @@ main:
         )
         .unwrap();
         if let HoverContents::Markup(m) = h_def.contents {
-            assert!(m.value.contains("**Directive** `%define NAME VALUE`"));
+            assert!(m.value.contains("**Directive** `%define NAME [VALUE]`"));
         } else {
             panic!("expected markup");
         }
@@ -2110,6 +2196,81 @@ main:
         if let HoverContents::Markup(m) = h_putch.contents {
             assert!(m.value.contains("putch:"));
             assert!(m.value.contains("Prints a single ASCII character"));
+        } else {
+            panic!("expected markup");
+        }
+    }
+
+    #[test]
+    fn test_hover_valueless_define_and_conditionals() {
+        let uri = Url::parse("file:///cond_hover.e8085").unwrap();
+        let text = r#"%define DEBUG ; debug flag
+%define VERBOSE
+section .text
+main:
+%if DEBUG
+    mvi a, 1
+%elif VERBOSE
+    mvi a, 2
+%else
+    mvi a, 0
+%endif
+    hlt
+"#;
+        let doc = Document::new(uri, 1, text.to_string());
+
+        // Hover over DEBUG symbol on line 0
+        let h_debug = get_hover(&doc, &Position { line: 0, character: 10 }).unwrap();
+        if let HoverContents::Markup(m) = h_debug.contents {
+            assert_eq!(m.value, "```\n%define DEBUG 1\n```");
+        } else {
+            panic!("expected markup");
+        }
+
+        // Hover over VERBOSE symbol on line 1
+        let h_verbose = get_hover(&doc, &Position { line: 1, character: 10 }).unwrap();
+        if let HoverContents::Markup(m) = h_verbose.contents {
+            assert_eq!(m.value, "```\n%define VERBOSE 1\n```");
+        } else {
+            panic!("expected markup");
+        }
+
+        // Hover over `section` keyword on line 2
+        let h_section = get_hover(&doc, &Position { line: 2, character: 2 }).unwrap();
+        if let HoverContents::Markup(m) = h_section.contents {
+            assert!(m.value.contains("**Keyword** `section`"));
+        } else {
+            panic!("expected markup");
+        }
+
+        // Hover over `%if` directive on line 4
+        let h_if = get_hover(&doc, &Position { line: 4, character: 1 }).unwrap();
+        if let HoverContents::Markup(m) = h_if.contents {
+            assert!(m.value.contains("**Directive** `%if <condition>`"));
+        } else {
+            panic!("expected markup");
+        }
+
+        // Hover over `%elif` directive on line 6
+        let h_elif = get_hover(&doc, &Position { line: 6, character: 1 }).unwrap();
+        if let HoverContents::Markup(m) = h_elif.contents {
+            assert!(m.value.contains("**Directive** `%elif <condition>`"));
+        } else {
+            panic!("expected markup");
+        }
+
+        // Hover over `%else` directive on line 8
+        let h_else = get_hover(&doc, &Position { line: 8, character: 1 }).unwrap();
+        if let HoverContents::Markup(m) = h_else.contents {
+            assert!(m.value.contains("**Directive** `%else`"));
+        } else {
+            panic!("expected markup");
+        }
+
+        // Hover over `%endif` directive on line 10
+        let h_endif = get_hover(&doc, &Position { line: 10, character: 1 }).unwrap();
+        if let HoverContents::Markup(m) = h_endif.contents {
+            assert!(m.value.contains("**Directive** `%endif`"));
         } else {
             panic!("expected markup");
         }
