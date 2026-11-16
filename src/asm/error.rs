@@ -190,6 +190,22 @@ pub enum AsmErrorKind {
     InvalidMacroArg(String),
     /// Macro recursion limit exceeded.
     MacroRecursionLimitExceeded(String),
+
+    // ---- conditional compilation ----
+    /// An `%if` block was started but never closed before end of file.
+    UnterminatedIf,
+    /// An `%elif` was encountered without a matching `%if`.
+    ElifWithoutIf,
+    /// An `%else` was encountered without a matching `%if`.
+    ElseWithoutIf,
+    /// An `%else` was encountered after an `%else` in the same `%if` block.
+    DuplicateElse,
+    /// An `%elif` was encountered after an `%else` in the same `%if` block.
+    ElifAfterElse,
+    /// An unexpected `%end` or `%endif` without a matching opening block.
+    UnexpectedEnd,
+    /// Malformed or invalid condition expression.
+    InvalidCondition(String),
 }
 
 impl fmt::Display for AsmErrorKind {
@@ -262,6 +278,13 @@ impl fmt::Display for AsmErrorKind {
             MacroCollision { name, collision_with } => write!(f, "macro name '{name}' collides with existing {collision_with}"),
             InvalidMacroArg(s) => write!(f, "invalid macro argument '{s}': only variables, constants, and literals are allowed"),
             MacroRecursionLimitExceeded(s) => write!(f, "macro expansion depth limit exceeded in macro '{s}'"),
+            UnterminatedIf => write!(f, "unterminated %if block (missing %end or %endif)"),
+            ElifWithoutIf => write!(f, "%elif without matching %if"),
+            ElseWithoutIf => write!(f, "%else without matching %if"),
+            DuplicateElse => write!(f, "duplicate %else in %if block"),
+            ElifAfterElse => write!(f, "%elif cannot follow %else in %if block"),
+            UnexpectedEnd => write!(f, "unexpected %end or %endif without matching opening directive"),
+            InvalidCondition(s) => write!(f, "invalid condition expression: {s}"),
         }
     }
 }

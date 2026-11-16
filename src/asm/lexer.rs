@@ -107,6 +107,68 @@ impl Lexer {
                 self.bump();
                 TokenKind::Period
             }
+            '!' => {
+                self.bump();
+                if self.peek() == Some('=') {
+                    self.bump();
+                    TokenKind::NotEqual
+                } else {
+                    TokenKind::Exclamation
+                }
+            }
+            '=' => {
+                self.bump();
+                if self.peek() == Some('=') {
+                    self.bump();
+                    TokenKind::DoubleEqual
+                } else {
+                    return Err(AsmError::new(start, AsmErrorKind::UnexpectedChar('=')));
+                }
+            }
+            '<' => {
+                self.bump();
+                if self.peek() == Some('=') {
+                    self.bump();
+                    TokenKind::LessEqual
+                } else {
+                    TokenKind::Less
+                }
+            }
+            '>' => {
+                self.bump();
+                if self.peek() == Some('=') {
+                    self.bump();
+                    TokenKind::GreaterEqual
+                } else {
+                    TokenKind::Greater
+                }
+            }
+            '&' => {
+                self.bump();
+                if self.peek() == Some('&') {
+                    self.bump();
+                    TokenKind::AmpAmp
+                } else {
+                    return Err(AsmError::new(start, AsmErrorKind::UnexpectedChar('&')));
+                }
+            }
+            '|' => {
+                self.bump();
+                if self.peek() == Some('|') {
+                    self.bump();
+                    TokenKind::PipePipe
+                } else {
+                    return Err(AsmError::new(start, AsmErrorKind::UnexpectedChar('|')));
+                }
+            }
+            '(' => {
+                self.bump();
+                TokenKind::LParen
+            }
+            ')' => {
+                self.bump();
+                TokenKind::RParen
+            }
             '"' => self.lex_string(start)?,
             '\'' => self.lex_char(start)?,
             c if c.is_ascii_digit() => self.lex_number(start)?,

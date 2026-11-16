@@ -1,0 +1,39 @@
+%include "devices/text_io.e8085"
+
+extern print
+
+%define DEBUG
+
+%if DEBUG
+%define BUFFER_CAP 64
+%macro mTrace 2
+    lxi HL, debug_prefix
+    mvi B, %len debug_prefix
+    call print
+    lxi HL, %1
+    mvi B, %2
+    call print
+%end
+%else
+%define BUFFER_CAP 16
+%macro mTrace 2
+    lxi HL, %1
+    mvi B, %2
+    call print
+%end
+%end
+
+segment .data
+%if DEBUG
+    debug_prefix BYTE "[DEBUG] "
+    banner       BYTE "Diagnostic Mode Active\n"
+%else
+    banner       BYTE "Release Mode Active\n"
+%end
+    ready_msg    BYTE "System Ready\n"
+
+segment .text
+main:
+    mTrace banner, %len banner
+    mTrace ready_msg, %len ready_msg
+    hlt

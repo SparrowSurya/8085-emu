@@ -12,7 +12,7 @@ use std::path::{Component, Path, PathBuf};
 use super::ast::{Program, Segment, TextItem};
 use super::error::{AsmError, AsmErrorKind};
 use super::lexer::lex;
-use super::parser::parse;
+
 
 #[derive(Debug, Clone)]
 pub struct ResolvedIncludes {
@@ -318,11 +318,11 @@ fn resolve_program_includes(
         let file_id = ctx.file_table.len() as u32;
         ctx.file_table.push((canonical_path.clone(), src.clone()));
 
+        let inc_dir = canonical_path.parent().unwrap_or(base_dir);
         let inc_tokens = lex(&src)?;
-        let mut inc_program = parse(inc_tokens)?;
+        let mut inc_program = super::parser::parse_with_base_dir(inc_tokens, Some(inc_dir))?;
         tag_program_spans(&mut inc_program, file_id);
 
-        let inc_dir = canonical_path.parent().unwrap_or(base_dir);
         let resolved_inc = resolve_program_includes(inc_dir, &inc_program, ctx)?;
 
         // Pop from active stack
@@ -413,7 +413,9 @@ fn resolve_program_includes(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+
+use super::*;
+use crate::asm::parse;
 
     #[test]
     fn test_self_include_rejected() {

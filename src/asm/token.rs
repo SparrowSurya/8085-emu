@@ -39,6 +39,28 @@ pub enum TokenKind {
     Colon,
     /// `.` — precedes a segment name
     Period,
+    /// `!` — logical NOT
+    Exclamation,
+    /// `==` — equality comparison
+    DoubleEqual,
+    /// `!=` — inequality comparison
+    NotEqual,
+    /// `<` — less than
+    Less,
+    /// `<=` — less than or equal
+    LessEqual,
+    /// `>` — greater than
+    Greater,
+    /// `>=` — greater than or equal
+    GreaterEqual,
+    /// `&&` — logical AND
+    AmpAmp,
+    /// `||` — logical OR
+    PipePipe,
+    /// `(` — left parenthesis
+    LParen,
+    /// `)` — right parenthesis
+    RParen,
     /// End of a logical line.
     Newline,
     /// End of input.

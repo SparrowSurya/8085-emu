@@ -12,8 +12,17 @@ use super::token::{Token, TokenKind};
 
 /// Parse a token stream (as produced by the lexer) into a [`Program`].
 pub fn parse(tokens: Vec<Token>) -> Result<Program, AsmError> {
+    parse_with_base_dir(tokens, None)
+}
+
+/// Parse a token stream with base directory context for `%include` define resolution.
+pub fn parse_with_base_dir(
+    tokens: Vec<Token>,
+    base_dir: Option<&std::path::Path>,
+) -> Result<Program, AsmError> {
+    let filtered_tokens = super::preprocessor::preprocess(tokens, base_dir)?;
     Parser {
-        toks: tokens,
+        toks: filtered_tokens,
         pos: 0,
         seen_globals: std::collections::HashSet::new(),
         seen_externs: std::collections::HashSet::new(),
@@ -117,16 +126,6 @@ impl Parser {
             return Err(AsmError::new(span, AsmErrorKind::ReservedName(s)));
         }
         Ok((s, span))
-    }
-
-    fn keyword_ci(&mut self, want: &str) -> Result<(), AsmError> {
-        match self.peek() {
-            TokenKind::Ident(s) if s.eq_ignore_ascii_case(want) => {
-                self.bump();
-                Ok(())
-            }
-            _ => Err(self.unexpected(&format!("`{want}`"))),
-        }
     }
 
     fn declare_extern(&mut self, name: &str, span: Span) -> Result<(), AsmError> {
@@ -265,7 +264,11 @@ impl Parser {
     }
 
     fn is_segment_ahead(&self) -> bool {
-        matches!(self.peek(), TokenKind::Ident(s) if s.eq_ignore_ascii_case("segment"))
+        matches!(
+            self.peek(),
+            TokenKind::Ident(s)
+                if s.eq_ignore_ascii_case("segment") || s.eq_ignore_ascii_case("section")
+        )
     }
 
     fn include(&mut self) -> Result<Include, AsmError> {
@@ -289,7 +292,10 @@ impl Parser {
         self.bump(); // %
         self.bump(); // define
         let (name, _) = self.name()?;
-        let value = self.value()?;
+        let value = match self.peek() {
+            TokenKind::Newline | TokenKind::Eof => Value::Number(1),
+            _ => self.value()?,
+        };
         self.expect_newline()?;
         Ok(Define { name, value, span })
     }
@@ -379,7 +385,14 @@ impl Parser {
     // ── segments ───────────────────────────────────────────────────────────
 
     fn segment(&mut self, seen_segments: &mut std::collections::HashSet<String>) -> Result<Segment, AsmError> {
-        self.keyword_ci("segment")?;
+        match self.peek() {
+            TokenKind::Ident(s)
+                if s.eq_ignore_ascii_case("segment") || s.eq_ignore_ascii_case("section") =>
+            {
+                self.bump();
+            }
+            _ => return Err(self.unexpected("`segment` or `section`")),
+        }
         match self.peek() {
             TokenKind::Period => {
                 self.bump();
@@ -681,6 +694,17 @@ fn describe(k: &TokenKind) -> String {
         TokenKind::Comma => "`,`".into(),
         TokenKind::Colon => "`:`".into(),
         TokenKind::Period => "`.`".into(),
+        TokenKind::Exclamation => "`!`".into(),
+        TokenKind::DoubleEqual => "`==`".into(),
+        TokenKind::NotEqual => "`!=`".into(),
+        TokenKind::Less => "`<`".into(),
+        TokenKind::LessEqual => "`<=`".into(),
+        TokenKind::Greater => "`>`".into(),
+        TokenKind::GreaterEqual => "`>=`".into(),
+        TokenKind::AmpAmp => "`&&`".into(),
+        TokenKind::PipePipe => "`||`".into(),
+        TokenKind::LParen => "`(`".into(),
+        TokenKind::RParen => "`)`".into(),
         TokenKind::Newline => "end of line".into(),
         TokenKind::Eof => "end of input".into(),
     }

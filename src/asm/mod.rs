@@ -18,6 +18,7 @@ pub mod keyword;
 pub mod lexer;
 pub mod macro_expander;
 pub mod parser;
+pub mod preprocessor;
 pub mod token;
 
 pub use assemble::{
@@ -37,5 +38,6 @@ pub use inspect::{
 pub use lexer::lex;
 pub use macro_expander::expand_macros;
 pub use parser::parse;
+pub use preprocessor::preprocess;
 pub use token::{Token, TokenKind};
 

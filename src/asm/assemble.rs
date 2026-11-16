@@ -16,7 +16,7 @@ use super::container::{
 };
 use super::encode::{AReg8, AReg16, Operand, encode};
 use super::error::{AsmError, AsmErrorKind, Span};
-use super::{lex, parse};
+use super::lex;
 
 /// Load an assembled image into a machine: write the bytes at `0x0000`, point the PC at
 /// the bootstrap or entry point, and set the stack pointer. Execution begins with the bootstrap
@@ -274,9 +274,9 @@ pub fn assemble_with_full_context(
     project_root: Option<&std::path::Path>,
     external_symbols: &HashMap<String, u16>,
 ) -> Result<LoadImage, AsmError> {
-    let raw_program = parse(lex(src)?)?;
     let cur_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let b_dir = base_dir.unwrap_or(&cur_dir);
+    let raw_program = super::parser::parse_with_base_dir(lex(src)?, Some(b_dir))?;
     let mut program = super::include::resolve_includes_with_main_and_root(
         main_file,
         b_dir,
@@ -307,9 +307,9 @@ pub fn assemble_and_link_with_file(
     project_root: Option<&std::path::Path>,
     linked_containers: &[BinaryContainer],
 ) -> Result<LoadImage, AsmError> {
-    let raw_program = parse(lex(src)?)?;
     let cur_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let b_dir = base_dir.unwrap_or(&cur_dir);
+    let raw_program = super::parser::parse_with_base_dir(lex(src)?, Some(b_dir))?;
     let mut program = super::include::resolve_includes_with_main_and_root(
         main_file,
         b_dir,
@@ -342,9 +342,9 @@ pub fn assemble_full_with_file(
     base_dir: Option<&std::path::Path>,
     linked_containers: &[BinaryContainer],
 ) -> Result<(LoadImage, BTreeMap<String, u16>, Vec<ListingRow>), AsmError> {
-    let raw_program = parse(lex(src)?)?;
     let cur_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let b_dir = base_dir.unwrap_or(&cur_dir);
+    let raw_program = super::parser::parse_with_base_dir(lex(src)?, Some(b_dir))?;
     let mut resolved = super::include::resolve_includes_with_sources(main_file, src, b_dir, &raw_program)?;
     super::macro_expander::expand_macros(&mut resolved.program)?;
 
@@ -362,8 +362,8 @@ pub fn assemble_full_with_file(
 /// Assemble, also returning the resolved symbol table (name → absolute address), sorted
 /// by name. Useful for listings, debugging, and `--dump`.
 pub fn assemble_with_symbols(src: &str) -> Result<(LoadImage, BTreeMap<String, u16>), AsmError> {
-    let raw_program = parse(lex(src)?)?;
     let cur_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let raw_program = super::parser::parse_with_base_dir(lex(src)?, Some(&cur_dir))?;
     let mut program = super::include::resolve_includes(&cur_dir, &raw_program)?;
     super::macro_expander::expand_macros(&mut program)?;
 
@@ -374,8 +374,8 @@ pub fn assemble_with_symbols(src: &str) -> Result<(LoadImage, BTreeMap<String, u
 
 /// Assemble, returning the image plus a per-line listing (address, bytes, source).
 pub fn assemble_listing(src: &str) -> Result<(LoadImage, Vec<ListingRow>), AsmError> {
-    let raw_program = parse(lex(src)?)?;
     let cur_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let raw_program = super::parser::parse_with_base_dir(lex(src)?, Some(&cur_dir))?;
     let mut program = super::include::resolve_includes(&cur_dir, &raw_program)?;
     super::macro_expander::expand_macros(&mut program)?;
 
