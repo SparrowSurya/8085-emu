@@ -1,0 +1,594 @@
+; ==============================================================================
+; Flappy Bird Game for Intel 8085 Microprocessor
+;
+; An interactive retro arcade game running on the CanvasDevice with a smooth
+; widescreen display (240x136 logical, scaled 4x4 to 960x544 physical).
+;
+; Physics:
+;   - Parabolic flap impulse with smooth deceleration to peak of arc
+;   - Gravitational acceleration downwards up to terminal velocity
+;
+; Graphics:
+;   - Authentic 17x12 pixel art Flappy Bird sprite based on reference img.png
+;   - Retro sky blue backdrop, pipe tubes with borders, grass/dirt ground
+;
+; Controls:
+;   - Spacebar / Up Arrow / W: Flap / Jump / Start / Restart
+;   - Escape: Exit game
+; ==============================================================================
+
+%include "../programs/devices/canvas.e8085"
+
+segment .data
+title_str    byte "8085 Flappy Bird\0"
+ready_str    byte "PRESS SPACE TO FLAP\0"
+gameover_str byte "GAME OVER!\0"
+retry_str    byte "PRESS SPACE TO RETRY\0"
+score_lbl    byte "SCORE: \0"
+score_buf    byte "00\0"
+
+; Gap height sequence for pipes (cyclic heights)
+pipe_heights byte 28 48 34 54 24 44 58 36
+
+; ------------------------------------------------------------------------------
+; Authentic 17x12 Pixel Art Flappy Bird Sprite (from reference img.png)
+; Palette:
+;   0 = Transparent
+;   1 = Black outline    (COLOR_BLACK)
+;   2 = White eye & wing (COLOR_WHITE)
+;   3 = Yellow body      (COLOR_YELLOW)
+;   4 = Orange beak      (0xF50F)
+; ------------------------------------------------------------------------------
+bird_sprite byte 0 0 0 0 0 0 1 1 1 1 1 1 0 0 0 0 0 0 0 0 0 1 1 2 2 2 1 2 2 1 0 0 0 0 0 0 0 1 2 2 3 3 1 2 2 2 2 1 0 0 0 0 1 1 1 1 3 3 3 1 2 2 2 1 2 1 0 0 1 2 2 2 2 1 3 3 1 2 2 2 1 2 1 0 0 1 2 2 2 2 2 1 3 3 1 2 2 2 2 1 0 0 1 3 2 2 2 3 1 3 3 3 1 1 1 1 1 1 0 0 1 3 3 3 1 3 3 3 1 4 4 4 4 4 4 1 0 0 1 1 1 4 4 3 1 4 1 1 1 1 1 1 0 0 0 1 3 3 3 3 3 3 1 4 4 4 4 4 1 0 0 0 0 1 1 3 3 3 3 3 1 1 1 1 1 0 0 0 0 0 0 0 1 1 1 1 1 0 0 0 0 0 0 0
+
+segment .bss
+game_state   byte 1 ; 0 = Ready, 1 = Playing, 2 = Game Over
+bird_y       byte 1
+bird_vy      byte 1 ; Signed vertical velocity (-4 rising to +4 falling)
+pipe1_x      byte 1
+pipe1_gap_y  byte 1
+pipe2_x      byte 1
+pipe2_gap_y  byte 1
+height_idx   byte 1
+score        byte 1
+best_score   byte 1
+
+segment .text
+main:
+    ; 1. Initialize Canvas in widescreen (240x136)
+    InitCanvas RES_WIDESCREEN_W, RES_WIDESCREEN_H, title_str
+    SetFPS 30
+
+    ; Initialize high score
+    xra A
+    sta best_score
+
+init_game:
+    ; Reset game state to Ready
+    xra A
+    sta game_state
+    sta score
+    sta bird_vy
+
+    ; Initial bird position (Y center)
+    mvi A, 50
+    sta bird_y
+
+    ; Initial Pipe 1 position (starts ahead at X=135)
+    mvi A, 135
+    sta pipe1_x
+    mvi A, 35
+    sta pipe1_gap_y
+
+    ; Initial Pipe 2 position (separated by 115 px at X=250)
+    mvi A, 250
+    sta pipe2_x
+    mvi A, 48
+    sta pipe2_gap_y
+
+    ; Table height index starts at 2 for future pipe wraps
+    mvi A, 2
+    sta height_idx
+
+; ------------------------------------------------------------------------------
+; Main Game Loop
+; ------------------------------------------------------------------------------
+game_loop:
+    ; 1. Check if window closed
+    IsCanvasOpen
+    jz game_exit
+
+    ; 2. Check for Escape key to exit
+    KeyDown K_ESCAPE
+    jnz game_exit
+
+    ; 3. State-based Input & Logic
+    lda game_state
+    cpi 0
+    jz state_ready
+    cpi 1
+    jz state_playing
+    jmp state_gameover
+
+; ------------------------------------------------------------------------------
+; State 0: Ready
+; ------------------------------------------------------------------------------
+state_ready:
+    ; Check Space, Up Arrow, or W to start
+    KeyPress K_SPACE
+    jnz .start
+    KeyPress K_ARROW_UP
+    jnz .start
+    KeyPress K_W
+    jz .render
+
+.start:
+    mvi A, 1
+    sta game_state
+    ; Upward impulse: velocity = -4 (0xFC)
+    mvi A, 0xFC
+    sta bird_vy
+    jmp .render
+
+.render:
+    call render_scene
+    ; Draw "PRESS SPACE TO FLAP"
+    FillText ready_str, 48, 55, 1, COLOR_WHITE_HI, COLOR_WHITE_LO
+    UpdateCanvas
+    jmp game_loop
+
+; ------------------------------------------------------------------------------
+; State 1: Playing
+; ------------------------------------------------------------------------------
+state_playing:
+    ; Check Flap input: Space, Up Arrow, or W
+    KeyPress K_SPACE
+    jnz .flap
+    KeyPress K_ARROW_UP
+    jnz .flap
+    KeyPress K_W
+    jz .physics
+
+.flap:
+    ; Instant upward impulse: bird_vy = -4 (0xFC in two's complement)
+    ; This creates a smooth non-linear arc that decelerates upward
+    mvi A, 0xFC
+    sta bird_vy
+
+.physics:
+    ; 1. Parabolic Movement: bird_y += bird_vy
+    lda bird_vy
+    mov B, A
+    lda bird_y
+    add B
+    sta bird_y
+
+    ; Ceiling check: clamp if bird_y <= 2
+    cpi 2
+    jnc .check_ground
+    mvi A, 2
+    sta bird_y
+    xra A
+    sta bird_vy ; hit ceiling: lose upward velocity
+
+.check_ground:
+    ; Ground check: ground starts at y=116. Bird height is 12.
+    ; If bird_y >= 104, bird hits the ground!
+    cpi 104
+    jnc trigger_gameover
+
+    ; 2. Gravitational Acceleration:
+    ; If bird_vy is negative (rising): inr bird_vy (-4 -> -3 -> -2 -> -1 -> 0)
+    ; If bird_vy is positive (falling): accelerate downwards up to terminal +4
+    lda bird_vy
+    mov B, A
+    ani 0x80
+    jnz .rising
+    jz .falling
+
+.falling:
+    ; Falling: increment velocity downwards until terminal speed of 4
+    mov A, B
+    cpi 4
+    jnc .gravity_done
+    inr A
+    sta bird_vy
+    jmp .gravity_done
+
+.rising:
+    ; Rising: gravity decelerates the rise towards 0 (peak of parabolic arc)
+    mov A, B
+    inr A
+    sta bird_vy
+
+.gravity_done:
+    ; 3. Update Pipe 1 Movement (moves left by 2 pixels)
+    lda pipe1_x
+    cpi 2
+    jc .wrap_pipe1
+    sui 2
+    sta pipe1_x
+    jmp .update_pipe2
+
+.wrap_pipe1:
+    ; Pipe 1 exited screen left: wrap behind Pipe 2 by 115 px
+    lda pipe2_x
+    adi 115
+    sta pipe1_x
+
+    ; Increment Score
+    lda score
+    inr A
+    sta score
+
+    ; Advance cyclic pipe height for Pipe 1
+    lda height_idx
+    mov E, A
+    inr A
+    ani 7 ; wrap 0..7
+    sta height_idx
+    mvi D, 0
+    lxi HL, pipe_heights
+    dad DE
+    mov A, M
+    sta pipe1_gap_y
+
+.update_pipe2:
+    ; Update Pipe 2 Movement (moves left by 2 pixels)
+    lda pipe2_x
+    cpi 2
+    jc .wrap_pipe2
+    sui 2
+    sta pipe2_x
+    jmp .check_collisions
+
+.wrap_pipe2:
+    ; Pipe 2 exited screen left: wrap behind Pipe 1 by 115 px
+    lda pipe1_x
+    adi 115
+    sta pipe2_x
+
+    ; Increment Score
+    lda score
+    inr A
+    sta score
+
+    ; Advance cyclic pipe height for Pipe 2
+    lda height_idx
+    mov E, A
+    inr A
+    ani 7 ; wrap 0..7
+    sta height_idx
+    mvi D, 0
+    lxi HL, pipe_heights
+    dad DE
+    mov A, M
+    sta pipe2_gap_y
+
+.check_collisions:
+    ; Check collision for Pipe 1
+    lda pipe1_x
+    mov C, A
+    lda pipe1_gap_y
+    mov D, A
+    call check_pipe_collision
+    jc trigger_gameover
+
+    ; Check collision for Pipe 2
+    lda pipe2_x
+    mov C, A
+    lda pipe2_gap_y
+    mov D, A
+    call check_pipe_collision
+    jc trigger_gameover
+
+    call render_scene
+    UpdateCanvas
+    jmp game_loop
+
+trigger_gameover:
+    mvi A, 2
+    sta game_state
+
+    ; Update best score if higher
+    lda score
+    mov B, A
+    lda best_score
+    cmp B
+    jnc state_gameover
+    mov A, B
+    sta best_score
+    jmp state_gameover
+
+; ------------------------------------------------------------------------------
+; State 2: Game Over
+; ------------------------------------------------------------------------------
+state_gameover:
+    ; Check Space, Up Arrow, or W to retry
+    KeyPress K_SPACE
+    jnz init_game
+    KeyPress K_ARROW_UP
+    jnz init_game
+    KeyPress K_W
+    jnz init_game
+
+    call render_scene
+    ; Draw Game Over banner
+    FillText gameover_str, 84, 45, 1, COLOR_RED_HI, COLOR_RED_LO
+    FillText retry_str, 44, 65, 1, COLOR_WHITE_HI, COLOR_WHITE_LO
+
+    UpdateCanvas
+    jmp game_loop
+
+; ------------------------------------------------------------------------------
+; Subroutine: Render Scene (Sky, Pipes, Ground, Authentic Bird Sprite, Score)
+; ------------------------------------------------------------------------------
+render_scene:
+    ; 1. Clear Sky (Soft Retro Sky Blue: 0x4C, 0xFF)
+    Clear 0x4C, 0xFF
+
+    ; 2. Draw Pipes (Pipe 1 and Pipe 2)
+    lda pipe1_x
+    mov C, A
+    lda pipe1_gap_y
+    mov D, A
+    call draw_pipe
+
+    lda pipe2_x
+    mov C, A
+    lda pipe2_gap_y
+    mov D, A
+    call draw_pipe
+
+    ; 3. Draw Ground
+    ; Top green grass strip: y=116..120
+    FillRectangle 0, 116, 240, 4, COLOR_GREEN_HI, COLOR_GREEN_LO
+    ; Dirt base: y=120..136
+    FillRectangle 0, 120, 240, 16, 0x85, 0x2F
+
+    ; 4. Draw Authentic Flappy Bird 17x12 Sprite
+    call draw_bird_sprite
+
+    ; 5. Draw Score Header
+    FillText score_lbl, 8, 6, 1, COLOR_WHITE_HI, COLOR_WHITE_LO
+
+    ; Format 2-digit score into score_buf
+    lda score
+    lxi HL, score_buf
+    mvi B, 0
+.div10:
+    cpi 10
+    jc .div_done
+    sui 10
+    inr B
+    jmp .div10
+
+.div_done:
+    ; B has tens digit, A has ones digit
+    mov C, A
+    mov A, B
+    adi '0'
+    mov M, A
+    inx HL
+    mov A, C
+    adi '0'
+    mov M, A
+
+    ; Render score number
+    FillText score_buf, 64, 6, 1, COLOR_YELLOW_HI, COLOR_YELLOW_LO
+    ret
+
+; ------------------------------------------------------------------------------
+; Subroutine: Draw 17x12 Flappy Bird Sprite (from reference img.png)
+; Renders pixel-by-pixel with transparency at top-left (42, bird_y)
+; ------------------------------------------------------------------------------
+draw_bird_sprite:
+    lxi HL, bird_sprite
+    lda bird_y
+    mov D, A         ; D = current row Y
+    mvi C, 12        ; C = row counter (12 rows)
+
+.row_loop:
+    mvi B, 17        ; B = col counter (17 cols)
+    mvi E, 42        ; E = current pixel X (starts at 42)
+
+.col_loop:
+    mov A, M         ; get color code from sprite table
+    inx HL
+    cpi 0
+    jz .next_pixel   ; 0 = transparent, skip
+
+    ; Not transparent: SetPixel (E, D, color)
+    push BC
+    push PSW
+    mvi A, CMD_SET_PIXEL
+    out CANVAS_CMD_PORT
+    mov A, E         ; X
+    out CANVAS_DATA_PORT
+    mov A, D         ; Y
+    out CANVAS_DATA_PORT
+
+    ; Select color based on palette index in stack
+    pop PSW
+    cpi 1
+    jz .color_black
+    cpi 2
+    jz .color_white
+    cpi 3
+    jz .color_yellow
+
+    ; Palette 4: Orange Beak (0xF50F)
+    mvi A, 0xF5
+    out CANVAS_DATA_PORT
+    mvi A, 0x0F
+    out CANVAS_DATA_PORT
+    jmp .pixel_done
+
+.color_black:
+    mvi A, COLOR_BLACK_HI
+    out CANVAS_DATA_PORT
+    mvi A, COLOR_BLACK_LO
+    out CANVAS_DATA_PORT
+    jmp .pixel_done
+
+.color_white:
+    mvi A, COLOR_WHITE_HI
+    out CANVAS_DATA_PORT
+    mvi A, COLOR_WHITE_LO
+    out CANVAS_DATA_PORT
+    jmp .pixel_done
+
+.color_yellow:
+    mvi A, COLOR_YELLOW_HI
+    out CANVAS_DATA_PORT
+    mvi A, COLOR_YELLOW_LO
+    out CANVAS_DATA_PORT
+
+.pixel_done:
+    pop BC
+
+.next_pixel:
+    inr E            ; next X
+    dcr B            ; decrement col counter
+    jnz .col_loop
+
+    inr D            ; next Y row
+    dcr C            ; decrement row counter
+    jnz .row_loop
+    ret
+
+; ------------------------------------------------------------------------------
+; Subroutine: Draw Pipe
+; Inputs: C = pipe_x, D = pipe_gap_y
+; Clobbers: A, B, E
+; ------------------------------------------------------------------------------
+draw_pipe:
+    ; Don't draw if pipe_x >= 240 (off-screen)
+    mov A, C
+    cpi 240
+    rnc
+
+    ; Top Pipe: (C, 0) of size (18, D)
+    mvi A, CMD_FILL_RECT
+    out CANVAS_CMD_PORT
+    mov A, C
+    out CANVAS_DATA_PORT
+    xra A
+    out CANVAS_DATA_PORT
+    mvi A, 18
+    out CANVAS_DATA_PORT
+    mov A, D
+    out CANVAS_DATA_PORT
+    mvi A, COLOR_GREEN_HI
+    out CANVAS_DATA_PORT
+    mvi A, COLOR_GREEN_LO
+    out CANVAS_DATA_PORT
+
+    ; Top pipe border
+    mvi A, CMD_STROKE_RECT
+    out CANVAS_CMD_PORT
+    mov A, C
+    out CANVAS_DATA_PORT
+    xra A
+    out CANVAS_DATA_PORT
+    mvi A, 18
+    out CANVAS_DATA_PORT
+    mov A, D
+    out CANVAS_DATA_PORT
+    mvi A, 1
+    out CANVAS_DATA_PORT
+    mvi A, 0x0A
+    out CANVAS_DATA_PORT
+    mvi A, 0x0F
+    out CANVAS_DATA_PORT
+
+    ; Bottom Pipe: (C, D + 40) down to ground (y=116)
+    mov A, D
+    adi 40
+    mov E, A ; E = bottom pipe y start
+    mvi A, 116
+    sub E
+    mov B, A ; B = bottom pipe height
+
+    mvi A, CMD_FILL_RECT
+    out CANVAS_CMD_PORT
+    mov A, C
+    out CANVAS_DATA_PORT
+    mov A, E
+    out CANVAS_DATA_PORT
+    mvi A, 18
+    out CANVAS_DATA_PORT
+    mov A, B
+    out CANVAS_DATA_PORT
+    mvi A, COLOR_GREEN_HI
+    out CANVAS_DATA_PORT
+    mvi A, COLOR_GREEN_LO
+    out CANVAS_DATA_PORT
+
+    mvi A, CMD_STROKE_RECT
+    out CANVAS_CMD_PORT
+    mov A, C
+    out CANVAS_DATA_PORT
+    mov A, E
+    out CANVAS_DATA_PORT
+    mvi A, 18
+    out CANVAS_DATA_PORT
+    mov A, B
+    out CANVAS_DATA_PORT
+    mvi A, 1
+    out CANVAS_DATA_PORT
+    mvi A, 0x0A
+    out CANVAS_DATA_PORT
+    mvi A, 0x0F
+    out CANVAS_DATA_PORT
+    ret
+
+; ------------------------------------------------------------------------------
+; Subroutine: Check Pipe Collision
+; Inputs: C = pipe_x, D = pipe_gap_y
+; Output: Carry flag SET if collision, CLEAR if safe
+; Clobbers: A, B
+; ------------------------------------------------------------------------------
+check_pipe_collision:
+    ; Bird X is fixed at 42..59 (width 17).
+    ; Pipe X is C .. C + 18.
+    ; Collision in X occurs if: pipe_x <= 59 AND pipe_x + 18 >= 42
+    mov A, C
+    cpi 60
+    jnc .no_collision_clear ; pipe is still to right of bird (Carry is 0)
+    adi 18
+    cpi 42
+    jc .no_collision        ; pipe has passed to left of bird (Carry is 1, must clear)
+
+    ; Horizontally overlapping with pipe:
+    ; Check Top pipe collision: bird_y < pipe_gap_y
+    lda bird_y
+    cmp D
+    jc .collision           ; bird_y < pipe_gap_y -> hit!
+
+    ; Check Bottom pipe collision:
+    ; Bottom pipe begins at (D + 40). Bird bottom is at (bird_y + 12).
+    ; Collision if: bird_y + 12 >= D + 40
+    mov A, D
+    adi 40
+    mov B, A
+    lda bird_y
+    adi 12
+    cmp B
+    jnc .collision          ; bird_y + 12 >= bottom pipe top -> hit!
+
+.no_collision:
+    ora A                   ; clears Carry flag
+.no_collision_clear:
+    ret
+
+.collision:
+    stc                     ; set Carry flag
+    ret
+
+; ------------------------------------------------------------------------------
+; Exit
+; ------------------------------------------------------------------------------
+game_exit:
+    DisposeCanvas
+    hlt

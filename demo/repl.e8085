@@ -1,0 +1,372 @@
+; ==============================================================================
+; 8085 Calculator REPL (Read-Eval-Print Loop)
+;
+; An interactive command-line calculator for the 8085 microprocessor using the
+; Text I/O peripheral device. Evaluates 8-bit unsigned arithmetic expressions
+; (+, -, *, /) left-to-right, supporting multi-digit numbers, whitespace,
+; division by zero detection, syntax error handling, and clean termination.
+;
+; Features:
+;   - Interactive prompt: "> "
+;   - Supported operators: +, -, *, /
+;   - Left-to-right expression evaluation
+;   - Arbitrary whitespace skipping (spaces, tabs)
+;   - Division by zero detection and error reporting
+;   - Syntax error detection for invalid characters/operators
+;   - Exit command: 'Q' or 'q'
+; ==============================================================================
+
+%include "../programs/devices/text_io.e8085"
+%include "../programs/lib/math.e8085"
+%include "../programs/lib/conv.e8085"
+%include "../programs/lib/cmp.e8085"
+
+%define INPUT_BUFFER_SIZE 128
+
+segment .data
+    welcome byte "\nWelcome to 8085 calculator REPL\nSupported Operations: +, -, *, /\n\nNOTE:\n1) Maximum input size is 128 characters.\n2) Only supports 8-bit operations (0..255).\n3) Enter 'Q' to quit.\n\n"
+    prompt byte "> "
+    exit_message byte "Exited successfully\n"
+    err_syntax byte "Error: Invalid Expression\n"
+    err_div0 byte "Error: Division by zero\n"
+
+segment .bss
+    expr_buffer byte INPUT_BUFFER_SIZE
+    expr_size byte 1
+    eval_value byte 1
+    err_flag byte 1
+    res_buffer byte 16
+
+segment .text
+main:
+    ; Show Welcome text
+    mvi B, %len welcome
+    lxi HL, welcome
+    call print
+
+.loop:
+    call read_input
+
+    ; If empty line, skip evaluation and prompt again
+    lda expr_size
+    cpi 0
+    jz .loop
+
+    ; Check for quit ('Q' or 'q')
+    lxi HL, expr_buffer
+    mov A, M
+    cpi 'Q'
+    jz .exit
+    cpi 'q'
+    jz .exit
+
+    call eval_expr
+    call show_result
+
+    jmp .loop
+
+.exit:
+    ; Show exit message
+    mvi B, %len exit_message
+    lxi HL, exit_message
+    call print
+    hlt
+
+
+; Displays the prompt and reads an input expression line from the TextIO device.
+;
+; Writes the prompt `> ` to the output and reads user input into `expr_buffer`,
+; storing the received character count in `expr_size`.
+;
+; **Inputs**: None
+;
+; **Outputs**:
+; - `A`: Number of bytes read from user
+; - `expr_size`: Stored byte count in memory
+; - `expr_buffer`: Captured ASCII text
+;
+; **Alters**: `A`, `B`, `C`, `D`, `HL`
+read_input:
+    ; Display input prompt
+    mvi B, %len prompt
+    lxi HL, prompt
+    call print
+
+    ; Read input from device
+    lxi HL, expr_buffer
+    mvi B, INPUT_BUFFER_SIZE
+    call input
+
+    ; Store input size from user
+    lxi HL, expr_size
+    mov M, A
+    ret
+
+
+; Evaluates the arithmetic expression stored in `expr_buffer`.
+;
+; Parses numbers and operators (+, -, *, /) sequentially from left to right.
+; Updates `eval_value` with the computed result or sets `err_flag` on failure.
+;
+; **Inputs**:
+; - `expr_buffer`: Memory buffer holding expression string
+; - `expr_size`: Length of expression string in bytes
+;
+; **Outputs**:
+; - `eval_value`: 8-bit unsigned evaluation result
+; - `err_flag`: Status code:
+;     - `0`: Success
+;     - `1`: Invalid expression / syntax error
+;     - `2`: Division by zero error
+;
+; **Alters**: `A`, `B`, `C`, `D`, `E`, `H`, `HL`
+eval_expr:
+    lda expr_size
+    cpi 0
+    jz .empty
+
+    lxi HL, expr_buffer
+    mov D, A            ; D = remaining character count in expr_buffer
+
+    call skip_spaces
+    mov A, D
+    cpi 0
+    jz .empty
+
+    ; Parse initial number
+    call parse_number
+    jc .syntax_error
+
+    sta eval_value
+
+.op_loop:
+    call skip_spaces
+    mov A, D
+    cpi 0
+    jz .success         ; Reached end of expression successfully
+
+    ; Read operator character
+    mov A, M
+    inx HL
+    dcr D
+
+    cpi '+'
+    jz .do_add
+    cpi '-'
+    jz .do_sub
+    cpi '*'
+    jz .do_mul
+    cpi '/'
+    jz .do_div
+
+    ; Invalid operator character
+    jmp .syntax_error
+
+.do_add:
+    call skip_spaces
+    call parse_number
+    jc .syntax_error
+    lda eval_value
+    add C
+    sta eval_value
+    jmp .op_loop
+
+.do_sub:
+    call skip_spaces
+    call parse_number
+    jc .syntax_error
+    lda eval_value
+    sub C
+    sta eval_value
+    jmp .op_loop
+
+.do_mul:
+    call skip_spaces
+    call parse_number
+    jc .syntax_error
+    lda eval_value
+    mov B, A            ; B = Multiplicand
+    mov A, C            ; A = Multiplier
+    call multiply       ; Product lower byte returned in C
+    mov A, C
+    sta eval_value
+    jmp .op_loop
+
+.do_div:
+    call skip_spaces
+    call parse_number
+    jc .syntax_error
+    mov A, C
+    cpi 0
+    jz .div0_error      ; Division by zero error
+    lda eval_value
+    mov B, A            ; B = Dividend
+    mov A, C            ; A = Divisor
+    call divide         ; Quotient returned in C
+    mov A, C
+    sta eval_value
+    jmp .op_loop
+
+.empty:
+    mvi A, 0
+    sta eval_value
+    mvi A, 0
+    sta err_flag
+    ret
+
+.success:
+    mvi A, 0
+    sta err_flag
+    ret
+
+.syntax_error:
+    mvi A, 1
+    sta err_flag
+    ret
+
+.div0_error:
+    mvi A, 2
+    sta err_flag
+    ret
+
+
+; Advances buffer pointer past leading whitespace characters (spaces, tabs, returns).
+;
+; **Inputs**:
+; - `HL`: Address in string buffer
+; - `D`: Remaining character count
+;
+; **Outputs**:
+; - `HL`: Updated address pointing to first non-whitespace character
+; - `D`: Updated remaining character count
+;
+; **Alters**: `A`, `D`, `HL`
+skip_spaces:
+    mov A, D
+    cpi 0
+    rz
+
+.loop:
+    mov A, M
+    cpi ' '
+    jz .advance
+    cpi 0x09        ; '\t'
+    jz .advance
+    cpi 0x0D        ; '\r'
+    jz .advance
+    ret
+
+.advance:
+    inx HL
+    dcr D
+    jnz .loop
+    ret
+
+
+; Parses an unsigned 8-bit decimal number ('0'..'9') from buffer at [HL].
+;
+; Accumulates digits using `value = value * 10 + digit`.
+;
+; **Inputs**:
+; - `HL`: Address in buffer pointing to digit characters
+; - `D`: Remaining byte count in buffer
+;
+; **Outputs**:
+; - `A`: Parsed 8-bit unsigned integer value
+; - `C`: Parsed 8-bit unsigned integer value
+; - `HL`: Advanced buffer address past the parsed digits
+; - `D`: Decremented remaining byte count
+; - **Flags**:
+;     - `CY=0`: Successfully parsed at least one digit
+;     - `CY=1`: Error (no digits found)
+;
+; **Alters**: `A`, `C`, `D`, `E`, `HL`
+parse_number:
+    mvi C, 0x00     ; Accumulated numeric value = 0
+    mvi E, 0x00     ; Digits read counter = 0
+
+.loop:
+    mov A, D        ; Check if remaining chars == 0
+    cpi 0
+    jz .done
+
+    mov A, M        ; Current character
+    cpi '0'
+    jc .done        ; If < '0', not a digit
+    cpi 58          ; If >= 58 (past '9'), not a digit
+    jnc .done
+
+    ; Valid ASCII digit ('0'..'9')
+    sui '0'         ; Convert to numeric (0..9)
+    push PSW        ; Save digit on stack
+
+    ; Multiply running accumulator C by 10 (C*10 = C*2 + C*8)
+    mov A, C
+    add A           ; * 2
+    add A           ; * 4
+    add C           ; * 5
+    add A           ; * 10
+    mov C, A
+
+    pop PSW         ; Restore digit
+    add C           ; A = C * 10 + digit
+    mov C, A
+
+    inr E           ; Increment digit counter
+    inx HL          ; Advance buffer pointer
+    dcr D           ; Decrement remaining char count
+    jmp .loop
+
+.done:
+    mov A, E        ; Check how many digits were read
+    cpi 0
+    jz .error       ; 0 digits read -> syntax error
+    mov A, C        ; Result in A and C
+    ora A           ; Clear carry flag (CY=0 -> success)
+    ret
+
+.error:
+    stc             ; Set carry flag (CY=1 -> error)
+    ret
+
+
+; Formats and displays the evaluation result or error message to TextIO device.
+;
+; Converts `eval_value` to an ASCII string via `to_str8` on success, or outputs
+; the appropriate error message if `err_flag` is non-zero.
+;
+; **Inputs**:
+; - `err_flag`: Evaluation status code (`0`=success, `1`=syntax err, `2`=div0 err)
+; - `eval_value`: Computed numeric value (when `err_flag == 0`)
+;
+; **Outputs**: None (rendered to TextIO device)
+;
+; **Alters**: `A`, `B`, `C`, `D`, `E`, `HL`
+show_result:
+    lda err_flag
+    cpi 1
+    jz .syntax_err
+    cpi 2
+    jz .div0_err
+
+    ; Normal numeric result: convert eval_value to string and print
+    lxi HL, res_buffer
+    lda eval_value
+    call to_str8        ; Returns length in B, writes ASCII to res_buffer
+
+    lxi HL, res_buffer
+    call print
+    call endl
+    ret
+
+.syntax_err:
+    mvi B, %len err_syntax
+    lxi HL, err_syntax
+    call print
+    ret
+
+.div0_err:
+    mvi B, %len err_div0
+    lxi HL, err_div0
+    call print
+    ret

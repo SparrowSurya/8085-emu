@@ -1,0 +1,507 @@
+; ==============================================================================
+; 8085 Tic-Tac-Toe Game
+; ==============================================================================
+; An interactive 2-player Tic-Tac-Toe game running on the 8085 microprocessor
+; using TextIODevice for display and input.
+;
+; How to play:
+;   * Player X and Player O take turns entering positions 1 through 9:
+;
+;        1 | 2 | 3
+;       ---+---+---
+;        4 | 5 | 6
+;       ---+---+---
+;        7 | 8 | 9
+;
+;   * The game checks for 3-in-a-row (rows, columns, diagonals) after each move.
+;   * Detects wins and draws (all 9 cells filled).
+; ==============================================================================
+
+
+%define CMD_WRITE   0x00
+%define CMD_DISPLAY 0x01
+%define CMD_READ    0x02
+%define DATA_PORT   0x01
+%define CMD_PORT    0x02
+
+segment .data
+
+    banner_msg BYTE "========================================\n       8085 TIC-TAC-TOE GAME\n========================================\nPositions are numbered 1 to 9 as shown:\n"
+    grid_div BYTE "---+---+---\n"
+    prompt_x BYTE "Player X, enter position (1-9): "
+    prompt_o BYTE "Player O, enter position (1-9): "
+    err_invalid BYTE "Invalid move! Please enter a digit from 1 to 9: "
+    err_occupied BYTE "Position already occupied! Choose another cell: "
+    win_x_msg BYTE "\n****************************************\n***         PLAYER X WINS!           ***\n****************************************\n\n"
+    win_o_msg BYTE "\n****************************************\n***         PLAYER O WINS!           ***\n****************************************\n\n"
+    draw_msg BYTE "\n****************************************\n***          IT'S A DRAW!            ***\n****************************************\n\n"
+
+segment .bss
+
+    board BYTE 9          ; 3x3 board: cells 0..8
+    current_plyr BYTE 1   ; Current player: 'X' (0x58) or 'O' (0x4F)
+    move_count BYTE 1     ; Total moves made so far (0..9)
+    in_buf BYTE 16        ; Input buffer for reading user entry
+
+segment .text
+
+main:
+    ; Initialize stack pointer
+    lxi SP, 0xF000
+
+    ; Print banner and instructions
+    lxi HL, banner_msg
+    mvi B, %len banner_msg
+    call print_str
+
+    ; Initialize board state and player
+    call init_game
+
+
+game_loop:
+    ; Display current board
+    call print_board
+
+    ; Prompt current player for move
+    call prompt_turn
+
+
+input_retry:
+    ; Read and validate move
+    call get_input
+    cpi 0
+    jz input_retry
+
+    call validate_and_apply
+    jc input_retry
+
+    ; Check for win
+    call check_win
+    cpi 1
+    jz on_win
+
+    ; Check for draw (all 9 moves played)
+    lda move_count
+    cpi 9
+    jz on_draw
+
+    ; Switch turn to next player
+    call switch_player
+    jmp game_loop
+
+
+on_win:
+    call print_board
+    lda current_plyr
+    cpi 'X'
+    jz .show_win_x
+    lxi HL, win_o_msg
+    mvi B, %len win_o_msg
+    call print_str
+    hlt
+
+.show_win_x:
+    lxi HL, win_x_msg
+    mvi B, %len win_x_msg
+    call print_str
+    hlt
+
+
+on_draw:
+    call print_board
+    lxi HL, draw_msg
+    mvi B, %len draw_msg
+    call print_str
+    hlt
+
+
+; ==============================================================================
+; Board & Game State Subroutines
+; ==============================================================================
+init_game:
+    ; Fill board with '1'..'9'
+    lxi HL, board
+    mvi M, '1'
+    inx HL
+    mvi M, '2'
+    inx HL
+    mvi M, '3'
+    inx HL
+    mvi M, '4'
+    inx HL
+    mvi M, '5'
+    inx HL
+    mvi M, '6'
+    inx HL
+    mvi M, '7'
+    inx HL
+    mvi M, '8'
+    inx HL
+    mvi M, '9'
+
+    ; Player X goes first
+    mvi A, 'X'
+    sta current_plyr
+
+    ; Move counter = 0
+    xra A
+    sta move_count
+    ret
+
+
+switch_player:
+    lda current_plyr
+    cpi 'X'
+    jz .set_o
+    mvi A, 'X'
+    sta current_plyr
+    ret
+
+.set_o:
+    mvi A, 'O'
+    sta current_plyr
+    ret
+
+
+prompt_turn:
+    call endl
+    lda current_plyr
+    cpi 'X'
+    jz .p_x
+    lxi HL, prompt_o
+    mvi B, %len prompt_o
+    call print_str
+    ret
+
+.p_x:
+    lxi HL, prompt_x
+    mvi B, %len prompt_x
+    call print_str
+    ret
+
+
+; ==============================================================================
+; Board Rendering Subroutine
+; ==============================================================================
+print_board:
+    call endl
+
+    ; Row 0: cells 0, 1, 2
+    mvi B, 0
+    mvi C, 1
+    mvi D, 2
+    call print_row
+
+    ; Divider
+    lxi HL, grid_div
+    mvi B, %len grid_div
+    call print_str
+
+    ; Row 1: cells 3, 4, 5
+    mvi B, 3
+    mvi C, 4
+    mvi D, 5
+    call print_row
+
+    ; Divider
+    lxi HL, grid_div
+    mvi B, %len grid_div
+    call print_str
+
+    ; Row 2: cells 6, 7, 8
+    mvi B, 6
+    mvi C, 7
+    mvi D, 8
+    call print_row
+
+    ret
+
+
+print_row:
+    ; Inputs: B = cell index 1, C = cell index 2, D = cell index 3
+    ; Load values of all 3 cells into B, C, D
+    mov A, B
+    call load_cell
+    push PSW
+
+    mov A, C
+    call load_cell
+    push PSW
+
+    mov A, D
+    call load_cell
+    mov D, A
+    pop PSW
+    mov C, A
+    pop PSW
+    mov B, A
+
+    ; Output formatted row: " <B> | <C> | <D> \n"
+    mvi A, ' '
+    call putch
+    mov A, B
+    call putch
+    mvi A, ' '
+    call putch
+    mvi A, '|'
+    call putch
+    mvi A, ' '
+    call putch
+    mov A, C
+    call putch
+    mvi A, ' '
+    call putch
+    mvi A, '|'
+    call putch
+    mvi A, ' '
+    call putch
+    mov A, D
+    call putch
+    mvi A, ' '
+    call putch
+    call endl
+    ret
+
+
+load_cell:
+    ; Input: A = index (0..8)
+    ; Output: A = byte at board[index]
+    ; Preserves: B, C, D
+    push BC
+    push DE
+    mov E, A
+    mvi D, 0
+    lxi HL, board
+    dad DE
+    mov A, M
+    pop DE
+    pop BC
+    ret
+
+
+; ==============================================================================
+; Move Validation & Application
+; ==============================================================================
+validate_and_apply:
+    ; Input: A = entered character
+    ; Output: Carry clear = success, Carry set = invalid/retry
+    cpi '1'
+    jc .err_inv
+    cpi 0x3A
+    jnc .err_inv
+
+    ; Compute cell index: A - '1'
+    sui '1'
+    mov E, A
+    mvi D, 0
+    lxi HL, board
+    dad DE
+
+    ; Check if occupied by 'X' or 'O'
+    mov A, M
+    cpi 'X'
+    jz .err_occ
+    cpi 'O'
+    jz .err_occ
+
+    ; Valid: place player symbol
+    lda current_plyr
+    mov M, A
+
+    ; Increment move count
+    lda move_count
+    inr A
+    sta move_count
+
+    ; Clear Carry flag to signal success
+    ora A
+    ret
+
+.err_occ:
+    lxi HL, err_occupied
+    mvi B, %len err_occupied
+    call print_str
+    stc
+    ret
+
+.err_inv:
+    lxi HL, err_invalid
+    mvi B, %len err_invalid
+    call print_str
+    stc
+    ret
+
+
+; ==============================================================================
+; Win Checking Subroutines
+; ==============================================================================
+check_win:
+    ; Returns A = 1 if current board has a winning triplet, A = 0 otherwise
+    ; Rows
+    mvi B, 0
+    mvi C, 1
+    mvi D, 2
+    call check_triplet
+    cpi 1
+    jz .winner
+
+    mvi B, 3
+    mvi C, 4
+    mvi D, 5
+    call check_triplet
+    cpi 1
+    jz .winner
+
+    mvi B, 6
+    mvi C, 7
+    mvi D, 8
+    call check_triplet
+    cpi 1
+    jz .winner
+
+    ; Columns
+    mvi B, 0
+    mvi C, 3
+    mvi D, 6
+    call check_triplet
+    cpi 1
+    jz .winner
+
+    mvi B, 1
+    mvi C, 4
+    mvi D, 7
+    call check_triplet
+    cpi 1
+    jz .winner
+
+    mvi B, 2
+    mvi C, 5
+    mvi D, 8
+    call check_triplet
+    cpi 1
+    jz .winner
+
+    ; Diagonals
+    mvi B, 0
+    mvi C, 4
+    mvi D, 8
+    call check_triplet
+    cpi 1
+    jz .winner
+
+    mvi B, 2
+    mvi C, 4
+    mvi D, 6
+    call check_triplet
+    cpi 1
+    jz .winner
+
+    xra A
+    ret
+
+.winner:
+    mvi A, 1
+    ret
+
+
+check_triplet:
+    ; Checks if board[B] == board[C] and board[C] == board[D]
+    ; Returns A = 1 if all match ('X' or 'O'), A = 0 otherwise
+    mov A, B
+    call load_cell
+    mov E, A         ; E = board[B]
+
+    mov A, C
+    call load_cell
+    cmp E            ; compare board[C] with board[B]
+    jnz .no_match
+
+    mov A, D
+    call load_cell
+    cmp E            ; compare board[D] with board[B]
+    jnz .no_match
+
+    ; Ensure it's 'X' or 'O'
+    mov A, E
+    cpi 'X'
+    jz .match
+    cpi 'O'
+    jz .match
+
+.no_match:
+    xra A
+    ret
+
+.match:
+    mvi A, 1
+    ret
+
+
+; ==============================================================================
+; TextIODevice I/O Subroutines
+; ==============================================================================
+print_str:
+    ; HL = string address, B = length
+    mvi A, CMD_WRITE
+    out CMD_PORT
+    mov A, B
+    out DATA_PORT
+
+.loop:
+    mov A, M
+    out DATA_PORT
+    inx HL
+    dcr B
+    jnz .loop
+    mvi A, CMD_DISPLAY
+    out CMD_PORT
+    ret
+
+
+putch:
+    ; Print single character in A
+    push BC
+    mov C, A
+    mvi A, CMD_WRITE
+    out CMD_PORT
+    mvi A, 1
+    out DATA_PORT
+    mov A, C
+    out DATA_PORT
+    mvi A, CMD_DISPLAY
+    out CMD_PORT
+    pop BC
+    ret
+
+
+endl:
+    ; Print newline
+    mvi A, 0x0A
+    jmp putch
+
+
+get_input:
+    ; Read user input line into in_buf
+    ; Returns first non-empty character in A, or 0 if empty
+    mvi A, CMD_READ
+    out CMD_PORT
+    in DATA_PORT      ; read length
+    cpi 0
+    jz .empty
+
+    mov C, A         ; C = length
+    lxi HL, in_buf
+
+.read_bytes:
+    in DATA_PORT
+    mov M, A
+    inx HL
+    dcr C
+    jnz .read_bytes
+
+    lda in_buf
+    ret
+
+.empty:
+    xra A
+    ret
