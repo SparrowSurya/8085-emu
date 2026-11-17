@@ -408,3 +408,47 @@ fn test_canvas_mouse_transitions() {
     assert!(!canvas.mouse_down[0]);
     assert!(!canvas.mouse_prev[0]); // Released = false
 }
+
+#[test]
+fn test_canvas_paint_mask_primitive() {
+    let src = r#"
+%include "devices/canvas.e8085"
+
+segment .data
+title byte "Mask Test\0"
+; 4x4 test mask:
+; 0 1 1 0
+; 1 2 2 1
+; 1 2 2 1
+; 0 1 1 0
+test_mask byte 0, 1, 1, 0, 1, 2, 2, 1, 1, 2, 2, 1, 0, 1, 1, 0
+
+segment .text
+main:
+    InitCanvas 160, 90, title
+
+    ; Clear canvas with black (0x00, 0x0F)
+    Clear 0x00, 0x0F
+
+    ; 1. Paint mask value 1 in Red (0xF0, 0x0F) at (10, 10)
+    PaintMask 10, 10, test_mask, 4, 4, 1, 0xF0, 0x0F, 0
+
+    ; 2. Paint mask value 2 in Green (0x0F, 0x0F) at (10, 10)
+    PaintMask 10, 10, test_mask, 4, 4, 2, 0x0F, 0x0F, 0
+
+    hlt
+"#;
+
+    let (mut machine, canvas) = setup_test_machine(src);
+    machine.attach_device(Box::new(canvas), &[0x10, 0x11, 0x12]);
+    machine.run();
+    assert!(machine.cpu.is_halt);
+
+    let dev = machine.devices.find_device::<CanvasDevice>().unwrap();
+    // (10, 10) was 0 -> transparent, still black (0x000F)
+    assert_eq!(dev.get_pixel_value(10, 10), 0x000F);
+    // (11, 10) was 1 -> painted Red (0xF00F)
+    assert_eq!(dev.get_pixel_value(11, 10), 0xF00F);
+    // (11, 11) was 2 -> painted Green (0x0F0F)
+    assert_eq!(dev.get_pixel_value(11, 11), 0x0F0F);
+}

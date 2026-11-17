@@ -68,10 +68,8 @@ impl Machine {
     /// Release the CPU from halt and run until it halts again (or a fault is recorded).
     pub fn run(&mut self) {
         self.cpu.is_halt = false;
-        let mut guard = 0u64;
-        while !self.cpu.is_halt && self.cpu.fault.is_none() && guard < 100_000_000 {
+        while !self.cpu.is_halt && self.cpu.fault.is_none() {
             self.tick();
-            guard += 1;
         }
     }
 

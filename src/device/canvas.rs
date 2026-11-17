@@ -88,6 +88,7 @@ pub const CMD_FILL_RECT: u8 = 0x14;
 pub const CMD_STROKE_RECT: u8 = 0x15;
 pub const CMD_FILL_ELLIPSE: u8 = 0x16;
 pub const CMD_STROKE_ELLIPSE: u8 = 0x17;
+pub const CMD_PAINT_MASK: u8 = 0x18;
 
 pub const CMD_FILL_TEXT: u8 = 0x20;
 pub const CMD_TEXT_WIDTH: u8 = 0x21;
@@ -261,20 +262,27 @@ impl CanvasDevice {
     }
 
     pub fn get_pixel_value(&self, x: u8, y: u8) -> u16 {
-        let (w, h) = (self.logical_width as usize, self.logical_height as usize);
+        let w = if self.logical_width == 0 { 256 } else { self.logical_width as usize };
+        let h = if self.logical_height == 0 { 256 } else { self.logical_height as usize };
         let (x, y) = (x as usize, y as usize);
         if x < w && y < h {
-            self.logical_buffer[y * w + x]
-        } else {
-            0
+            let idx = y * w + x;
+            if idx < self.logical_buffer.len() {
+                return self.logical_buffer[idx];
+            }
         }
+        0
     }
 
     pub fn set_pixel_value(&mut self, x: u8, y: u8, color: u16) {
-        let (w, h) = (self.logical_width as usize, self.logical_height as usize);
+        let w = if self.logical_width == 0 { 256 } else { self.logical_width as usize };
+        let h = if self.logical_height == 0 { 256 } else { self.logical_height as usize };
         let (x, y) = (x as usize, y as usize);
         if x < w && y < h {
-            self.logical_buffer[y * w + x] = color;
+            let idx = y * w + x;
+            if idx < self.logical_buffer.len() {
+                self.logical_buffer[idx] = color;
+            }
         }
     }
 
@@ -295,6 +303,13 @@ impl CanvasDevice {
         self.window_open = true;
 
         if !self.headless {
+            let total_pixels = actual_w * actual_h;
+            if total_pixels > 200 * 200 {
+                eprintln!(
+                    "CanvasDevice: opened {}x{} canvas ({} logical pixels, {} physical pixels)",
+                    actual_w, actual_h, total_pixels, total_pixels * SCALE_FACTOR * SCALE_FACTOR
+                );
+            }
             let mut opts = minifb::WindowOptions::default();
             opts.resize = false;
             opts.scale = minifb::Scale::X1;
@@ -328,6 +343,11 @@ impl CanvasDevice {
             self.physical_buffer.resize(pw * ph, 0xFF000000);
         }
 
+        // Guard against disposed/empty logical buffer
+        if self.logical_buffer.len() < lw * lh {
+            return;
+        }
+
         // 4x4 Nearest-Neighbor Upscale
         for ly in 0..lh {
             for lx in 0..lw {
@@ -354,7 +374,9 @@ impl CanvasDevice {
         // Window blit & OS event polling
         if let Some(ref mut win) = self.window {
             if win.is_open() {
-                let _ = win.update_with_buffer(&self.physical_buffer, pw, ph);
+                if let Err(e) = win.update_with_buffer(&self.physical_buffer, pw, ph) {
+                    eprintln!("CanvasDevice warning: update_with_buffer failed: {e}");
+                }
                 self.window_open = win.is_open();
 
                 // Poll keys and mouse from minifb
@@ -405,12 +427,25 @@ impl CanvasDevice {
                 (minifb::Key::Key9, 0x39),
                 (minifb::Key::Up, 0x90), (minifb::Key::Down, 0x91),
                 (minifb::Key::Left, 0x92), (minifb::Key::Right, 0x93),
+                (minifb::Key::Home, 0x94), (minifb::Key::End, 0x95),
+                (minifb::Key::PageUp, 0x96), (minifb::Key::PageDown, 0x97),
                 (minifb::Key::Space, 0x20), (minifb::Key::Enter, 0x0D),
                 (minifb::Key::Escape, 0x1B), (minifb::Key::Backspace, 0x08),
-                (minifb::Key::Tab, 0x09), (minifb::Key::LeftShift, 0xA0),
-                (minifb::Key::RightShift, 0xA0), (minifb::Key::LeftCtrl, 0xA1),
-                (minifb::Key::RightCtrl, 0xA1), (minifb::Key::LeftAlt, 0xA2),
-                (minifb::Key::RightAlt, 0xA2),
+                (minifb::Key::Tab, 0x09), (minifb::Key::Delete, 0x7F),
+                (minifb::Key::LeftShift, 0xA0), (minifb::Key::RightShift, 0xA0),
+                (minifb::Key::LeftCtrl, 0xA1), (minifb::Key::RightCtrl, 0xA1),
+                (minifb::Key::LeftAlt, 0xA2), (minifb::Key::RightAlt, 0xA2),
+                (minifb::Key::CapsLock, 0xA3),
+                (minifb::Key::F1, 0x81), (minifb::Key::F2, 0x82), (minifb::Key::F3, 0x83),
+                (minifb::Key::F4, 0x84), (minifb::Key::F5, 0x85), (minifb::Key::F6, 0x86),
+                (minifb::Key::F7, 0x87), (minifb::Key::F8, 0x88), (minifb::Key::F9, 0x89),
+                (minifb::Key::F10, 0x8A), (minifb::Key::F11, 0x8B), (minifb::Key::F12, 0x8C),
+                (minifb::Key::Minus, 0x2D), (minifb::Key::Equal, 0x3D),
+                (minifb::Key::LeftBracket, 0x5B), (minifb::Key::RightBracket, 0x5D),
+                (minifb::Key::Backslash, 0x5C), (minifb::Key::Semicolon, 0x3B),
+                (minifb::Key::Apostrophe, 0x27), (minifb::Key::Backquote, 0x60),
+                (minifb::Key::Comma, 0x2C), (minifb::Key::Period, 0x2E),
+                (minifb::Key::Slash, 0x2F),
             ];
 
             for (m_key, code) in mapped_keys {
@@ -469,6 +504,9 @@ impl CanvasDevice {
     pub fn fill_rect(&mut self, x: u8, y: u8, w: u8, h: u8, color: u16) {
         let lw = if self.logical_width == 0 { 256 } else { self.logical_width as usize };
         let lh = if self.logical_height == 0 { 256 } else { self.logical_height as usize };
+        if self.logical_buffer.len() < lw * lh {
+            return;
+        }
         let (x, y, w, h) = (x as usize, y as usize, w as usize, h as usize);
 
         for py in y..((y + h).min(lh)) {
@@ -481,15 +519,18 @@ impl CanvasDevice {
 
     pub fn stroke_rect(&mut self, x: u8, y: u8, w: u8, h: u8, thickness: u8, color: u16) {
         let th = thickness.max(1);
+        let (xu, yu, wu, hu, thu) = (x as usize, y as usize, w as usize, h as usize, th as usize);
         // Top and bottom horizontal borders
         self.fill_rect(x, y, w, th, color);
-        if h > th {
-            self.fill_rect(x, y + h - th, w, th, color);
+        if hu > thu {
+            let y2 = (yu + hu - thu).min(255) as u8;
+            self.fill_rect(x, y2, w, th, color);
         }
         // Left and right vertical borders
         self.fill_rect(x, y, th, h, color);
-        if w > th {
-            self.fill_rect(x + w - th, y, th, h, color);
+        if wu > thu {
+            let x2 = (xu + wu - thu).min(255) as u8;
+            self.fill_rect(x2, y, th, h, color);
         }
     }
 
@@ -497,7 +538,7 @@ impl CanvasDevice {
         if rx == 0 || ry == 0 {
             return;
         }
-        let (cx, cy, rx, ry) = (cx as i32, cy as i32, rx as i32, ry as i32);
+        let (cx, cy, rx, ry) = (cx as i64, cy as i64, rx as i64, ry as i64);
         let rx2 = rx * rx;
         let ry2 = ry * ry;
 
@@ -509,7 +550,7 @@ impl CanvasDevice {
             // dy^2 / ry^2 + dx^2 / rx^2 <= 1 => dx^2 <= rx^2 * (1 - dy^2 / ry^2)
             let remaining = rx2 - (rx2 * dy * dy) / ry2;
             if remaining >= 0 {
-                let dx_max = (remaining as f64).sqrt() as i32;
+                let dx_max = (remaining as f64).sqrt() as i64;
                 for dx in -dx_max..=dx_max {
                     let x = cx + dx;
                     if x >= 0 && x < 256 {
@@ -524,8 +565,8 @@ impl CanvasDevice {
         if rx == 0 || ry == 0 {
             return;
         }
-        let th = thickness.max(1) as i32;
-        let (cx, cy, rx, ry) = (cx as i32, cy as i32, rx as i32, ry as i32);
+        let th = thickness.max(1) as i64;
+        let (cx, cy, rx, ry) = (cx as i64, cy as i64, rx as i64, ry as i64);
 
         let rx_outer = rx + th / 2;
         let ry_outer = ry + th / 2;
@@ -556,6 +597,59 @@ impl CanvasDevice {
 
                 if in_outer && !in_inner {
                     self.set_pixel_value(x as u8, y as u8, color);
+                }
+            }
+        }
+    }
+
+    pub fn paint_mask(
+        &mut self,
+        x: u8,
+        y: u8,
+        w: u8,
+        h: u8,
+        mask_value: u8,
+        mask_invert: u8,
+        color: u16,
+        mask_data: &[u8],
+    ) {
+        if w == 0 || h == 0 {
+            return;
+        }
+        let lw = if self.logical_width == 0 { 256 } else { self.logical_width as usize };
+        let lh = if self.logical_height == 0 { 256 } else { self.logical_height as usize };
+        if self.logical_buffer.len() < lw * lh {
+            return;
+        }
+        let (x, y, w, h) = (x as usize, y as usize, w as usize, h as usize);
+
+        for dy in 0..h {
+            let py = y + dy;
+            if py >= lh {
+                continue;
+            }
+            let row_start = py * lw;
+            for dx in 0..w {
+                let px = x + dx;
+                if px >= lw {
+                    continue;
+                }
+                let idx = dy * w + dx;
+                if idx >= mask_data.len() {
+                    break;
+                }
+                let val = mask_data[idx];
+                if val == 0x00 {
+                    // 0x00 is always transparent
+                    continue;
+                }
+                let should_paint = if mask_invert == 0 {
+                    val == mask_value
+                } else {
+                    val != mask_value
+                };
+                if should_paint {
+                    self.logical_buffer[row_start + px] = color;
                 }
             }
         }
@@ -650,8 +744,9 @@ impl CanvasDevice {
             }
             CMD_GET_CANVAS_TITLE => {
                 let bytes = self.title.as_bytes();
-                self.return_queue.push_back(bytes.len() as u8);
-                for &b in bytes {
+                let len = bytes.len().min(255);
+                self.return_queue.push_back(len as u8);
+                for &b in &bytes[..len] {
                     self.return_queue.push_back(b);
                 }
                 self.current_cmd = None;
@@ -804,6 +899,26 @@ impl CanvasDevice {
                     self.stroke_ellipse(cx, cy, rx, ry, th, color);
                     self.current_cmd = None;
                     self.param_bytes.clear();
+                }
+            }
+            CMD_PAINT_MASK => {
+                if self.param_bytes.len() >= 8 {
+                    let x = self.param_bytes[0];
+                    let y = self.param_bytes[1];
+                    let w = self.param_bytes[2];
+                    let h = self.param_bytes[3];
+                    let mask_val = self.param_bytes[4];
+                    let invert = self.param_bytes[5];
+                    let hi = self.param_bytes[6] as u16;
+                    let lo = self.param_bytes[7] as u16;
+                    let color = (hi << 8) | lo;
+                    let total_bytes = w as usize * h as usize;
+                    if self.param_bytes.len() >= 8 + total_bytes {
+                        let mask_data = self.param_bytes[8..8 + total_bytes].to_vec();
+                        self.paint_mask(x, y, w, h, mask_val, invert, color, &mask_data);
+                        self.current_cmd = None;
+                        self.param_bytes.clear();
+                    }
                 }
             }
             CMD_FILL_TEXT => {
@@ -974,6 +1089,21 @@ impl Device for CanvasDevice {
             self.param_bytes.clear();
             self.execute_command();
         } else if port == self.data_port {
+            if self.current_cmd.is_none() {
+                // Ignore stray data port write with no active command
+                return;
+            }
+            const MAX_PARAM_BYTES: usize = 65536 + 16;
+            if self.param_bytes.len() >= MAX_PARAM_BYTES {
+                eprintln!(
+                    "CanvasDevice error: param_bytes overflow (cmd={:02X}, len={}). Dropping command to prevent hang.",
+                    self.current_cmd.unwrap_or(0),
+                    self.param_bytes.len()
+                );
+                self.current_cmd = None;
+                self.param_bytes.clear();
+                return;
+            }
             self.param_bytes.push(data);
             self.execute_command();
         }
@@ -1146,5 +1276,38 @@ mod tests {
         // 6. Dispose Canvas
         dev.port_write(DEFAULT_CANVAS_CMD_PORT, CMD_DISPOSE_CANVAS);
         assert!(!dev.window_open);
+    }
+
+    #[test]
+    fn test_canvas_param_bytes_overflow_protection() {
+        let mut dev = CanvasDevice::new_headless(
+            DEFAULT_CANVAS_CMD_PORT,
+            DEFAULT_CANVAS_DATA_PORT,
+            DEFAULT_CANVAS_STATUS_PORT,
+        );
+
+        // 1. Stray write when current_cmd is None should be ignored
+        dev.port_write(DEFAULT_CANVAS_DATA_PORT, 0x99);
+        assert!(dev.param_bytes.is_empty());
+
+        // 2. Start CMD_PAINT_MASK with 255x255 expected size (needs 65033 bytes)
+        dev.port_write(DEFAULT_CANVAS_CMD_PORT, CMD_PAINT_MASK);
+        dev.port_write(DEFAULT_CANVAS_DATA_PORT, 0); // x
+        dev.port_write(DEFAULT_CANVAS_DATA_PORT, 0); // y
+        dev.port_write(DEFAULT_CANVAS_DATA_PORT, 255); // w
+        dev.port_write(DEFAULT_CANVAS_DATA_PORT, 255); // h
+        dev.port_write(DEFAULT_CANVAS_DATA_PORT, 1); // mask_val
+        dev.port_write(DEFAULT_CANVAS_DATA_PORT, 0); // invert
+        dev.port_write(DEFAULT_CANVAS_DATA_PORT, 0xFF); // hi
+        dev.port_write(DEFAULT_CANVAS_DATA_PORT, 0xFF); // lo
+
+        // Flood data port past MAX_PARAM_BYTES (65536 + 16 = 65552)
+        for _ in 0..65550 {
+            dev.port_write(DEFAULT_CANVAS_DATA_PORT, 0x01);
+        }
+
+        // Should have safely reset current_cmd and cleared param_bytes
+        assert_eq!(dev.current_cmd, None);
+        assert!(dev.param_bytes.is_empty());
     }
 }

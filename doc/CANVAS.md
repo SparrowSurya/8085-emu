@@ -135,6 +135,7 @@ No intermediary parameter buffers or memory blocks in 8085 RAM are required.
 | `0x15` | `CMD_STROKE_RECT` | `x` (u8), `y` (u8), `w` (u8), `h` (u8), `thickness` (u8), `color_hi` (u8), `color_lo` (u8) | None | Draw outlined rectangle |
 | `0x16` | `CMD_FILL_ELLIPSE` | `cx` (u8), `cy` (u8), `rx` (u8), `ry` (u8), `color_hi` (u8), `color_lo` (u8) | None | Draw filled ellipse / circle |
 | `0x17` | `CMD_STROKE_ELLIPSE`| `cx` (u8), `cy` (u8), `rx` (u8), `ry` (u8), `thickness` (u8), `color_hi` (u8), `color_lo` (u8) | None | Draw outlined ellipse / circle |
+| `0x18` | `CMD_PAINT_MASK` | `x` (u8), `y` (u8), `w` (u8), `h` (u8), `mask_val` (u8), `invert` (u8), `color_hi` (u8), `color_lo` (u8), `mask_bytes...` | None | Draw multi-valued sprite mask with transparent 0x00 and optional invert |
 | `0x20` | `CMD_FILL_TEXT` | `x` (u8), `y` (u8), `size` (u8), `color_hi` (u8), `color_lo` (u8), `len` (u8), `text_bytes...` | None | Render filled text string using built-in font |
 | `0x21` | `CMD_TEXT_WIDTH` | `size` (u8), `len` (u8), `text_bytes...` | `width` (u8) | Calculate rendered pixel width of string |
 | `0x22` | `CMD_STROKE_TEXT` | `x` (u8), `y` (u8), `size` (u8), `thickness` (u8), `color_hi` (u8), `color_lo` (u8), `len` (u8), `text_bytes...` | None | Render outlined/stroke text string |
@@ -198,6 +199,10 @@ All coordinates are 8-bit (`0` to `255`). Colors are 16-bit RGBA4444.
   - Draws a solid filled ellipse centered at $(cx, cy)$ with horizontal radius $rx$ and vertical radius $ry$.
 - **`StrokeEllipse(cx, cy, rx, ry, color, thickness)`**:
   - Draws an outlined ellipse with border thickness.
+- **`PaintMask(x, y, mask_address, width, height, mask_value, color, mask_invert)`**:
+  - Rasterizes a 2D multi-valued sprite mask from memory at `mask_address`.
+  - Overwrites pixels matching `mask_value` (or `!= mask_value` if `mask_invert != 0`) with `color`.
+  - Mask value `0x00` is always transparent. Fast hardware-accelerated drawing.
 
 ### 4.4 Text Rendering
 - **`FillText(text, x, y, size, color)`**:

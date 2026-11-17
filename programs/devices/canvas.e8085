@@ -44,6 +44,7 @@
 %define CMD_STROKE_RECT       0x15
 %define CMD_FILL_ELLIPSE      0x16
 %define CMD_STROKE_ELLIPSE    0x17
+%define CMD_PAINT_MASK        0x18
 
 ; Text Rendering
 %define CMD_FILL_TEXT         0x20
@@ -432,6 +433,34 @@
     out CANVAS_DATA_PORT
 %end
 
+; Paints a multi-valued masked sprite at (%1, %2) of size (%4 x %5) from memory at %3
+; Matching %6 (or inverted if %9 != 0) with color (%7 = hi, %8 = lo)
+; Mask value 0x00 is always treated as transparent
+%macro PaintMask 9
+    mvi A, CMD_PAINT_MASK
+    out CANVAS_CMD_PORT
+    mvi A, %1
+    out CANVAS_DATA_PORT
+    mvi A, %2
+    out CANVAS_DATA_PORT
+    mvi A, %4
+    out CANVAS_DATA_PORT
+    mvi A, %5
+    out CANVAS_DATA_PORT
+    mvi A, %6
+    out CANVAS_DATA_PORT
+    mvi A, %9
+    out CANVAS_DATA_PORT
+    mvi A, %7
+    out CANVAS_DATA_PORT
+    mvi A, %8
+    out CANVAS_DATA_PORT
+    lxi HL, %3
+    mvi D, %4
+    mvi C, %5
+    call canvas_stream_grid
+%end
+
 ; --- Text Rendering Macros ---
 
 ; Renders solid text %1 at (%2, %3) with scale %4 and color (%5 = hi, %6 = lo)
@@ -631,6 +660,27 @@ global canvas_read_str:
 .read_done:
     mvi M, 0
     pop HL
+    pop BC
+    ret
+
+; Streams a 2D grid of bytes from HL of dimensions D (width) x C (height) to CANVAS_DATA_PORT
+; Preserves: B, C, D, E, H, L
+global canvas_stream_grid:
+    push BC
+    push DE
+    push HL
+.row_loop:
+    mov B, D
+.col_loop:
+    mov A, M
+    out CANVAS_DATA_PORT
+    inx HL
+    dcr B
+    jnz .col_loop
+    dcr C
+    jnz .row_loop
+    pop HL
+    pop DE
     pop BC
     ret
 
