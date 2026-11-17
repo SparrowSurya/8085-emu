@@ -84,7 +84,7 @@ cargo run --bin e8085-lsp
 cargo run --bin e8085 -- lsp
 
 # Launch VS Code with full LSP development extension
-./open.sh
+make code
 ```
 
 ### 6. Interactive Debugging & DAP Server (`dap`)

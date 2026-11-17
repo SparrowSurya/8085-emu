@@ -108,7 +108,7 @@ A dedicated extension is provided in [`editors/vscode/`](../editors/vscode/).
 
 To test in VS Code development mode:
 ```bash
-./open.sh
+make code
 ```
 
 Or manually:

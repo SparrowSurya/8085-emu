@@ -98,9 +98,20 @@ pub fn find_stdlib_dir(start: Option<&Path>) -> Option<PathBuf> {
     }
 
     if let Ok(home) = std::env::var("HOME") {
-        let user_candidate = PathBuf::from(home).join(".local/share/emu8085/stdlib");
+        let user_candidate = PathBuf::from(&home).join(".local/share/emu8085/stdlib");
         if user_candidate.is_dir() {
             return Some(user_candidate);
+        }
+        let mac_candidate = PathBuf::from(&home).join("Library/Application Support/emu8085/stdlib");
+        if mac_candidate.is_dir() {
+            return Some(mac_candidate);
+        }
+    }
+
+    if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+        let win_candidate = PathBuf::from(local_app_data).join("emu8085/stdlib");
+        if win_candidate.is_dir() {
+            return Some(win_candidate);
         }
     }
 

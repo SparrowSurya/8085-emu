@@ -111,14 +111,16 @@ Press `F5` in any open `.e8085` file, or create `.vscode/launch.json`:
 ## How to Use & Open in VS Code
 
 ### Quick Launch (Extension Development Mode)
-Run the bundled script from the project root:
+Run from the project root:
 ```bash
-bash open.sh
+make code
 ```
-This starts VS Code with the local extension loaded for the workspace.
+This builds the required LSP/DAP binaries and starts VS Code in extension development mode with the workspace loaded.
 
 ### Permanent Installation (Symlink)
 To make the extension globally available across all VS Code sessions:
 ```bash
-ln -s "$(pwd)/editors/vscode" $HOME/.vscode/extensions/e8085-assembly
+make install-extension
+# Or manually:
+# ln -s "$(pwd)/editors/vscode" $HOME/.vscode/extensions/e8085-assembly
 ```
