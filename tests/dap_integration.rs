@@ -88,7 +88,7 @@ async fn full_dap_session_drives_client_lifecycle() {
     assert!(init_events.iter().any(|e| e.event == "initialized"));
 
     // 2. Launch demo program with stopOnEntry
-    let demo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("programs/demo.e8085");
+    let demo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/demo.e8085");
     let (launch_resp, launch_events) = client.send_request("launch", Some(serde_json::json!({
         "program": demo_path.to_string_lossy().to_string(),
         "stopOnEntry": true
@@ -227,7 +227,7 @@ async fn multifile_source_stepping_and_terminal_bridge_stream_io() {
     assert!(init_resp.success);
 
     // 3. Launch triangle_pattern pointing to terminalPort 18085
-    let triangle_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("programs/triangle_pattern.e8085");
+    let triangle_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/triangle_pattern.e8085");
     let (launch_resp, launch_events) = client.send_request("launch", Some(serde_json::json!({
         "program": triangle_path.to_string_lossy().to_string(),
         "stopOnEntry": true,
@@ -355,7 +355,7 @@ async fn stack_word_and_parent_child_labels_format_in_call_stack() {
         "adapterID": "e8085"
     }))).await;
 
-    let demo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("programs/demo.e8085");
+    let demo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/demo.e8085");
     client.send_request("launch", Some(serde_json::json!({
         "program": demo_path.to_string_lossy().to_string(),
         "stopOnEntry": true
@@ -427,7 +427,7 @@ async fn test_dap_macro_breakpoints_set_before_launch() {
     assert!(init_resp.success);
 
     // 2. VS Code sends setBreakpoints BEFORE launch
-    let macro_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("programs/macro.e8085");
+    let macro_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/macro.e8085");
     let (bp_resp, _) = client.send_request("setBreakpoints", Some(serde_json::json!({
         "source": {
             "path": macro_path.to_string_lossy().to_string()

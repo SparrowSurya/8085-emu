@@ -5,7 +5,7 @@
       "type": "e8085",
       "name": "Debug Triangle Pattern",
       "request": "launch",
-      "program": "${workspaceFolder}/programs/triangle_pattern.e8085",
+      "program": "${workspaceFolder}/examples/triangle_pattern.e8085",
       "stopOnEntry": true,
       "console": "integratedTerminal",
       "terminalPort": 8085,

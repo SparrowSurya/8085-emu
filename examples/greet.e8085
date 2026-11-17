@@ -1,7 +1,7 @@
 ; This program uses external subroutines (print, input, endl) defined in text_io.e8085.
 ; Compile the library first, then link it using the -l flag:
-;   cargo run --bin e8085 -- compile programs/devices/text_io.e8085 -o text_io.8085.bin
-;   cargo run --bin e8085 -- compile programs/greet.e8085 -l text_io.8085.bin -o greet.8085.bin
+;   cargo run --bin e8085 -- compile stdlib/device/text_io.e8085 -o text_io.8085.bin
+;   cargo run --bin e8085 -- compile examples/greet.e8085 -l text_io.8085.bin -o greet.8085.bin
 ;   cargo run --bin e8085 -- run greet.8085.bin
 
 

@@ -150,18 +150,18 @@ The `e8085` CLI provides three core subcommands for compiling, running, and disa
 ### 1. Compile to Binary Image (`compile`)
 Assembles a `.e8085` source file and writes a raw binary machine code image (`.8085.bin`):
 ```bash
-cargo run --bin e8085 -- compile programs/hello_world.e8085 -o target/hello_world.8085.bin
+cargo run --bin e8085 -- compile examples/hello_world.e8085 -o target/hello_world.8085.bin
 ```
 **Output**:
 ```text
-Compiled 'programs/hello_world.e8085' -> 'target/hello_world.8085.bin' (103 bytes)
+Compiled 'examples/hello_world.e8085' -> 'target/hello_world.8085.bin' (103 bytes)
 ```
 
 ### 2. Run Program or Binary Image (`run`)
 Executes either an assembly source file (`.e8085`) or a precompiled binary image (`.8085.bin`) on the cycle-accurate emulator with virtual terminal I/O:
 ```bash
 # Run assembly file
-cargo run --bin e8085 -- run programs/hello_world.e8085
+cargo run --bin e8085 -- run examples/hello_world.e8085
 
 # Run precompiled binary file
 cargo run --bin e8085 -- run target/hello_world.8085.bin
@@ -379,16 +379,16 @@ The linker (`-l / --link`) strictly accepts compiled `*.8085.bin` binary librari
 
 ```bash
 # 1. Compile reusable subroutine library (TextIO helper)
-cargo run --bin e8085 -- compile programs/devices/text_io.e8085 -o text_io.8085.bin
+cargo run --bin e8085 -- compile stdlib/device/text_io.e8085 -o text_io.8085.bin
 
 # 2. Compile main program linking with precompiled library (statically bundles library code)
-cargo run --bin e8085 -- compile programs/greet.e8085 -l text_io.8085.bin -o greet.8085.bin
+cargo run --bin e8085 -- compile examples/greet.e8085 -l text_io.8085.bin -o greet.8085.bin
 
 # 3. Run the standalone binary executable directly (no runtime -l needed!)
 cargo run --bin e8085 -- run greet.8085.bin
 
 # 4. Or run the source file directly with on-the-fly linking
-cargo run --bin e8085 -- run programs/greet.e8085 -l text_io.8085.bin
+cargo run --bin e8085 -- run examples/greet.e8085 -l text_io.8085.bin
 ```
 
 > **Note on Entry Points**: Pure subroutine libraries (without a `main:` label) have `entry_pc = 0x0000`. Attempting to run a library binary directly (`e8085 run text_io.8085.bin`) will be rejected with `error: no entry point specified (main label missing in binary)`.

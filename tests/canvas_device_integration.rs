@@ -4,7 +4,7 @@ use emu8085::device::canvas::*;
 use emu8085::{CanvasDevice, Machine};
 
 fn setup_test_machine(src: &str) -> (Machine, CanvasDevice) {
-    let base_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("programs");
+    let base_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples");
     let fake_file = base_dir.join("test_canvas.e8085");
 
     let image = assemble_and_link_with_file(Some(&fake_file), src, Some(&base_dir), None, &[])

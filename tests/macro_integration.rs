@@ -655,13 +655,13 @@ main:
 }
 
 #[test]
-fn test_dap_macro_programs_file_scenario() {
+fn test_dap_macro_examples_file_scenario() {
     use std::path::PathBuf;
     use emu8085::dap::protocol::LaunchRequestArguments;
     use emu8085::dap::session::DebugSession;
 
-    let macro_prog_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("programs/macro.e8085");
-    assert!(macro_prog_path.exists(), "programs/macro.e8085 must exist");
+    let macro_prog_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/macro.e8085");
+    assert!(macro_prog_path.exists(), "examples/macro.e8085 must exist");
 
     let args = LaunchRequestArguments {
         program: macro_prog_path.to_string_lossy().to_string(),
@@ -749,8 +749,8 @@ fn test_dap_macro_breakpoint_inside_macro_body_hit_on_continue() {
     use emu8085::dap::protocol::{LaunchRequestArguments, SourceBreakpoint};
     use emu8085::dap::session::{DebugSession, StopReason};
 
-    let macro_prog_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("programs/macro.e8085");
-    assert!(macro_prog_path.exists(), "programs/macro.e8085 must exist");
+    let macro_prog_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/macro.e8085");
+    assert!(macro_prog_path.exists(), "examples/macro.e8085 must exist");
 
     let args = LaunchRequestArguments {
         program: macro_prog_path.to_string_lossy().to_string(),

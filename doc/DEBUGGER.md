@@ -261,7 +261,7 @@ cargo run --bin e8085 -- dap
 ```
 
 ### In Visual Studio Code
-1. Open any `.e8085` assembly file (e.g. `programs/triangle_pattern.e8085`).
+1. Open any `.e8085` assembly file (e.g. `examples/triangle_pattern.e8085`).
 2. Press **F5** (or navigate to **Run and Debug** $\to$ **Debug Current 8085 File**).
 3. The debug session will start, stop at the entry instruction, and open the `"8085 Terminal"` tab.
 
@@ -269,12 +269,12 @@ cargo run --bin e8085 -- dap
 
 ## 6. End-to-End Debugging Walkthrough
 
-Let's walk through debugging [`programs/triangle_pattern.e8085`](../programs/triangle_pattern.e8085):
+Let's walk through debugging [`examples/triangle_pattern.e8085`](../examples/triangle_pattern.e8085):
 
 ```e8085
-%include "devices/text_io.e8085"
-%include "lib/math.e8085"
-%include "lib/conv.e8085"
+%include <device/text_io>
+%include <math>
+%include <conv>
 
 segment .data
     askSize "Enter size of triangle: "
@@ -341,10 +341,10 @@ main:
 
 ## 7. Macro Debugging Walkthrough
 
-Let's walk through debugging [`programs/macro.e8085`](../programs/macro.e8085):
+Let's walk through debugging [`examples/macro.e8085`](../examples/macro.e8085):
 
 ```e8085
-%include "../programs/devices/text_io.e8085"
+%include <device/text_io>
 
 extern print
 

@@ -1,8 +1,8 @@
-//! Integration tests for files in `programs/` directory.
+//! Integration tests for files in `examples/` directory.
 //!
 //! Driven by declarative manifests:
-//! - `programs/programs.json` for standalone/terminal/printer executables in `programs/`
-//! - `programs/libraries.json` for reusable subroutine libraries in `devices/` and `lib/`
+//! - `examples/programs.json` for standalone/terminal/printer executables in `examples/`
+//! - `examples/libraries.json` for reusable subroutine libraries in `stdlib/`
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -71,7 +71,7 @@ fn compile_lib_file(rel_path: &str, base_dir: &Path) -> BinaryContainer {
 
 #[test]
 fn test_programs_manifest_suite() {
-    let base_dir = Path::new("programs");
+    let base_dir = Path::new("examples");
     let manifest_path = base_dir.join("programs.json");
     let manifest_str = fs::read_to_string(&manifest_path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", manifest_path.display()));
@@ -187,7 +187,7 @@ fn test_programs_manifest_suite() {
 
 #[test]
 fn test_libraries_manifest_suite() {
-    let base_dir = Path::new("programs");
+    let base_dir = Path::new("examples");
     let manifest_path = base_dir.join("libraries.json");
     let manifest_str = fs::read_to_string(&manifest_path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", manifest_path.display()));

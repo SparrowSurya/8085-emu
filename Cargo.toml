@@ -17,5 +17,66 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 minifb = "0.27"
 
+[[example]]
+name = "arithmetic_immediate"
+path = "examples/api/arithmetic_immediate.rs"
+
+[[example]]
+name = "arithmetic_register"
+path = "examples/api/arithmetic_register.rs"
+
+[[example]]
+name = "bcd_arithmetic"
+path = "examples/api/bcd_arithmetic.rs"
+
+[[example]]
+name = "branching_control"
+path = "examples/api/branching_control.rs"
+
+[[example]]
+name = "data_transfer"
+path = "examples/api/data_transfer.rs"
+
+[[example]]
+name = "hello_world"
+path = "examples/api/hello_world.rs"
+
+[[example]]
+name = "hello_world_labels"
+path = "examples/api/hello_world_labels.rs"
+
+[[example]]
+name = "keyboard_input_interrupt"
+path = "examples/api/keyboard_input_interrupt.rs"
+
+[[example]]
+name = "logical_operations"
+path = "examples/api/logical_operations.rs"
+
+[[example]]
+name = "loop_multiplication_labels"
+path = "examples/api/loop_multiplication_labels.rs"
+
+[[example]]
+name = "printer_output"
+path = "examples/api/printer_output.rs"
+
+[[example]]
+name = "register_pair_arithmetic"
+path = "examples/api/register_pair_arithmetic.rs"
+
+[[example]]
+name = "stack_operations"
+path = "examples/api/stack_operations.rs"
+
+[[example]]
+name = "system_control_pins"
+path = "examples/api/system_control_pins.rs"
+
+[[example]]
+name = "usb_dma_transfer"
+path = "examples/api/usb_dma_transfer.rs"
+
+
 
 

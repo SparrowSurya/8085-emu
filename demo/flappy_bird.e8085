@@ -17,7 +17,7 @@
 ;   - Escape: Exit game
 ; ==============================================================================
 
-%include "programs/devices/canvas.e8085"
+%include <device/canvas>
 
 segment .data
 title_str    byte "8085 Flappy Bird\0"

@@ -25,7 +25,7 @@ fn main() {
         Instruction::with(Opcode::MVI_C, Operand::byte(0x55)), // MVI C, 0x55
         Instruction::new(Opcode::MOV_MC), // MOV M, C (memory at [HL] becomes 0x55)
         Instruction::new(Opcode::LDA_DE), // LDAX D (Load Accumulator from memory at DE [0x3344])
-        Instruction::new(Opcode::STA_BC), // STAX B (Store Accumulator to memory at BC [0xAA22])
+        Instruction::new(Opcode::STA_BC), // STAX B (Store Accumulator to memory at BC [0xAA55])
         Instruction::with(Opcode::LHLD, Operand::word(0x0200)), // LHLD 0x0200 (Load HL from memory 0x0200)
         Instruction::with(Opcode::SHLD, Operand::word(0x0300)), // SHLD 0x0300 (Store HL to memory 0x0300)
         Instruction::new(Opcode::XCHG),                         // XCHG (Exchange HL and DE)
@@ -54,7 +54,7 @@ fn main() {
     println!("Register H: 0x{:02X}", cpu.regs.h);
     println!("Register L: 0x{:02X}", cpu.regs.l);
     println!("Memory at 0x0100: 0x{:02X}", ram.read(Addr(0x0100)));
-    println!("Memory at 0xAA22: 0x{:02X}", ram.read(Addr(0xAA22)));
+    println!("Memory at 0xAA55: 0x{:02X}", ram.read(Addr(0xAA55)));
     println!("Memory at 0x0300: 0x{:02X}", ram.read(Addr(0x0300)));
     println!("Memory at 0x0301: 0x{:02X}", ram.read(Addr(0x0301)));
 
@@ -62,7 +62,7 @@ fn main() {
     assert_eq!(cpu.regs.a, 0x77);
     assert_eq!(cpu.regs.c, 0x55);
     assert_eq!(ram.read(Addr(0x0100)), 0x55);
-    assert_eq!(ram.read(Addr(0xAA22)), 0x77);
+    assert_eq!(ram.read(Addr(0xAA55)), 0x77);
     assert_eq!(ram.read(Addr(0x0300)), 0xEF);
     assert_eq!(ram.read(Addr(0x0301)), 0xBE);
 }

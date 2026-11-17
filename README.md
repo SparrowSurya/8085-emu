@@ -13,16 +13,16 @@ Run any assembly source file (`.e8085`) or precompiled binary (`.8085.bin`):
 
 ```bash
 # Run assembly file directly
-cargo run --bin e8085 -- run programs/demo.e8085
+cargo run --bin e8085 -- run examples/demo.e8085
 
 # Run Hello World program
-cargo run --bin e8085 -- run programs/hello_world.e8085
+cargo run --bin e8085 -- run examples/hello_world.e8085
 
 # Run precompiled standalone binary (no extra linker flags needed)
 cargo run --bin e8085 -- run greet.8085.bin
 
 # Run assembly file with external library linking on-the-fly
-cargo run --bin e8085 -- run programs/greet.e8085 -l text_io.8085.bin
+cargo run --bin e8085 -- run examples/greet.e8085 -l text_io.8085.bin
 ```
 
 ### 2. Compiling Programs & Linking Libraries (`compile`)
@@ -30,10 +30,10 @@ Compile `.e8085` source into a self-contained `.8085.bin` binary image:
 
 ```bash
 # 1. Compile reusable subroutine library (TextIO helper)
-cargo run --bin e8085 -- compile programs/devices/text_io.e8085 -o text_io.8085.bin
+cargo run --bin e8085 -- compile stdlib/device/text_io.e8085 -o text_io.8085.bin
 
 # 2. Statically link library into a standalone executable binary
-cargo run --bin e8085 -- compile programs/greet.e8085 -l text_io.8085.bin -o greet.8085.bin
+cargo run --bin e8085 -- compile examples/greet.e8085 -l text_io.8085.bin -o greet.8085.bin
 
 # 3. Run the standalone binary directly
 cargo run --bin e8085 -- run greet.8085.bin
@@ -124,9 +124,24 @@ cargo test --all-targets && cargo test --doc
 
 ```text
 emu8085/
-├── programs/           # 8085 user assembly programs (.e8085)
+├── examples/           # Assembly programs (.e8085) & developer API examples
+│   ├── api/                    # Rust crate developer API examples (.rs)
+│   │   ├── arithmetic_immediate.rs # Immediate arithmetic operations
+│   │   ├── arithmetic_register.rs  # Register-to-register arithmetic
+│   │   ├── bcd_arithmetic.rs       # DAA and BCD arithmetic
+│   │   ├── branching_control.rs    # Conditional jumps and flags
+│   │   ├── data_transfer.rs        # MOV, MVI, LDA, STA, LHLD, SHLD
+│   │   ├── hello_world.rs          # Basic machine initialization
+│   │   ├── hello_world_labels.rs   # Label resolution in Program compiler
+│   │   ├── keyboard_input_interrupt.rs # Keyboard hardware interrupt & INTA
+│   │   ├── logical_operations.rs   # ANA, ORA, XRA, CMA, CMP
+│   │   ├── loop_multiplication_labels.rs # Loop arithmetic with labels
+│   │   ├── printer_output.rs       # Direct port output streaming
+│   │   ├── register_pair_arithmetic.rs # DAD, INX, DCX operations
+│   │   ├── stack_operations.rs     # PUSH, POP, XTHL, SPHL
+│   │   ├── system_control_pins.rs  # READY, HOLD/HLDA, RESET_IN
+│   │   └── usb_dma_transfer.rs     # Bus mastering & DMA transfer
 │   ├── demo.e8085              # Interactive TextIO I/O demo
-│   ├── devices/text_io.e8085   # TextIO subroutine library (print, input, putch, endl)
 │   ├── greet.e8085             # Interactive greeting using extern subroutine linking
 │   ├── hello_world.e8085       # TextIO device string display
 │   ├── macro.e8085             # Parameterized macros (%macro / %end) with %len
@@ -135,24 +150,18 @@ emu8085/
 │   ├── hardware_trap.e8085     # Hardware TRAP exception handling
 │   ├── print_stars.e8085       # Printer port loop counter
 │   ├── software_interrupts.e8085 # Custom RST 1 & RST 2 ISR routines
-│   └── subroutine.e8085        # CALL and RET subroutine execution
+│   ├── subroutine.e8085        # CALL and RET subroutine execution
+│   └── triangle_pattern.e8085  # Interactive terminal triangle drawing
 │
-├── examples/           # Rust programmatic API examples (.rs)
-│   ├── arithmetic_immediate.rs # Immediate arithmetic operations
-│   ├── arithmetic_register.rs  # Register-to-register arithmetic
-│   ├── bcd_arithmetic.rs       # DAA and BCD arithmetic
-│   ├── branching_control.rs    # Conditional jumps and flags
-│   ├── data_transfer.rs        # MOV, MVI, LDA, STA, LHLD, SHLD
-│   ├── hello_world.rs          # Basic machine initialization
-│   ├── hello_world_labels.rs   # Label resolution in Program compiler
-│   ├── keyboard_input_interrupt.rs # Keyboard hardware interrupt & INTA
-│   ├── logical_operations.rs   # ANA, ORA, XRA, CMA, CMP
-│   ├── loop_multiplication_labels.rs # Loop arithmetic with labels
-│   ├── printer_output.rs       # Direct port output streaming
-│   ├── register_pair_arithmetic.rs # DAD, INX, DCX operations
-│   ├── stack_operations.rs     # PUSH, POP, XTHL, SPHL
-│   ├── system_control_pins.rs  # READY, HOLD/HLDA, RESET_IN
-│   └── usb_dma_transfer.rs     # Bus mastering & DMA transfer
+├── stdlib/             # Standard library modules & device drivers
+│   ├── device/
+│   │   ├── canvas.e8085        # Canvas 2D graphics & input device driver
+│   │   └── text_io.e8085       # Text I/O & string printing device driver
+│   ├── math.e8085              # Math subroutines (divide, multiply, modulo, power)
+│   ├── conv.e8085              # Conversion subroutines (to_uint8, to_str8)
+│   └── cmp.e8085               # Comparison subroutines (less_than, in_range, etc.)
+│
+├── demo/               # Complete interactive applications (chess, flappy_bird, repl, etc.)
 │
 ├── editors/            # Editor extensions & client integrations
 │   └── vscode/                 # Official VS Code extension (e8085-assembly)
@@ -207,7 +216,7 @@ emu8085/
 ├── tests/              # Integration and verification test suites
 │   ├── macro_integration.rs    # Parameterized macros and DAP/LSP macro test suite
 │   ├── linking_integration.rs  # Static linking, local labels, %include & extern tests
-│   ├── programs_integration.rs # Tests all programs/ files end-to-end
+│   ├── programs_integration.rs # Tests all examples/ assembly files end-to-end
 │   ├── interrupt_software_and_hardware.rs # Software RST and Hardware TRAP tests
 │   ├── asm_coverage.rs         # Assembler directives & layout coverage
 │   ├── asm_end_to_end.rs       # Assembler end-to-end integration tests

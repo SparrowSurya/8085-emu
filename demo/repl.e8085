@@ -16,10 +16,10 @@
 ;   - Exit command: 'Q' or 'q'
 ; ==============================================================================
 
-%include "programs/devices/text_io.e8085"
-%include "programs/lib/math.e8085"
-%include "programs/lib/conv.e8085"
-%include "programs/lib/cmp.e8085"
+%include <device/text_io>
+%include <math>
+%include <conv>
+%include <cmp>
 
 %define INPUT_BUFFER_SIZE 128
 

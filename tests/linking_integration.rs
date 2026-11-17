@@ -298,7 +298,7 @@ func_b:
 
 #[test]
 fn test_cmp_library_relational_and_range_subroutines() {
-    let base_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("programs");
+    let base_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples");
     let test_src = r#"
 %include <cmp>
 

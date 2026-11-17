@@ -85,7 +85,7 @@ async fn test_dap_conditional_compilation_stepping_and_breakpoints() {
     assert!(init_events.iter().any(|e| e.event == "initialized"));
 
     // 2. Launch program with stopOnEntry
-    let prog_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("programs/conditional.e8085");
+    let prog_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/conditional.e8085");
     let (launch_resp, launch_events) = client.send_request("launch", Some(serde_json::json!({
         "program": prog_path.to_string_lossy().to_string(),
         "stopOnEntry": true

@@ -26,7 +26,7 @@ mod tests {
     #[test]
     fn launch_and_step_tracks_tstates_and_scopes() {
         let mut session = DebugSession::new();
-        let demo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("programs/demo.e8085");
+        let demo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/demo.e8085");
         let args = LaunchRequestArguments {
             program: demo_path.to_string_lossy().to_string(),
             stop_on_entry: Some(true),
@@ -68,7 +68,7 @@ mod tests {
     #[test]
     fn line_breakpoints_pause_execution_on_hit() {
         let mut session = DebugSession::new();
-        let demo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("programs/directives.e8085");
+        let demo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/directives.e8085");
         let args = LaunchRequestArguments {
             program: demo_path.to_string_lossy().to_string(),
             stop_on_entry: Some(true),

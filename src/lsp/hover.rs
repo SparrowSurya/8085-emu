@@ -2290,7 +2290,7 @@ main:
     #[test]
     fn test_hover_standard_library_and_devices_modules() {
         let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let main_file = manifest_dir.join("programs/triangle_pattern.e8085");
+        let main_file = manifest_dir.join("examples/triangle_pattern.e8085");
         let text = std::fs::read_to_string(&main_file).unwrap();
         let uri = Url::from_file_path(&main_file).unwrap();
         let doc = Document::new(uri, 1, text);
@@ -2327,7 +2327,7 @@ main:
 
         // 3b. Hover on %include <cmp>
         let cmp_text = "%include <cmp>\n\nmain:\n    call in_range\n    hlt\n".to_string();
-        let cmp_doc = Document::new(Url::from_file_path(manifest_dir.join("programs/cmp_test.e8085")).unwrap(), 1, cmp_text);
+        let cmp_doc = Document::new(Url::from_file_path(manifest_dir.join("examples/cmp_test.e8085")).unwrap(), 1, cmp_text);
         let h_cmp_inc = get_hover(&cmp_doc, &Position { line: 0, character: 12 }).unwrap();
         if let HoverContents::Markup(m) = h_cmp_inc.contents {
             assert!(m.value.contains("8085 Comparison & Relational Library"));
