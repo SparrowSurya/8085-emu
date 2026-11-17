@@ -1,4 +1,4 @@
-%include "../programs/devices/text_io.e8085"
+%include "programs/devices/text_io.e8085"
 
 
 extern print

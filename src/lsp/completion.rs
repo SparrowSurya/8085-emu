@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use tower_lsp::lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionList, CompletionResponse, InsertTextFormat,
-    Position,
+    CompletionItem, CompletionItemKind, CompletionList, CompletionResponse, CompletionTextEdit,
+    InsertTextFormat, Position, Range, TextEdit,
 };
 
 use super::document::{Document, resolve_relative_path};
@@ -319,7 +319,7 @@ pub fn get_completions(doc: &Document, position: &Position) -> Option<Completion
 
 fn get_include_path_completions(
     doc: &Document,
-    _position: &Position,
+    position: &Position,
     line: &str,
     char_idx: usize,
 ) -> Option<Vec<CompletionItem>> {
@@ -335,19 +335,39 @@ fn get_include_path_completions(
     }
 
     let raw_rel = &prefix[quote_pos + 1..char_idx];
-    let doc_path = doc.uri.to_file_path().ok()?;
-    let base_dir = doc_path.parent()?;
+    let project_root = doc
+        .uri
+        .to_file_path()
+        .ok()
+        .map(|p| crate::asm::include::find_project_root(&p))
+        .unwrap_or_else(|| {
+            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+        });
 
-    let (search_dir, typed_prefix) = if let Some(last_slash) = raw_rel.rfind('/') {
-        let sub = &raw_rel[..last_slash];
-        let pre = &raw_rel[last_slash + 1..];
-        (base_dir.join(sub), pre)
+    let clean_rel = raw_rel.trim_start_matches('/');
+    let (search_dir, typed_prefix, prefix_start_char) = if let Some(last_slash) = clean_rel.rfind('/') {
+        let sub = &clean_rel[..last_slash];
+        let pre = &clean_rel[last_slash + 1..];
+        let offset = quote_pos + 1 + (raw_rel.len() - pre.len());
+        (project_root.join(sub), pre, offset)
     } else {
-        (base_dir.to_path_buf(), raw_rel)
+        let offset = quote_pos + 1 + (raw_rel.len() - clean_rel.len());
+        (project_root.clone(), clean_rel, offset)
     };
 
     let entries = std::fs::read_dir(&search_dir).ok()?;
     let mut items = Vec::new();
+
+    let replace_range = Range {
+        start: Position {
+            line: position.line,
+            character: prefix_start_char as u32,
+        },
+        end: Position {
+            line: position.line,
+            character: char_idx as u32,
+        },
+    };
 
     for entry in entries.flatten() {
         let file_name = entry.file_name().to_string_lossy().to_string();
@@ -361,7 +381,15 @@ fn get_include_path_completions(
                     label: format!("{file_name}/"),
                     kind: Some(CompletionItemKind::FOLDER),
                     detail: Some("Folder".to_string()),
-                    insert_text: Some(format!("{file_name}/")),
+                    text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                        range: replace_range,
+                        new_text: format!("{file_name}/"),
+                    })),
+                    command: Some(tower_lsp::lsp_types::Command {
+                        title: "Trigger Suggest".to_string(),
+                        command: "editor.action.triggerSuggest".to_string(),
+                        arguments: None,
+                    }),
                     ..Default::default()
                 });
             } else if file_type.is_file() {
@@ -370,7 +398,10 @@ fn get_include_path_completions(
                         label: file_name.clone(),
                         kind: Some(CompletionItemKind::FILE),
                         detail: Some("8085 Assembly file".to_string()),
-                        insert_text: Some(file_name),
+                        text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                            range: replace_range,
+                            new_text: file_name,
+                        })),
                         ..Default::default()
                     });
                 }
@@ -2521,6 +2552,33 @@ main:
             assert!(list.items.iter().any(|item| item.label == "ifdef"));
             assert!(list.items.iter().any(|item| item.label == "ifndef"));
             assert!(list.items.iter().any(|item| item.label == "define"));
+        } else {
+            panic!("expected list");
+        }
+    }
+
+    #[test]
+    fn test_include_path_completion_with_trigger_suggest() {
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let main_file = manifest.join("main.e8085");
+        let uri = Url::from_file_path(&main_file).unwrap();
+        let text = "%include \"programs/".to_string();
+        let doc = Document::new(uri, 1, text);
+
+        let res = get_completions(
+            &doc,
+            &Position {
+                line: 0,
+                character: 19,
+            },
+        )
+        .unwrap();
+
+        if let CompletionResponse::List(list) = res {
+            // Check that devices/ folder is offered with triggerSuggest
+            let folder_item = list.items.iter().find(|item| item.label == "devices/").expect("expected devices/ folder");
+            assert_eq!(folder_item.kind, Some(CompletionItemKind::FOLDER));
+            assert!(folder_item.command.as_ref().map(|c| c.command.as_str()) == Some("editor.action.triggerSuggest"));
         } else {
             panic!("expected list");
         }

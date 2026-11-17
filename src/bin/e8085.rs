@@ -380,9 +380,11 @@ fn run_file(path: &str, link: &[String]) {
         });
 
         let link_containers = load_external_symbols(link);
+        let cur_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let project_root = emu8085::asm::include::find_project_root(&cur_dir);
         let base_dir = Path::new(path).parent();
         let main_file = Path::new(path);
-        let image = match assemble_and_link_with_file(Some(main_file), &src, base_dir, None, &link_containers) {
+        let image = match assemble_and_link_with_file(Some(main_file), &src, base_dir, Some(&project_root), &link_containers) {
             Ok(img) => img,
             Err(e) => {
                 eprintln!("{path}:{}: error: {}", e.span, e.kind);
@@ -451,10 +453,12 @@ fn compile_file(input_path: &str, link: &[String], output_path: Option<&str>) {
     });
 
     let link_containers = load_external_symbols(link);
+    let cur_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let project_root = emu8085::asm::include::find_project_root(&cur_dir);
     let base_dir = Path::new(input_path).parent();
     let main_file = Path::new(input_path);
 
-    let image = match assemble_and_link_with_file(Some(main_file), &src, base_dir, None, &link_containers) {
+    let image = match assemble_and_link_with_file(Some(main_file), &src, base_dir, Some(&project_root), &link_containers) {
         Ok(img) => img,
         Err(e) => {
             eprintln!("{input_path}:{}: error: {}", e.span, e.kind);

@@ -28,6 +28,11 @@ pub fn get_code_actions(doc: &Document, params: &CodeActionParams) -> Vec<CodeAc
         if let Some(action) = check_mnemonic_casing(doc, line_idx, line, trimmed) {
             actions.push(CodeActionOrCommand::CodeAction(action));
         }
+
+        // 3. Number base conversions (hex, dec, bin 4-bit, bin 8-bit, oct)
+        for action in check_number_base_conversions(doc, line_idx, line, &params.range) {
+            actions.push(CodeActionOrCommand::CodeAction(action));
+        }
     }
 
     actions
@@ -236,6 +241,103 @@ fn is_known_mnemonic(m: &str) -> bool {
     )
 }
 
+fn check_number_base_conversions(
+    doc: &Document,
+    line_idx: usize,
+    line: &str,
+    range: &Range,
+) -> Vec<CodeAction> {
+    let mut actions = Vec::new();
+    let code_part = line.split(';').next().unwrap_or(line);
+
+    let mut char_indices = code_part.char_indices().peekable();
+    while let Some(&(i, ch)) = char_indices.peek() {
+        if ch.is_ascii_alphanumeric() || ch == '\'' || ch == '_' {
+            let start = i;
+            let mut end = i + ch.len_utf8();
+            char_indices.next();
+            while let Some(&(j, c)) = char_indices.peek() {
+                if c.is_ascii_alphanumeric() || c == '_' || c == '\'' {
+                    end = j + c.len_utf8();
+                    char_indices.next();
+                } else {
+                    break;
+                }
+            }
+            let word = &code_part[start..end];
+            let col_start = start;
+            let col_end = end;
+            let touches = if range.start.line as usize == line_idx {
+                (range.start.character as usize <= col_end) && (range.end.character as usize >= col_start)
+            } else {
+                false
+            };
+
+            if touches {
+                if let Some(val) = crate::lsp::hover::parse_numeric_literal(word) {
+                    let hex_rep = format!("0x{:X}", val);
+                    let dec_rep = format!("{}", val);
+                    let bin_4_rep = crate::lsp::hover::format_binary_grouped(val, 4);
+                    let bin_8_rep = crate::lsp::hover::format_binary_grouped(val, 8);
+                    let oct_rep = format!("0o{:o}", val);
+
+                    let mut options = vec![
+                        (format!("Convert to Hexadecimal: {hex_rep}"), hex_rep),
+                        (format!("Convert to Decimal: {dec_rep}"), dec_rep),
+                        (format!("Convert to Binary (4-bit grouped): {bin_4_rep}"), bin_4_rep),
+                    ];
+
+                    if bin_8_rep != options[2].1 {
+                        options.push((format!("Convert to Binary (8-bit grouped): {bin_8_rep}"), bin_8_rep));
+                    }
+                    options.push((format!("Convert to Octal: {oct_rep}"), oct_rep));
+
+                    for (title, new_text) in options {
+                        if word.eq_ignore_ascii_case(&new_text) {
+                            continue;
+                        }
+                        let mut changes = HashMap::new();
+                        changes.insert(
+                            doc.uri.clone(),
+                            vec![TextEdit {
+                                range: Range {
+                                    start: Position {
+                                        line: line_idx as u32,
+                                        character: col_start as u32,
+                                    },
+                                    end: Position {
+                                        line: line_idx as u32,
+                                        character: col_end as u32,
+                                    },
+                                },
+                                new_text,
+                            }],
+                        );
+                        actions.push(CodeAction {
+                            title,
+                            kind: Some(CodeActionKind::REFACTOR_REWRITE),
+                            diagnostics: None,
+                            edit: Some(WorkspaceEdit {
+                                changes: Some(changes),
+                                document_changes: None,
+                                change_annotations: None,
+                            }),
+                            command: None,
+                            is_preferred: Some(false),
+                            disabled: None,
+                            data: None,
+                        });
+                    }
+                }
+            }
+        } else {
+            char_indices.next();
+        }
+    }
+
+    actions
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -265,9 +367,54 @@ mod tests {
         };
 
         let actions = get_code_actions(&doc, &params);
-        assert_eq!(actions.len(), 1);
-        if let CodeActionOrCommand::CodeAction(ref a) = actions[0] {
-            assert!(a.title.contains("xra A"));
-        }
+        let has_xra = actions.iter().any(|act| {
+            if let CodeActionOrCommand::CodeAction(a) = act {
+                a.title.contains("xra A")
+            } else {
+                false
+            }
+        });
+        assert!(has_xra);
+    }
+
+    #[test]
+    fn test_number_base_conversions() {
+        let uri = Url::parse("file:///test.e8085").unwrap();
+        let text = "main:\n    mvi A, 10\n    hlt\n".to_string();
+        let doc = Document::new(uri.clone(), 1, text);
+
+        let params = CodeActionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            range: Range {
+                start: Position {
+                    line: 1,
+                    character: 11,
+                },
+                end: Position {
+                    line: 1,
+                    character: 13,
+                },
+            },
+            context: CodeActionContext::default(),
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        };
+
+        let actions = get_code_actions(&doc, &params);
+        let titles: Vec<String> = actions
+            .iter()
+            .filter_map(|act| {
+                if let CodeActionOrCommand::CodeAction(a) = act {
+                    Some(a.title.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        assert!(titles.iter().any(|t| t.contains("Hexadecimal: 0xA")));
+        assert!(titles.iter().any(|t| t.contains("Binary (4-bit grouped): 0b0000_1010")));
+        assert!(titles.iter().any(|t| t.contains("Binary (8-bit grouped): 0b00001010")));
+        assert!(titles.iter().any(|t| t.contains("Octal: 0o12")));
     }
 }

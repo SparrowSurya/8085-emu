@@ -237,10 +237,28 @@ fn resolve_program_includes(
 
     // 1. Process all %include directives first
     for inc in &program.includes {
-        let inc_path = base_dir.join(&inc.path);
+        let clean_path = inc.path.trim_start_matches('/');
 
-        // Check 1: Prevent %include on files that go outside the project root
-        if is_outside_root(&inc_path, &ctx.project_root) {
+        // Verify resolution does not escape project root step-by-step
+        let mut cur = ctx.project_root.clone();
+        let mut escaped = false;
+        for comp in Path::new(clean_path).components() {
+            match comp {
+                std::path::Component::ParentDir => {
+                    if cur == ctx.project_root || !cur.starts_with(&ctx.project_root) {
+                        escaped = true;
+                        break;
+                    }
+                    cur.pop();
+                }
+                std::path::Component::Normal(part) => {
+                    cur.push(part);
+                }
+                _ => {}
+            }
+        }
+
+        if escaped || is_outside_root(&cur, &ctx.project_root) {
             return Err(AsmError::new(
                 inc.span,
                 AsmErrorKind::IncludeError(format!(
@@ -250,8 +268,21 @@ fn resolve_program_includes(
             ));
         }
 
+        // Try project root path first: PWD_PATH / clean_path
+        let inc_candidate = if cur.exists() {
+            cur
+        } else {
+            // Secondary fallback for subfolder programs: base_dir / clean_path
+            let sub_path = base_dir.join(clean_path);
+            if !is_outside_root(&sub_path, &ctx.project_root) && sub_path.exists() {
+                sub_path
+            } else {
+                cur
+            }
+        };
+
         // Check 2: Check if file exists and can be canonicalized
-        let canonical_path = inc_path.canonicalize().map_err(|e| {
+        let canonical_path = inc_candidate.canonicalize().map_err(|e| {
             AsmError::new(
                 inc.span,
                 AsmErrorKind::IncludeError(format!("cannot read '{}': {e}", inc.path)),
@@ -536,5 +567,55 @@ use crate::asm::parse;
         );
 
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_include_relative_to_project_root_example1() {
+        let temp_root = std::env::temp_dir().join("emu8085_test_example1");
+        let lib_dir = temp_root.join("lib");
+        std::fs::create_dir_all(&lib_dir).unwrap();
+
+        let io_file = lib_dir.join("io.e8085");
+        std::fs::write(&io_file, "segment .text\nglobal print_char:\n    ret\n").unwrap();
+
+        let main_file = temp_root.join("main.e8085");
+
+        // 1. Correct include: %include "lib/io.e8085"
+        let good_src = "%include \"lib/io.e8085\"\nsegment .text\nmain:\n    call print_char\n    hlt\n";
+        let tokens = lex(good_src).unwrap();
+        let program = parse(tokens).unwrap();
+        let res_good = resolve_includes_with_main_and_root(
+            Some(&main_file),
+            &temp_root,
+            Some(&temp_root),
+            &program,
+        );
+        assert!(res_good.is_ok(), "expected lib/io.e8085 to succeed: {:?}", res_good.err());
+
+        // 2. Absolute-style include: %include "/lib/io.e8085"
+        let abs_src = "%include \"/lib/io.e8085\"\nsegment .text\nmain:\n    call print_char\n    hlt\n";
+        let tokens = lex(abs_src).unwrap();
+        let program = parse(tokens).unwrap();
+        let res_abs = resolve_includes_with_main_and_root(
+            Some(&main_file),
+            &temp_root,
+            Some(&temp_root),
+            &program,
+        );
+        assert!(res_abs.is_ok(), "expected /lib/io.e8085 to succeed: {:?}", res_abs.err());
+
+        // 3. Incorrect include: %include "io.e8085" (not in root)
+        let bad_src = "%include \"io.e8085\"\nsegment .text\nmain:\n    call print_char\n    hlt\n";
+        let tokens = lex(bad_src).unwrap();
+        let program = parse(tokens).unwrap();
+        let res_bad = resolve_includes_with_main_and_root(
+            Some(&main_file),
+            &temp_root,
+            Some(&temp_root),
+            &program,
+        );
+        assert!(res_bad.is_err(), "expected io.e8085 to fail");
+
+        let _ = std::fs::remove_dir_all(&temp_root);
     }
 }

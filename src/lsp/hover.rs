@@ -70,7 +70,24 @@ pub fn get_hover(doc: &Document, position: &Position) -> Option<Hover> {
     None
 }
 
-fn parse_numeric_literal(word: &str) -> Option<u32> {
+pub fn format_binary_grouped(val: u32, chunk_size: usize) -> String {
+    let bit_len = if val <= 0xFF {
+        8
+    } else if val <= 0xFFFF {
+        16
+    } else {
+        32
+    };
+    let s = format!("{:0width$b}", val, width = bit_len);
+    let chunks: Vec<&str> = s
+        .as_bytes()
+        .chunks(chunk_size)
+        .map(|c| std::str::from_utf8(c).unwrap_or(""))
+        .collect();
+    format!("0b{}", chunks.join("_"))
+}
+
+pub fn parse_numeric_literal(word: &str) -> Option<u32> {
     let clean = word.trim();
     if clean.is_empty() {
         return None;
@@ -97,26 +114,28 @@ fn parse_numeric_literal(word: &str) -> Option<u32> {
         }
     }
 
-    if let Some(hex) = clean
+    let unseparated: String = clean.chars().filter(|&c| c != '_').collect();
+
+    if let Some(hex) = unseparated
         .strip_prefix("0x")
-        .or_else(|| clean.strip_prefix("0X"))
+        .or_else(|| unseparated.strip_prefix("0X"))
     {
         return u32::from_str_radix(hex, 16).ok();
     }
-    if let Some(bin) = clean
+    if let Some(bin) = unseparated
         .strip_prefix("0b")
-        .or_else(|| clean.strip_prefix("0B"))
+        .or_else(|| unseparated.strip_prefix("0B"))
     {
         return u32::from_str_radix(bin, 2).ok();
     }
-    if let Some(oct) = clean
+    if let Some(oct) = unseparated
         .strip_prefix("0o")
-        .or_else(|| clean.strip_prefix("0O"))
+        .or_else(|| unseparated.strip_prefix("0O"))
     {
         return u32::from_str_radix(oct, 8).ok();
     }
-    if clean.chars().all(|c| c.is_ascii_digit()) {
-        return clean.parse::<u32>().ok();
+    if unseparated.chars().all(|c| c.is_ascii_digit()) {
+        return unseparated.parse::<u32>().ok();
     }
     None
 }
@@ -124,7 +143,7 @@ fn parse_numeric_literal(word: &str) -> Option<u32> {
 fn format_number_hover(val: u32) -> String {
     let dec = format!("{}", val);
     let hex = format!("0x{:X}", val);
-    let bin = format!("0b{:b}", val);
+    let bin = format_binary_grouped(val, 4);
     let oct = format!("0o{:o}", val);
     let ascii = if val <= 0x7F {
         match val as u8 {
@@ -1431,18 +1450,15 @@ fn get_user_symbol_hover_in_single_doc(
         if trimmed.starts_with("%macro") {
             let parts: Vec<&str> = trimmed.split_whitespace().collect();
             if parts.len() >= 2 && parts[1] == symbol {
-                let doc_comment = collect_preceding_comments(lines, i);
-                let mut body = Vec::new();
-                body.push(trimmed.to_string());
-                for next_line in &lines[i + 1..] {
-                    let next_trimmed = next_line.trim();
-                    body.push(next_line.to_string());
-                    if next_trimmed.starts_with("%end") {
-                        break;
+                let arg_count = parts.get(2).unwrap_or(&"0");
+                let mut doc_comment = collect_preceding_comments(lines, i);
+                if doc_comment.is_empty() && i + 1 < lines.len() {
+                    let next_line = lines[i + 1].trim();
+                    if let Some(comment) = next_line.strip_prefix(';') {
+                        doc_comment = comment.trim().to_string();
                     }
                 }
-                let body_text = body.join("\n");
-                let mut out = format!("```e8085\n{}\n```", body_text);
+                let mut out = format!("```\n%macro {} {}\n```", symbol, arg_count);
                 if !doc_comment.is_empty() {
                     out.push_str("\n\n");
                     out.push_str(&doc_comment);
@@ -2271,6 +2287,38 @@ main:
         let h_endif = get_hover(&doc, &Position { line: 10, character: 1 }).unwrap();
         if let HoverContents::Markup(m) = h_endif.contents {
             assert!(m.value.contains("**Directive** `%endif`"));
+        } else {
+            panic!("expected markup");
+        }
+    }
+
+    #[test]
+    fn test_macro_hover_format() {
+        let uri = Url::parse("file:///test_macro.e8085").unwrap();
+        let text = r#"
+; Clears the screen with given color
+%macro ClearScreen 2
+    mvi A, %1
+    out 0x10
+    mvi A, %2
+    out 0x11
+%end
+
+main:
+    ClearScreen 0xFF, 0x00
+    hlt
+"#
+        .to_string();
+        let doc = Document::new(uri, 1, text);
+
+        // Hover over `ClearScreen` call on line 10
+        let h_call = get_hover(&doc, &Position { line: 10, character: 6 }).unwrap();
+        if let HoverContents::Markup(m) = h_call.contents {
+            assert!(m.value.contains("%macro ClearScreen 2"));
+            assert!(m.value.contains("Clears the screen with given color"));
+            // Must NOT contain the internal implementation body instructions
+            assert!(!m.value.contains("out 0x10"));
+            assert!(!m.value.contains("%end"));
         } else {
             panic!("expected markup");
         }

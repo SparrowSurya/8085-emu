@@ -338,8 +338,10 @@ impl Lexer {
             lexeme.push(p);
             let mut digits = String::new();
             while let Some(c) = self.peek() {
-                if c.is_ascii_alphanumeric() {
-                    digits.push(c);
+                if c.is_ascii_alphanumeric() || c == '_' {
+                    if c != '_' {
+                        digits.push(c);
+                    }
                     lexeme.push(c);
                     self.bump();
                 } else {
@@ -353,16 +355,19 @@ impl Lexer {
         } else {
             let mut digits = String::new();
             while let Some(c) = self.peek() {
-                if c.is_ascii_digit() {
-                    digits.push(c);
+                if c.is_ascii_digit() || c == '_' {
+                    if c != '_' {
+                        digits.push(c);
+                    }
+                    lexeme.push(c);
                     self.bump();
                 } else {
                     break;
                 }
             }
             match u32::from_str_radix(&digits, 10) {
-                Ok(v) => Ok(TokenKind::Number(v)),
-                Err(_) => Err(AsmError::new(start, AsmErrorKind::MalformedNumber(digits))),
+                Ok(v) if !digits.is_empty() => Ok(TokenKind::Number(v)),
+                _ => Err(AsmError::new(start, AsmErrorKind::MalformedNumber(lexeme))),
             }
         }
     }
@@ -387,6 +392,22 @@ mod tests {
                 Number(10),
                 Number(63),
                 Number(0),
+                Eof
+            ]
+        );
+    }
+
+    #[test]
+    fn numbers_with_underscores() {
+        use TokenKind::*;
+        assert_eq!(
+            kinds("0b0000_1010 0b00000000_00001010 0x12_34 1_000 0o7_7"),
+            vec![
+                Number(10),
+                Number(10),
+                Number(0x1234),
+                Number(1000),
+                Number(63),
                 Eof
             ]
         );

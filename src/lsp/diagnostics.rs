@@ -207,10 +207,28 @@ fn validate_top_level_includes(
     let canon_main = main_file.map(crate::asm::include::canonicalize_or_norm);
 
     for inc in &program.includes {
-        let inc_path = base_dir.join(&inc.path);
+        let clean_path = inc.path.trim_start_matches('/');
 
-        // 1. Outside project root
-        if crate::asm::include::is_outside_root(&inc_path, project_root) {
+        // Verify resolution does not escape project root step-by-step
+        let mut cur = project_root.to_path_buf();
+        let mut escaped = false;
+        for comp in Path::new(clean_path).components() {
+            match comp {
+                std::path::Component::ParentDir => {
+                    if cur == *project_root || !cur.starts_with(project_root) {
+                        escaped = true;
+                        break;
+                    }
+                    cur.pop();
+                }
+                std::path::Component::Normal(part) => {
+                    cur.push(part);
+                }
+                _ => {}
+            }
+        }
+
+        if escaped || crate::asm::include::is_outside_root(&cur, project_root) {
             diagnostics.push(make_include_diagnostic(
                 doc,
                 inc.span,
@@ -220,8 +238,19 @@ fn validate_top_level_includes(
             continue;
         }
 
+        let inc_candidate = if cur.exists() {
+            cur
+        } else {
+            let sub_path = base_dir.join(clean_path);
+            if !crate::asm::include::is_outside_root(&sub_path, project_root) && sub_path.exists() {
+                sub_path
+            } else {
+                cur
+            }
+        };
+
         // 2. Existence and canonicalization
-        let canon_inc = match inc_path.canonicalize() {
+        let canon_inc = match inc_candidate.canonicalize() {
             Ok(p) => p,
             Err(e) => {
                 diagnostics.push(make_include_diagnostic(

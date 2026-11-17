@@ -206,16 +206,23 @@ impl DocumentStore {
 
 /// Resolves a relative file path against a document URI or current working directory within project root.
 pub fn resolve_relative_path(doc_uri: &Url, rel_path: &str) -> Option<std::path::PathBuf> {
+    let clean_rel = rel_path.trim_start_matches('/');
     if let Ok(doc_path) = doc_uri.to_file_path() {
+        let project_root = crate::asm::include::find_project_root(&doc_path);
+        // 1. Try project root first
+        let root_candidate = project_root.join(clean_rel);
+        if !crate::asm::include::is_outside_root(&root_candidate, &project_root) && root_candidate.exists() {
+            return Some(root_candidate);
+        }
+        // 2. Try file parent directory as secondary fallback
         if let Some(parent) = doc_path.parent() {
-            let candidate = parent.join(rel_path);
-            let project_root = crate::asm::include::find_project_root(&doc_path);
+            let candidate = parent.join(clean_rel);
             if !crate::asm::include::is_outside_root(&candidate, &project_root) && candidate.exists() {
                 return Some(candidate);
             }
         }
     }
-    let candidate = std::path::PathBuf::from(rel_path);
+    let candidate = std::path::PathBuf::from(clean_rel);
     if candidate.exists() {
         let project_root = crate::asm::include::find_project_root(&candidate);
         if !crate::asm::include::is_outside_root(&candidate, &project_root) {
