@@ -39,6 +39,8 @@ pub enum TokenKind {
     Colon,
     /// `.` — precedes a segment name
     Period,
+    /// `/` — slash separator (e.g. for paths)
+    Slash,
     /// `!` — logical NOT
     Exclamation,
     /// `==` — equality comparison

@@ -62,10 +62,26 @@
           "match": "%[0-9]+\\b"
         },
         {
-          "match": "(%(?i:include))\\s+(\"[^\"]*\")",
+          "match": "(%(?i:include))\\s+(<)([^>]*)(>)",
+          "captures": {
+            "1": { "name": "keyword.control.directive.include.e8085" },
+            "2": { "name": "punctuation.definition.string.begin.e8085 string.quoted.other.lt-gt.include.e8085" },
+            "3": { "name": "string.quoted.other.lt-gt.include.e8085" },
+            "4": { "name": "punctuation.definition.string.end.e8085 string.quoted.other.lt-gt.include.e8085" }
+          }
+        },
+        {
+          "match": "(%(?i:include))\\s+(\"[^\"]*\"|'[^']*')",
           "captures": {
             "1": { "name": "keyword.control.directive.include.e8085" },
             "2": { "name": "string.quoted.double.path.include.e8085" }
+          }
+        },
+        {
+          "match": "(%(?i:include))\\s+([^\\s;\"'<]+)",
+          "captures": {
+            "1": { "name": "keyword.control.directive.include.e8085" },
+            "2": { "name": "string.unquoted.path.include.e8085" }
           }
         },
         {

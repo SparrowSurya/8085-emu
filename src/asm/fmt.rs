@@ -619,8 +619,27 @@ pub fn format_define_group(lines: &[LineItem]) -> Vec<String> {
 pub fn format_directive_code(code: &str) -> String {
     let trimmed = code.trim();
     if let Some(rest) = trimmed.strip_prefix("%include") {
-        let tokens = split_tokens_outside_quotes(rest);
-        format!("%include {}", tokens.join(" "))
+        let rest_trimmed = rest.trim();
+        if rest_trimmed.starts_with('<') {
+            if let Some(end_idx) = rest_trimmed.find('>') {
+                let inside: String = rest_trimmed[1..end_idx]
+                    .chars()
+                    .filter(|c| !c.is_whitespace())
+                    .collect();
+                let trailing = rest_trimmed[end_idx + 1..].trim();
+                if trailing.is_empty() {
+                    format!("%include <{inside}>")
+                } else {
+                    format!("%include <{inside}> {trailing}")
+                }
+            } else {
+                let tokens = split_tokens_outside_quotes(rest);
+                format!("%include {}", tokens.join(" "))
+            }
+        } else {
+            let tokens = split_tokens_outside_quotes(rest);
+            format!("%include {}", tokens.join(" "))
+        }
     } else if let Some(rest) = trimmed.strip_prefix("%origin") {
         let tokens = split_tokens_outside_quotes(rest);
         format!("%origin {}", tokens.join(" "))
@@ -1098,6 +1117,30 @@ segment .bss
     buf BYTE 10
 "#;
 
+        assert_eq!(formatted, expected);
+    }
+
+    #[test]
+    fn test_format_system_includes() {
+        let input = r#"
+%include   <math>
+%include  <  device / canvas  >
+%include "custom.e8085"
+
+segment .text
+main:
+    hlt
+"#;
+        let formatted = format_source(input);
+        let expected = r#"%include <math>
+%include <device/canvas>
+%include "custom.e8085"
+
+segment .text
+
+main:
+    hlt
+"#;
         assert_eq!(formatted, expected);
     }
 }

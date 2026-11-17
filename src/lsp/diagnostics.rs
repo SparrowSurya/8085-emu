@@ -207,72 +207,155 @@ fn validate_top_level_includes(
     let canon_main = main_file.map(crate::asm::include::canonicalize_or_norm);
 
     for inc in &program.includes {
-        let clean_path = inc.path.trim_start_matches('/');
-
-        // Verify resolution does not escape project root step-by-step
-        let mut cur = project_root.to_path_buf();
-        let mut escaped = false;
-        for comp in Path::new(clean_path).components() {
-            match comp {
-                std::path::Component::ParentDir => {
-                    if cur == *project_root || !cur.starts_with(project_root) {
-                        escaped = true;
-                        break;
-                    }
-                    cur.pop();
-                }
-                std::path::Component::Normal(part) => {
-                    cur.push(part);
-                }
-                _ => {}
-            }
-        }
-
-        if escaped || crate::asm::include::is_outside_root(&cur, project_root) {
-            diagnostics.push(make_include_diagnostic(
-                doc,
-                inc.span,
-                format!("cannot include '{}': path is outside project root", inc.path),
-            ));
-            has_error = true;
-            continue;
-        }
-
-        let inc_candidate = if cur.exists() {
-            cur
-        } else {
-            let sub_path = base_dir.join(clean_path);
-            if !crate::asm::include::is_outside_root(&sub_path, project_root) && sub_path.exists() {
-                sub_path
+        let (canon_inc, inc_display) = if inc.is_system {
+            let mod_name = if inc.path.ends_with(".e8085") {
+                inc.path.clone()
             } else {
-                cur
-            }
-        };
+                format!("{}.e8085", inc.path)
+            };
+            let stdlib_dir = crate::asm::include::find_stdlib_dir(Some(base_dir))
+                .or_else(|| crate::asm::include::find_stdlib_dir(Some(project_root)));
 
-        // 2. Existence and canonicalization
-        let canon_inc = match inc_candidate.canonicalize() {
-            Ok(p) => p,
-            Err(e) => {
+            let disk_found = if let Some(ref sdir) = stdlib_dir {
+                let mut cur = sdir.clone();
+                let mut escaped = false;
+                for comp in Path::new(&mod_name).components() {
+                    match comp {
+                        std::path::Component::ParentDir => {
+                            if cur == *sdir || !cur.starts_with(sdir) {
+                                escaped = true;
+                                break;
+                            }
+                            cur.pop();
+                        }
+                        std::path::Component::Normal(part) => {
+                            cur.push(part);
+                        }
+                        _ => {}
+                    }
+                }
+                if escaped || crate::asm::include::is_outside_root(&cur, sdir) {
+                    diagnostics.push(make_include_diagnostic(
+                        doc,
+                        inc.span,
+                        format!("cannot include '<{}>': path escapes standard library directory", inc.path),
+                    ));
+                    has_error = true;
+                    continue;
+                }
+                if cur.exists() {
+                    match cur.canonicalize() {
+                        Ok(c) => {
+                            if crate::asm::include::is_outside_root(&c, sdir) {
+                                diagnostics.push(make_include_diagnostic(
+                                    doc,
+                                    inc.span,
+                                    format!("cannot include '<{}>': path escapes standard library directory", inc.path),
+                                ));
+                                has_error = true;
+                                continue;
+                            }
+                            Some(c)
+                        }
+                        Err(_) => None,
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            let canon = if let Some(c) = disk_found {
+                c
+            } else if let Some((embed_path, _)) = crate::asm::include::EMBEDDED_STDLIB
+                .iter()
+                .find(|(p, _)| *p == mod_name || *p == inc.path)
+            {
+                stdlib_dir
+                    .unwrap_or_else(|| project_root.join("stdlib"))
+                    .join(embed_path)
+            } else {
                 diagnostics.push(make_include_diagnostic(
                     doc,
                     inc.span,
-                    format!("cannot read '{}': {e}", inc.path),
+                    format!("standard library module '<{}>' not found", inc.path),
+                ));
+                has_error = true;
+                continue;
+            };
+
+            (canon, format!("<{}>", inc.path))
+        } else {
+            let clean_path = inc.path.trim_start_matches('/');
+
+            // Verify resolution does not escape project root step-by-step
+            let mut cur = project_root.to_path_buf();
+            let mut escaped = false;
+            for comp in Path::new(clean_path).components() {
+                match comp {
+                    std::path::Component::ParentDir => {
+                        if cur == *project_root || !cur.starts_with(project_root) {
+                            escaped = true;
+                            break;
+                        }
+                        cur.pop();
+                    }
+                    std::path::Component::Normal(part) => {
+                        cur.push(part);
+                    }
+                    _ => {}
+                }
+            }
+
+            if escaped || crate::asm::include::is_outside_root(&cur, project_root) {
+                diagnostics.push(make_include_diagnostic(
+                    doc,
+                    inc.span,
+                    format!("cannot include '{}': path is outside project root", inc.path),
                 ));
                 has_error = true;
                 continue;
             }
-        };
 
-        // Re-check canonicalized path against root
-        if crate::asm::include::is_outside_root(&canon_inc, project_root) {
-            diagnostics.push(make_include_diagnostic(
-                doc,
-                inc.span,
-                format!("cannot include '{}': path is outside project root", inc.path),
-            ));
-            has_error = true;
-            continue;
-        }
+            let inc_candidate = if cur.exists() {
+                cur
+            } else {
+                let sub_path = base_dir.join(clean_path);
+                if !crate::asm::include::is_outside_root(&sub_path, project_root) && sub_path.exists() {
+                    sub_path
+                } else {
+                    cur
+                }
+            };
+
+            // 2. Existence and canonicalization
+            let canon = match inc_candidate.canonicalize() {
+                Ok(p) => p,
+                Err(e) => {
+                    diagnostics.push(make_include_diagnostic(
+                        doc,
+                        inc.span,
+                        format!("cannot read '{}': {e}", inc.path),
+                    ));
+                    has_error = true;
+                    continue;
+                }
+            };
+
+            // Re-check canonicalized path against root
+            if crate::asm::include::is_outside_root(&canon, project_root) {
+                diagnostics.push(make_include_diagnostic(
+                    doc,
+                    inc.span,
+                    format!("cannot include '{}': path is outside project root", inc.path),
+                ));
+                has_error = true;
+                continue;
+            }
+
+            (canon, format!("'{}'", inc.path))
+        };
 
         // 3. Self-inclusion
         if let Some(ref main) = canon_main {
@@ -280,7 +363,7 @@ fn validate_top_level_includes(
                 diagnostics.push(make_include_diagnostic(
                     doc,
                     inc.span,
-                    format!("file cannot include itself: '{}'", inc.path),
+                    format!("file cannot include itself: {inc_display}"),
                 ));
                 has_error = true;
                 continue;
@@ -292,7 +375,7 @@ fn validate_top_level_includes(
             diagnostics.push(make_include_diagnostic(
                 doc,
                 inc.span,
-                format!("duplicate include: file '{}' has already been included", inc.path),
+                format!("duplicate include: file {inc_display} has already been included"),
             ));
             has_error = true;
             continue;
@@ -1138,5 +1221,23 @@ mod tests {
         assert_eq!(diags[0].range.start.line, 0);
 
         let _ = std::fs::remove_dir_all(&temp_root);
+    }
+
+    #[test]
+    fn test_lsp_invalid_system_include_diagnostic() {
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let main_file = manifest.join("diag_test.e8085");
+        let uri = Url::from_file_path(&main_file).unwrap();
+        let text = "%include <non_existent_module>\nsegment .text\nmain:\n    hlt\n".to_string();
+        let doc = Document::new(uri, 1, text);
+        let diags = compute_diagnostics(&doc);
+
+        assert_eq!(diags.len(), 1);
+        assert!(
+            diags[0].message.contains("standard library module '<non_existent_module>' not found"),
+            "unexpected diag message: {}",
+            diags[0].message
+        );
+        assert_eq!(diags[0].range.start.line, 0);
     }
 }

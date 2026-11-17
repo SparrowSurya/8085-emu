@@ -551,9 +551,84 @@ impl<'a> Preprocessor<'a> {
             None => return Ok(()),
         };
 
+        // Check for angle-bracket stdlib include: %include <...>
+        if let Some(less_idx) = line_tokens.iter().position(|t| matches!(t.kind, TokenKind::Less)) {
+            let mut mod_name = String::new();
+            for tok in &line_tokens[less_idx + 1..] {
+                match &tok.kind {
+                    TokenKind::Ident(s) => mod_name.push_str(s),
+                    TokenKind::Slash => mod_name.push('/'),
+                    TokenKind::Number(n) => mod_name.push_str(&n.to_string()),
+                    TokenKind::Period => mod_name.push('.'),
+                    TokenKind::Greater => break,
+                    _ => {}
+                }
+            }
+
+            if !mod_name.is_empty() {
+                let file_name = if mod_name.ends_with(".e8085") {
+                    mod_name.clone()
+                } else {
+                    format!("{mod_name}.e8085")
+                };
+
+                let stdlib_dir = crate::asm::include::find_stdlib_dir(Some(&base_dir));
+                let disk_res = if let Some(ref sdir) = stdlib_dir {
+                    let cand = sdir.join(&file_name);
+                    if cand.exists() {
+                        cand.canonicalize().ok().and_then(|c| {
+                            std::fs::read_to_string(&c).ok().map(|s| (c, s))
+                        })
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                let (canon, inc_src) = if let Some((c, s)) = disk_res {
+                    (c, s)
+                } else if let Some((embed_path, embed_src)) =
+                    crate::asm::include::EMBEDDED_STDLIB.iter().find(|(p, _)| *p == file_name || *p == mod_name)
+                {
+                    let p = stdlib_dir.unwrap_or_else(|| base_dir.join("stdlib")).join(embed_path);
+                    (p, embed_src.to_string())
+                } else {
+                    return Ok(());
+                };
+
+                if self.visited_includes.contains(&canon) {
+                    return Ok(());
+                }
+                self.visited_includes.insert(canon.clone());
+
+                let inc_tokens = match lex(&inc_src) {
+                    Ok(t) => t,
+                    Err(_) => return Ok(()),
+                };
+
+                let inc_dir = canon.parent().unwrap_or(&base_dir);
+                let _ = preprocess_with_defines(
+                    inc_tokens,
+                    Some(inc_dir),
+                    self.defines,
+                    self.visited_includes,
+                );
+                return Ok(());
+            }
+        }
+
+        // Quoted string include: %include "..."
         for tok in line_tokens {
             if let TokenKind::Str(ref path_str) = tok.kind {
-                let inc_path = base_dir.join(path_str);
+                let clean_str = path_str.trim_start_matches('/');
+                let project_root = crate::asm::include::find_project_root(&base_dir);
+                let inc_path = if project_root.join(clean_str).exists() {
+                    project_root.join(clean_str)
+                } else {
+                    base_dir.join(clean_str)
+                };
+
                 let canon = match inc_path.canonicalize() {
                     Ok(c) => c,
                     Err(_) => continue,

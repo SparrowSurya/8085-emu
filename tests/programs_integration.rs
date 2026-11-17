@@ -5,7 +5,7 @@
 //! - `programs/libraries.json` for reusable subroutine libraries in `devices/` and `lib/`
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 
@@ -57,7 +57,11 @@ struct LibraryTestCase {
 }
 
 fn compile_lib_file(rel_path: &str, base_dir: &Path) -> BinaryContainer {
-    let full_path = base_dir.join(rel_path);
+    let full_path = if Path::new(rel_path).exists() {
+        PathBuf::from(rel_path)
+    } else {
+        base_dir.join(rel_path)
+    };
     let src = fs::read_to_string(&full_path)
         .unwrap_or_else(|e| panic!("failed to read library '{}': {e}", full_path.display()));
     let img = assemble(&src)
@@ -191,7 +195,11 @@ fn test_libraries_manifest_suite() {
         serde_json::from_str(&manifest_str).expect("valid libraries.json schema");
 
     for lib in manifest.libraries {
-        let lib_path = base_dir.join(&lib.file);
+        let lib_path = if Path::new(&lib.file).exists() {
+            PathBuf::from(&lib.file)
+        } else {
+            base_dir.join(&lib.file)
+        };
         let src = fs::read_to_string(&lib_path)
             .unwrap_or_else(|e| panic!("failed to read library '{}': {e}", lib_path.display()));
 

@@ -2,14 +2,14 @@
   "libraries": [
     {
       "name": "text_io",
-      "dir": "devices",
-      "file": "devices/text_io.e8085",
+      "dir": "device",
+      "file": "stdlib/device/text_io.e8085",
       "expected_symbols": ["print", "input", "putch", "endl"]
     },
     {
       "name": "canvas",
-      "dir": "devices",
-      "file": "devices/canvas.e8085",
+      "dir": "device",
+      "file": "stdlib/device/canvas.e8085",
       "expected_symbols": [
         "canvas_stream_str",
         "canvas_read_str",
@@ -25,21 +25,21 @@
     },
     {
       "name": "math",
-      "dir": "lib",
-      "file": "lib/math.e8085",
+      "dir": "stdlib",
+      "file": "stdlib/math.e8085",
       "expected_symbols": ["divide", "multiply", "modulo", "power"]
     },
     {
       "name": "conv",
-      "dir": "lib",
-      "file": "lib/conv.e8085",
-      "link_libs": ["lib/math.e8085"],
+      "dir": "stdlib",
+      "file": "stdlib/conv.e8085",
+      "link_libs": ["stdlib/math.e8085"],
       "expected_symbols": ["to_uint8", "to_str8"]
     },
     {
       "name": "cmp",
-      "dir": "lib",
-      "file": "lib/cmp.e8085",
+      "dir": "stdlib",
+      "file": "stdlib/cmp.e8085",
       "expected_symbols": [
         "less_than",
         "greater_than",

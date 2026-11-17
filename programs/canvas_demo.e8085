@@ -10,7 +10,7 @@
 ;   - Escape: Exit program
 ; ==============================================================================
 
-%include "devices/canvas.e8085"
+%include <device/canvas>
 
 segment .data
 title_str byte "8085 Canvas Interactive Demo\0"

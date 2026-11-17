@@ -1,6 +1,6 @@
 use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position, Range, Url};
 
-use super::document::{Document, resolve_relative_path};
+use super::document::Document;
 
 /// Provides rich hover documentation for 8085 instructions, registers, directives, and symbols.
 pub fn get_hover(doc: &Document, position: &Position) -> Option<Hover> {
@@ -1505,37 +1505,72 @@ fn find_user_symbol_hover_in_included_files(
     for line in doc.text.lines() {
         let trimmed = line.trim();
         if trimmed.starts_with("%include") {
-            let quote_char = if line.contains('"') {
-                Some('"')
-            } else if line.contains('\'') {
-                Some('\'')
+            let include_info = if let Some(start_angle) = line.find('<') {
+                if let Some(end_angle_offset) = line[start_angle + 1..].find('>') {
+                    let path = line[start_angle + 1..start_angle + 1 + end_angle_offset].trim();
+                    Some((path.to_string(), true))
+                } else {
+                    None
+                }
+            } else if let Some(q) = if line.contains('"') { Some('"') } else if line.contains('\'') { Some('\'') } else { None } {
+                if let Some(start_q) = line.find(q) {
+                    if let Some(end_q_offset) = line[start_q + 1..].find(q) {
+                        let path = &line[start_q + 1..start_q + 1 + end_q_offset];
+                        Some((path.to_string(), false))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
             } else {
-                None
+                let after = trimmed.strip_prefix("%include").unwrap().trim();
+                if !after.is_empty() && !after.starts_with(';') {
+                    let raw = after.split_whitespace().next().unwrap_or("").split(';').next().unwrap_or("").trim();
+                    if !raw.is_empty() {
+                        Some((raw.to_string(), false))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
             };
 
-            if let Some(q) = quote_char {
-                if let Some(start_quote) = line.find(q) {
-                    if let Some(end_quote_offset) = line[start_quote + 1..].find(q) {
-                        let rel_path = &line[start_quote + 1..start_quote + 1 + end_quote_offset];
-                        if let Some(target_path) = resolve_relative_path(&doc.uri, rel_path) {
-                            if visited.insert(target_path.clone()) {
-                                if let Ok(content) = std::fs::read_to_string(&target_path) {
-                                    let inc_lines: Vec<&str> = content.lines().collect();
-                                    if let Some(hover) = get_user_symbol_hover_in_single_doc(
-                                        &inc_lines, symbol, None,
-                                    ) {
-                                        return Some(hover);
-                                    }
-                                    if let Ok(inc_uri) = Url::from_file_path(&target_path) {
-                                        let inc_doc = Document::new(inc_uri, 1, content);
-                                        if let Some(hover) =
-                                            find_user_symbol_hover_in_included_files(
-                                                &inc_doc, symbol, visited,
-                                            )
-                                        {
-                                            return Some(hover);
-                                        }
-                                    }
+            if let Some((rel_path, is_system)) = include_info {
+                if let Some(target_path) = super::document::resolve_include_target(&doc.uri, &rel_path, is_system) {
+                    if visited.insert(target_path.clone()) {
+                        let content_opt = std::fs::read_to_string(&target_path).ok().or_else(|| {
+                            if is_system {
+                                let mod_name = if rel_path.ends_with(".e8085") {
+                                    rel_path.clone()
+                                } else {
+                                    format!("{rel_path}.e8085")
+                                };
+                                crate::asm::include::EMBEDDED_STDLIB
+                                    .iter()
+                                    .find(|(p, _)| *p == mod_name || *p == rel_path)
+                                    .map(|(_, s)| s.to_string())
+                            } else {
+                                None
+                            }
+                        });
+
+                        if let Some(content) = content_opt {
+                            let inc_lines: Vec<&str> = content.lines().collect();
+                            if let Some(hover) = get_user_symbol_hover_in_single_doc(
+                                &inc_lines, symbol, None,
+                            ) {
+                                return Some(hover);
+                            }
+                            if let Ok(inc_uri) = Url::from_file_path(&target_path) {
+                                let inc_doc = Document::new(inc_uri, 1, content);
+                                if let Some(hover) =
+                                    find_user_symbol_hover_in_included_files(
+                                        &inc_doc, symbol, visited,
+                                    )
+                                {
+                                    return Some(hover);
                                 }
                             }
                         }
@@ -1553,38 +1588,92 @@ fn get_include_hover(doc: &Document, position: &Position) -> Option<Hover> {
     let trimmed = line.trim();
 
     if trimmed.starts_with("%include") {
-        let quote_char = if line.contains('"') {
+        let char_col = position.character as usize;
+
+        let (rel_path, is_system, start_col, end_col) = if let Some(start_angle) = line.find('<') {
+            if let Some(end_angle_offset) = line[start_angle + 1..].find('>') {
+                let end_angle = start_angle + 1 + end_angle_offset;
+                if char_col >= start_angle && char_col <= end_angle {
+                    let path = line[start_angle + 1..end_angle].trim();
+                    (path, true, start_angle, end_angle)
+                } else {
+                    return None;
+                }
+            } else {
+                return None;
+            }
+        } else if let Some(quote_char) = if line.contains('"') {
             Some('"')
         } else if line.contains('\'') {
             Some('\'')
         } else {
             None
-        }?;
+        } {
+            let start_quote = line.find(quote_char)?;
+            let end_quote_offset = line[start_quote + 1..].find(quote_char)?;
+            let end_quote = start_quote + 1 + end_quote_offset;
 
-        let start_quote = line.find(quote_char)?;
-        let end_quote_offset = line[start_quote + 1..].find(quote_char)?;
-        let end_quote = start_quote + 1 + end_quote_offset;
+            if char_col >= start_quote && char_col <= end_quote {
+                let path = &line[start_quote + 1..end_quote];
+                (path, false, start_quote, end_quote)
+            } else {
+                return None;
+            }
+        } else {
+            let inc_end = line.find("%include")? + "%include".len();
+            let after_inc = &line[inc_end..];
+            let spaces = after_inc.chars().take_while(|c| c.is_whitespace()).count();
+            if spaces == 0 {
+                return None;
+            }
+            let raw_start = inc_end + spaces;
+            let raw_end = line[raw_start..]
+                .find(|c: char| c.is_whitespace() || c == ';')
+                .map(|off| raw_start + off)
+                .unwrap_or(line.len());
+            if char_col >= raw_start && char_col <= raw_end {
+                let path = line[raw_start..raw_end].trim();
+                (path, false, raw_start, raw_end.saturating_sub(1))
+            } else {
+                return None;
+            }
+        };
 
-        let char_col = position.character as usize;
-        // Only trigger include module doc when cursor is on/within the quoted string path
-        if char_col < start_quote || char_col > end_quote {
-            return None;
-        }
+        let target_path = super::document::resolve_include_target(&doc.uri, rel_path, is_system)?;
+        let module_doc = extract_file_module_doc(&target_path).or_else(|| {
+            if is_system {
+                let mod_name = if rel_path.ends_with(".e8085") {
+                    rel_path.to_string()
+                } else {
+                    format!("{rel_path}.e8085")
+                };
+                crate::asm::include::EMBEDDED_STDLIB
+                    .iter()
+                    .find(|(p, _)| *p == mod_name || *p == rel_path)
+                    .and_then(|(_, s)| extract_module_doc_from_str(s))
+            } else {
+                None
+            }
+        });
 
-        let rel_path = &line[start_quote + 1..end_quote];
-        let target_path = super::document::resolve_relative_path(&doc.uri, rel_path)?;
-        let module_doc = extract_file_module_doc(&target_path);
-
-        let val = module_doc.unwrap_or_default();
+        let val = if let Some(doc) = module_doc {
+            doc
+        } else {
+            let file_name = std::path::Path::new(rel_path)
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or(rel_path);
+            format!("Included file: `{file_name}`")
+        };
 
         let range = Range {
             start: Position {
                 line: position.line,
-                character: start_quote as u32,
+                character: start_col as u32,
             },
             end: Position {
                 line: position.line,
-                character: (end_quote + 1) as u32,
+                character: (end_col + 1) as u32,
             },
         };
 
@@ -1598,6 +1687,33 @@ fn get_include_hover(doc: &Document, position: &Position) -> Option<Hover> {
     }
 
     None
+}
+
+fn extract_module_doc_from_str(content: &str) -> Option<String> {
+    let mut comments = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if let Some(comment) = trimmed.strip_prefix(';') {
+            let clean = comment.trim();
+            if !clean.starts_with("====") && !clean.starts_with("----") {
+                comments.push(clean);
+            }
+        } else if trimmed.is_empty() {
+            if !comments.is_empty() {
+                // Keep collecting comments
+            }
+        } else {
+            // First non-comment, non-empty statement (e.g. %define, segment, instructions)
+            break;
+        }
+    }
+
+    if comments.is_empty() {
+        None
+    } else {
+        Some(comments.join("\n"))
+    }
 }
 
 fn extract_file_module_doc(path: &std::path::Path) -> Option<String> {
@@ -2047,6 +2163,57 @@ multiply_fast:
     }
 
     #[test]
+    fn test_hover_raw_unquoted_include_and_imported_symbol() {
+        let temp_dir = std::env::temp_dir();
+        let helper_file = temp_dir.join("raw_helper.e8085");
+        let helper_content = r#"
+; Multiplies numbers
+raw_multiply:
+    ret
+"#;
+        std::fs::write(&helper_file, helper_content).unwrap();
+
+        let main_file = temp_dir.join("main_raw_calc.e8085");
+        let text = "%include raw_helper.e8085\n\nmain:\n    call raw_multiply\n    hlt\n"
+            .to_string();
+        let uri = Url::from_file_path(&main_file).unwrap();
+        let doc = Document::new(uri, 1, text);
+
+        // Hover over `%include raw_helper.e8085`
+        let h_inc = get_hover(
+            &doc,
+            &Position {
+                line: 0,
+                character: 14,
+            },
+        )
+        .unwrap();
+        if let HoverContents::Markup(m) = h_inc.contents {
+            assert!(m.value.contains("Multiplies numbers"));
+        } else {
+            panic!("expected markup for raw include hover");
+        }
+
+        // Hover over `raw_multiply`
+        let h_sym = get_hover(
+            &doc,
+            &Position {
+                line: 3,
+                character: 12,
+            },
+        )
+        .unwrap();
+        if let HoverContents::Markup(m) = h_sym.contents {
+            assert!(m.value.contains("raw_multiply:"));
+            assert!(m.value.contains("Multiplies numbers"));
+        } else {
+            panic!("expected markup for symbol imported via raw include");
+        }
+
+        let _ = std::fs::remove_file(helper_file);
+    }
+
+    #[test]
     fn test_hover_non_contiguous_comment_not_docstring() {
         let uri = Url::parse("file:///test.e8085").unwrap();
         let text = r#"
@@ -2138,8 +2305,8 @@ main:
             panic!("expected markup");
         }
 
-        // 2. Hover on %include "lib/math.e8085" (line 1)
-        let h_math_inc = get_hover(&doc, &Position { line: 1, character: 15 }).unwrap();
+        // 2. Hover on %include <math> (line 1)
+        let h_math_inc = get_hover(&doc, &Position { line: 1, character: 12 }).unwrap();
         if let HoverContents::Markup(m) = h_math_inc.contents {
             assert!(m.value.contains("8085 Math Library"));
             assert!(m.value.contains("divide:"));
@@ -2148,8 +2315,8 @@ main:
             panic!("expected markup");
         }
 
-        // 3. Hover on %include "lib/conv.e8085" (line 2)
-        let h_conv_inc = get_hover(&doc, &Position { line: 2, character: 15 }).unwrap();
+        // 3. Hover on %include <conv> (line 2)
+        let h_conv_inc = get_hover(&doc, &Position { line: 2, character: 12 }).unwrap();
         if let HoverContents::Markup(m) = h_conv_inc.contents {
             assert!(m.value.contains("8085 String & Integer Conversion Library"));
             assert!(m.value.contains("to_uint8:"));
@@ -2158,10 +2325,10 @@ main:
             panic!("expected markup");
         }
 
-        // 3b. Hover on %include "lib/cmp.e8085"
-        let cmp_text = "%include \"lib/cmp.e8085\"\n\nmain:\n    call in_range\n    hlt\n".to_string();
+        // 3b. Hover on %include <cmp>
+        let cmp_text = "%include <cmp>\n\nmain:\n    call in_range\n    hlt\n".to_string();
         let cmp_doc = Document::new(Url::from_file_path(manifest_dir.join("programs/cmp_test.e8085")).unwrap(), 1, cmp_text);
-        let h_cmp_inc = get_hover(&cmp_doc, &Position { line: 0, character: 15 }).unwrap();
+        let h_cmp_inc = get_hover(&cmp_doc, &Position { line: 0, character: 12 }).unwrap();
         if let HoverContents::Markup(m) = h_cmp_inc.contents {
             assert!(m.value.contains("8085 Comparison & Relational Library"));
             assert!(m.value.contains("less_than:"));

@@ -317,6 +317,36 @@ pub fn get_completions(doc: &Document, position: &Position) -> Option<Completion
     }))
 }
 
+fn extract_include_info(line: &str) -> Option<(String, bool)> {
+    let trimmed = line.trim();
+    if !trimmed.starts_with("%include") {
+        return None;
+    }
+    if let Some(start_angle) = line.find('<') {
+        if let Some(end_angle_offset) = line[start_angle + 1..].find('>') {
+            let path = &line[start_angle + 1..start_angle + 1 + end_angle_offset];
+            return Some((path.trim().to_string(), true));
+        }
+    }
+    for q in ['"', '\''] {
+        if let Some(start_q) = line.find(q) {
+            if let Some(end_q_offset) = line[start_q + 1..].find(q) {
+                let path = &line[start_q + 1..start_q + 1 + end_q_offset];
+                return Some((path.trim().to_string(), false));
+            }
+        }
+    }
+    // Check raw unquoted include
+    let rest = trimmed.strip_prefix("%include").unwrap().trim();
+    if !rest.is_empty() && !rest.starts_with(';') {
+        let raw = rest.split_whitespace().next().unwrap_or("").split(';').next().unwrap_or("").trim();
+        if !raw.is_empty() {
+            return Some((raw.to_string(), false));
+        }
+    }
+    None
+}
+
 fn get_include_path_completions(
     doc: &Document,
     position: &Position,
@@ -329,12 +359,176 @@ fn get_include_path_completions(
         return None;
     }
 
-    let quote_pos = prefix.find('"').or_else(|| prefix.find('\''))?;
-    if char_idx <= quote_pos {
-        return None;
+    let angle_pos = prefix.find('<');
+    let quote_pos = prefix.find('"').or_else(|| prefix.find('\''));
+
+    if let Some(pos) = angle_pos {
+        if char_idx <= pos {
+            return None;
+        }
+
+        let raw_rel = &prefix[pos + 1..char_idx];
+        let doc_path = doc.uri.to_file_path().ok();
+        let stdlib_dir = crate::asm::include::find_stdlib_dir(doc_path.as_deref())
+            .unwrap_or_else(|| {
+                let project_root = doc_path
+                    .as_ref()
+                    .map(|p| crate::asm::include::find_project_root(p))
+                    .unwrap_or_else(|| std::path::PathBuf::from("."));
+                project_root.join("stdlib")
+            });
+
+        let clean_rel = raw_rel.trim_start_matches('/');
+        let (search_dir, typed_prefix, prefix_start_char) = if let Some(last_slash) = clean_rel.rfind('/') {
+            let sub = &clean_rel[..last_slash];
+            let pre = &clean_rel[last_slash + 1..];
+            let offset = pos + 1 + (raw_rel.len() - pre.len());
+            (stdlib_dir.join(sub), pre, offset)
+        } else {
+            let offset = pos + 1 + (raw_rel.len() - clean_rel.len());
+            (stdlib_dir.clone(), clean_rel, offset)
+        };
+
+        let replace_range = Range {
+            start: Position {
+                line: position.line,
+                character: prefix_start_char as u32,
+            },
+            end: Position {
+                line: position.line,
+                character: char_idx as u32,
+            },
+        };
+
+        let mut items = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+
+        if let Ok(entries) = std::fs::read_dir(&search_dir) {
+            for entry in entries.flatten() {
+                let file_name = entry.file_name().to_string_lossy().to_string();
+                if file_name.starts_with('.') && !typed_prefix.starts_with('.') {
+                    continue;
+                }
+
+                if let Ok(file_type) = entry.file_type() {
+                    if file_type.is_dir() {
+                        let label = format!("{file_name}/");
+                        let insert = label.clone();
+                        seen.insert(label.clone());
+                        items.push(CompletionItem {
+                            label,
+                            kind: Some(CompletionItemKind::FOLDER),
+                            detail: Some("Standard Library Folder".to_string()),
+                            text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                                range: replace_range,
+                                new_text: insert,
+                            })),
+                            command: Some(tower_lsp::lsp_types::Command {
+                                title: "Trigger Suggest".to_string(),
+                                command: "editor.action.triggerSuggest".to_string(),
+                                arguments: None,
+                            }),
+                            ..Default::default()
+                        });
+                    } else if file_name.ends_with(".e8085") {
+                        let mod_name = file_name.strip_suffix(".e8085").unwrap_or(&file_name).to_string();
+                        seen.insert(mod_name.clone());
+                        items.push(CompletionItem {
+                            label: mod_name.clone(),
+                            kind: Some(CompletionItemKind::MODULE),
+                            detail: Some("Standard Library Module".to_string()),
+                            text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                                range: replace_range,
+                                new_text: mod_name,
+                            })),
+                            ..Default::default()
+                        });
+                    }
+                }
+            }
+        }
+
+        // Also offer embedded stdlib entries if not already seen
+        for (embed_path, _) in crate::asm::include::EMBEDDED_STDLIB {
+            let embed_clean = embed_path.strip_suffix(".e8085").unwrap_or(embed_path);
+            let (embed_sub, embed_name): (&str, &str) = if let Some(slash) = embed_clean.rfind('/') {
+                (&embed_clean[..slash], &embed_clean[slash + 1..])
+            } else {
+                ("", embed_clean)
+            };
+
+            if clean_rel.contains('/') {
+                let sub = &clean_rel[..clean_rel.rfind('/').unwrap()];
+                if sub == embed_sub && !seen.contains(embed_name) {
+                    seen.insert(embed_name.to_string());
+                    items.push(CompletionItem {
+                        label: embed_name.to_string(),
+                        kind: Some(CompletionItemKind::MODULE),
+                        detail: Some("Standard Library Module".to_string()),
+                        text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                            range: replace_range,
+                            new_text: embed_name.to_string(),
+                        })),
+                        ..Default::default()
+                    });
+                }
+            } else if !embed_sub.is_empty() {
+                let folder = format!("{embed_sub}/");
+                if !seen.contains(&folder) {
+                    seen.insert(folder.clone());
+                    items.push(CompletionItem {
+                        label: folder.clone(),
+                        kind: Some(CompletionItemKind::FOLDER),
+                        detail: Some("Standard Library Folder".to_string()),
+                        text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                            range: replace_range,
+                            new_text: folder,
+                        })),
+                        command: Some(tower_lsp::lsp_types::Command {
+                            title: "Trigger Suggest".to_string(),
+                            command: "editor.action.triggerSuggest".to_string(),
+                            arguments: None,
+                        }),
+                        ..Default::default()
+                    });
+                }
+            } else if !seen.contains(embed_name) {
+                seen.insert(embed_name.to_string());
+                items.push(CompletionItem {
+                    label: embed_name.to_string(),
+                    kind: Some(CompletionItemKind::MODULE),
+                    detail: Some("Standard Library Module".to_string()),
+                    text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                        range: replace_range,
+                        new_text: embed_name.to_string(),
+                    })),
+                    ..Default::default()
+                });
+            }
+        }
+
+        return Some(items);
     }
 
-    let raw_rel = &prefix[quote_pos + 1..char_idx];
+    let (raw_rel, rel_start) = if let Some(qpos) = quote_pos {
+        if char_idx <= qpos {
+            return None;
+        }
+        (&prefix[qpos + 1..char_idx], qpos + 1)
+    } else {
+        let inc_end = prefix.find("%include")? + "%include".len();
+        let after_inc = &prefix[inc_end..];
+        let spaces = after_inc.chars().take_while(|c| c.is_whitespace()).count();
+        if spaces == 0 {
+            return None;
+        }
+        let start = inc_end + spaces;
+        if char_idx < start {
+            return None;
+        }
+        (&prefix[start..char_idx], start)
+    };
+
     let project_root = doc
         .uri
         .to_file_path()
@@ -348,10 +542,10 @@ fn get_include_path_completions(
     let (search_dir, typed_prefix, prefix_start_char) = if let Some(last_slash) = clean_rel.rfind('/') {
         let sub = &clean_rel[..last_slash];
         let pre = &clean_rel[last_slash + 1..];
-        let offset = quote_pos + 1 + (raw_rel.len() - pre.len());
+        let offset = rel_start + (raw_rel.len() - pre.len());
         (project_root.join(sub), pre, offset)
     } else {
-        let offset = quote_pos + 1 + (raw_rel.len() - clean_rel.len());
+        let offset = rel_start + (raw_rel.len() - clean_rel.len());
         (project_root.clone(), clean_rel, offset)
     };
 
@@ -800,34 +994,42 @@ fn get_label_completions(doc: &Document, position: &Position) -> Vec<CompletionI
     // 4. Labels from %include imported files
     for line in &raw_lines {
         let code_line = line.split(';').next().unwrap_or("").trim();
-        if code_line.starts_with("%include") {
-            if let Some(quote_char) = if code_line.contains('"') {
-                Some('"')
-            } else if code_line.contains('\'') {
-                Some('\'')
-            } else {
-                None
-            } {
-                if let Some(start_q) = code_line.find(quote_char) {
-                    if let Some(end_q) = code_line[start_q + 1..].find(quote_char) {
-                        let rel_path = &code_line[start_q + 1..start_q + 1 + end_q];
-                        if let Some(target_path) = resolve_relative_path(&doc.uri, rel_path) {
-                            if let Ok(content) = std::fs::read_to_string(target_path) {
-                                for inc_line in content.lines() {
-                                    let inc_code = inc_line.split(';').next().unwrap_or("").trim();
-                                    if let Some(rest) = inc_code.strip_suffix(':') {
-                                        let clean =
-                                            rest.strip_prefix("global ").unwrap_or(rest).trim();
-                                        if !clean.starts_with('.') && !clean.is_empty() {
-                                            items.push(CompletionItem {
-                                                label: clean.to_string(),
-                                                kind: Some(CompletionItemKind::FUNCTION),
-                                                detail: Some(format!("Imported from {}", rel_path)),
-                                                ..Default::default()
-                                            });
-                                        }
-                                    }
-                                }
+        if let Some((rel_path, is_system)) = extract_include_info(code_line) {
+            if let Some(target_path) = super::document::resolve_include_target(&doc.uri, &rel_path, is_system) {
+                let content_opt = std::fs::read_to_string(&target_path).ok().or_else(|| {
+                    if is_system {
+                        let mod_name = if rel_path.ends_with(".e8085") {
+                            rel_path.clone()
+                        } else {
+                            format!("{rel_path}.e8085")
+                        };
+                        crate::asm::include::EMBEDDED_STDLIB
+                            .iter()
+                            .find(|(p, _)| *p == mod_name || *p == rel_path)
+                            .map(|(_, s)| s.to_string())
+                    } else {
+                        None
+                    }
+                });
+
+                if let Some(content) = content_opt {
+                    for inc_line in content.lines() {
+                        let inc_code = inc_line.split(';').next().unwrap_or("").trim();
+                        if let Some(rest) = inc_code.strip_suffix(':') {
+                            let clean =
+                                rest.strip_prefix("global ").unwrap_or(rest).trim();
+                            if !clean.starts_with('.') && !clean.is_empty() {
+                                let origin = if is_system {
+                                    format!("<{rel_path}>")
+                                } else {
+                                    format!("\"{rel_path}\"")
+                                };
+                                items.push(CompletionItem {
+                                    label: clean.to_string(),
+                                    kind: Some(CompletionItemKind::FUNCTION),
+                                    detail: Some(format!("Imported from {origin}")),
+                                    ..Default::default()
+                                });
                             }
                         }
                     }
@@ -919,20 +1121,26 @@ fn extract_variables_and_constants(doc: &Document) -> (Vec<VariableInfo>, Vec<St
     // 2. Scan %include files
     for line in doc.text.lines() {
         let code_line = line.split(';').next().unwrap_or("").trim();
-        if code_line.to_lowercase().starts_with("%include") {
-            if let Some(quote_char) = if code_line.contains('"') {
-                Some('"')
-            } else if code_line.contains('\'') {
-                Some('\'')
-            } else {
-                None
-            } {
-                if let Some(start_q) = code_line.find(quote_char) {
-                    if let Some(end_q) = code_line[start_q + 1..].find(quote_char) {
-                        let rel_path = &code_line[start_q + 1..start_q + 1 + end_q];
-                        if let Some(target_path) = resolve_relative_path(&doc.uri, rel_path) {
-                            if let Ok(content) = std::fs::read_to_string(&target_path) {
-                                let mut inc_seg: Option<SegmentKind> = None;
+        if let Some((rel_path, is_system)) = extract_include_info(code_line) {
+            if let Some(target_path) = super::document::resolve_include_target(&doc.uri, &rel_path, is_system) {
+                let content_opt = std::fs::read_to_string(&target_path).ok().or_else(|| {
+                    if is_system {
+                        let mod_name = if rel_path.ends_with(".e8085") {
+                            rel_path.clone()
+                        } else {
+                            format!("{rel_path}.e8085")
+                        };
+                        crate::asm::include::EMBEDDED_STDLIB
+                            .iter()
+                            .find(|(p, _)| *p == mod_name || *p == rel_path)
+                            .map(|(_, s)| s.to_string())
+                    } else {
+                        None
+                    }
+                });
+
+                if let Some(content) = content_opt {
+                    let mut inc_seg: Option<SegmentKind> = None;
                                 for inc_line in content.lines() {
                                     let inc_code = inc_line.split(';').next().unwrap_or("").trim();
                                     if inc_code.is_empty() {
@@ -1001,9 +1209,6 @@ fn extract_variables_and_constants(doc: &Document) -> (Vec<VariableInfo>, Vec<St
                         }
                     }
                 }
-            }
-        }
-    }
 
     (vars, constants)
 }
@@ -1525,40 +1730,48 @@ fn get_extern_symbol_completions(doc: &Document) -> Vec<CompletionItem> {
     // 2. Check %include files for global exports
     for line in doc.text.lines() {
         let code_line = line.split(';').next().unwrap_or("").trim();
-        if code_line.to_lowercase().starts_with("%include") {
-            if let Some(quote_char) = if code_line.contains('"') {
-                Some('"')
-            } else if code_line.contains('\'') {
-                Some('\'')
-            } else {
-                None
-            } {
-                if let Some(start_q) = code_line.find(quote_char) {
-                    if let Some(end_q) = code_line[start_q + 1..].find(quote_char) {
-                        let rel_path = &code_line[start_q + 1..start_q + 1 + end_q];
-                        if let Some(target_path) = resolve_relative_path(&doc.uri, rel_path) {
-                            if let Ok(content) = std::fs::read_to_string(&target_path) {
-                                extract_exported_globals_from_str(
-                                    &content,
-                                    &format!("Imported from {rel_path}"),
-                                    &local_symbols,
-                                    &mut seen,
-                                    &mut items,
-                                );
-                            }
-                        }
+        if let Some((rel_path, is_system)) = extract_include_info(code_line) {
+            if let Some(target_path) = super::document::resolve_include_target(&doc.uri, &rel_path, is_system) {
+                let content_opt = std::fs::read_to_string(&target_path).ok().or_else(|| {
+                    if is_system {
+                        let mod_name = if rel_path.ends_with(".e8085") {
+                            rel_path.clone()
+                        } else {
+                            format!("{rel_path}.e8085")
+                        };
+                        crate::asm::include::EMBEDDED_STDLIB
+                            .iter()
+                            .find(|(p, _)| *p == mod_name || *p == rel_path)
+                            .map(|(_, s)| s.to_string())
+                    } else {
+                        None
                     }
+                });
+
+                if let Some(content) = content_opt {
+                    let origin = if is_system {
+                        format!("<{rel_path}>")
+                    } else {
+                        format!("\"{rel_path}\"")
+                    };
+                    extract_exported_globals_from_str(
+                        &content,
+                        &format!("Imported from {origin}"),
+                        &local_symbols,
+                        &mut seen,
+                        &mut items,
+                    );
                 }
             }
         }
     }
 
-    // 3. Scan workspace / library directories (programs/lib, programs/devices)
+    // 3. Scan workspace / library directories (stdlib, stdlib/device)
     if let Ok(doc_path) = doc.uri.to_file_path() {
         let project_root = crate::asm::include::find_project_root(&doc_path);
         let search_dirs = [
-            project_root.join("programs").join("lib"),
-            project_root.join("programs").join("devices"),
+            project_root.join("stdlib"),
+            project_root.join("stdlib").join("device"),
         ];
 
         for sdir in &search_dirs {
@@ -2562,25 +2775,63 @@ main:
         let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let main_file = manifest.join("main.e8085");
         let uri = Url::from_file_path(&main_file).unwrap();
-        let text = "%include \"programs/".to_string();
-        let doc = Document::new(uri, 1, text);
+        let text = "%include <".to_string();
+        let doc = Document::new(uri.clone(), 1, text);
 
         let res = get_completions(
             &doc,
             &Position {
                 line: 0,
-                character: 19,
+                character: 10,
             },
         )
         .unwrap();
 
         if let CompletionResponse::List(list) = res {
-            // Check that devices/ folder is offered with triggerSuggest
-            let folder_item = list.items.iter().find(|item| item.label == "devices/").expect("expected devices/ folder");
+            // Check that device/ folder is offered with triggerSuggest
+            let folder_item = list.items.iter().find(|item| item.label == "device/").expect("expected device/ folder");
             assert_eq!(folder_item.kind, Some(CompletionItemKind::FOLDER));
             assert!(folder_item.command.as_ref().map(|c| c.command.as_str()) == Some("editor.action.triggerSuggest"));
+
+            // Check that math module is offered
+            assert!(list.items.iter().any(|item| item.label == "math" && item.kind == Some(CompletionItemKind::MODULE)));
         } else {
             panic!("expected list");
+        }
+
+        let text_device = "%include <device/".to_string();
+        let doc_device = Document::new(uri.clone(), 2, text_device);
+        let res_device = get_completions(
+            &doc_device,
+            &Position {
+                line: 0,
+                character: 17,
+            },
+        )
+        .unwrap();
+        if let CompletionResponse::List(list) = res_device {
+            assert!(list.items.iter().any(|item| item.label == "canvas" && item.kind == Some(CompletionItemKind::MODULE)));
+            assert!(list.items.iter().any(|item| item.label == "text_io" && item.kind == Some(CompletionItemKind::MODULE)));
+        } else {
+            panic!("expected list");
+        }
+
+        // Test unquoted raw include path completion
+        let text_raw = "%include stdlib/".to_string();
+        let doc_raw = Document::new(uri, 3, text_raw);
+        let res_raw = get_completions(
+            &doc_raw,
+            &Position {
+                line: 0,
+                character: 16,
+            },
+        )
+        .unwrap();
+        if let CompletionResponse::List(list) = res_raw {
+            assert!(list.items.iter().any(|item| item.label == "math.e8085"));
+            assert!(list.items.iter().any(|item| item.label == "device/"));
+        } else {
+            panic!("expected list for raw include path");
         }
     }
 }

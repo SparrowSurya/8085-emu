@@ -126,6 +126,40 @@ main:
 }
 
 #[test]
+fn test_include_raw_unquoted_path() {
+    let temp_dir = std::env::temp_dir().join("emu8085_test_include_raw");
+    let nested = temp_dir.join("subdir");
+    std::fs::create_dir_all(&nested).unwrap();
+    std::fs::write(
+        nested.join("helper.e8085"),
+        "segment .text\nadd_twenty:\n    adi 20\n    ret\n",
+    )
+    .unwrap();
+
+    let src = r#"
+%include subdir/helper.e8085
+
+segment .text
+main:
+    mvi A, 5
+    call add_twenty
+    hlt
+"#;
+
+    let image = assemble_with_options(src, Some(&temp_dir), &HashMap::new())
+        .expect("assembles cleanly with unquoted raw %include path");
+
+    let mut machine = Machine::default();
+    load(&mut machine, &image).expect("loads image cleanly");
+    machine.run();
+
+    assert_eq!(machine.cpu.regs.a, 25);
+    assert!(machine.cpu.is_halt);
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
 fn test_extern_linking_with_precompiled_binary_library() {
     let lib_src = r#"
 segment .text
@@ -266,7 +300,7 @@ func_b:
 fn test_cmp_library_relational_and_range_subroutines() {
     let base_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("programs");
     let test_src = r#"
-%include "lib/cmp.e8085"
+%include <cmp>
 
 segment .text
 

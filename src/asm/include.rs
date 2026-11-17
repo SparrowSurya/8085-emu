@@ -30,6 +30,83 @@ struct IncludeContext<'a> {
     file_table: &'a mut Vec<(PathBuf, String)>,
 }
 
+pub const EMBEDDED_STDLIB: &[(&str, &str)] = &[
+    ("device/canvas.e8085", include_str!("../../stdlib/device/canvas.e8085")),
+    ("device/text_io.e8085", include_str!("../../stdlib/device/text_io.e8085")),
+    ("cmp.e8085", include_str!("../../stdlib/cmp.e8085")),
+    ("conv.e8085", include_str!("../../stdlib/conv.e8085")),
+    ("math.e8085", include_str!("../../stdlib/math.e8085")),
+];
+
+/// Finds the standard library root directory using a multi-tier search:
+/// 1. Environment variable override (`EMU8085_STDLIB_DIR` or `EMU8085_STDLIB`)
+/// 2. Project root discovery (ancestor walk from `start` looking for `stdlib/`)
+/// 3. Executable-relative discovery (ancestor walk from `std::env::current_exe()` looking for `stdlib/`)
+/// 4. System standard paths (`/usr/local/share/emu8085/stdlib`, etc.)
+pub fn find_stdlib_dir(start: Option<&Path>) -> Option<PathBuf> {
+    // 1. Environment variables
+    if let Ok(val) = std::env::var("EMU8085_STDLIB_DIR").or_else(|_| std::env::var("EMU8085_STDLIB")) {
+        let p = PathBuf::from(val);
+        if p.is_dir() {
+            return Some(canonicalize_or_norm(&p));
+        }
+    }
+
+    // 2. Project root / ancestor walk from `start` or current_dir
+    let cur_dir = std::env::current_dir().ok();
+    let start_dir = start
+        .map(|s| {
+            if s.is_file() || s.extension().is_some() {
+                s.parent().unwrap_or(s)
+            } else {
+                s
+            }
+        })
+        .or(cur_dir.as_deref());
+
+    if let Some(dir) = start_dir {
+        let canon = canonicalize_or_norm(dir);
+        for ancestor in canon.ancestors() {
+            let candidate = ancestor.join("stdlib");
+            if candidate.is_dir() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    // 3. Executable-relative lookup (covers bin/../stdlib, target/debug/../../stdlib, etc.)
+    if let Ok(exe_path) = std::env::current_exe() {
+        let exe_canon = canonicalize_or_norm(&exe_path);
+        for ancestor in exe_canon.ancestors().skip(1) {
+            let candidate = ancestor.join("stdlib");
+            if candidate.is_dir() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    // 4. System standard directories
+    let sys_candidates = [
+        "/usr/local/share/emu8085/stdlib",
+        "/usr/share/emu8085/stdlib",
+    ];
+    for sys in &sys_candidates {
+        let p = Path::new(sys);
+        if p.is_dir() {
+            return Some(p.to_path_buf());
+        }
+    }
+
+    if let Ok(home) = std::env::var("HOME") {
+        let user_candidate = PathBuf::from(home).join(".local/share/emu8085/stdlib");
+        if user_candidate.is_dir() {
+            return Some(user_candidate);
+        }
+    }
+
+    None
+}
+
 /// Finds the project root by walking upward from `start` looking for `.git`, `Cargo.toml`, or `e8085.toml`.
 pub fn find_project_root(start: &Path) -> PathBuf {
     let start_dir = if start.is_file() || start.extension().is_some() {
@@ -237,68 +314,166 @@ fn resolve_program_includes(
 
     // 1. Process all %include directives first
     for inc in &program.includes {
-        let clean_path = inc.path.trim_start_matches('/');
-
-        // Verify resolution does not escape project root step-by-step
-        let mut cur = ctx.project_root.clone();
-        let mut escaped = false;
-        for comp in Path::new(clean_path).components() {
-            match comp {
-                std::path::Component::ParentDir => {
-                    if cur == ctx.project_root || !cur.starts_with(&ctx.project_root) {
-                        escaped = true;
-                        break;
-                    }
-                    cur.pop();
-                }
-                std::path::Component::Normal(part) => {
-                    cur.push(part);
-                }
-                _ => {}
-            }
-        }
-
-        if escaped || is_outside_root(&cur, &ctx.project_root) {
-            return Err(AsmError::new(
-                inc.span,
-                AsmErrorKind::IncludeError(format!(
-                    "cannot include '{}': path is outside project root",
-                    inc.path
-                )),
-            ));
-        }
-
-        // Try project root path first: PWD_PATH / clean_path
-        let inc_candidate = if cur.exists() {
-            cur
-        } else {
-            // Secondary fallback for subfolder programs: base_dir / clean_path
-            let sub_path = base_dir.join(clean_path);
-            if !is_outside_root(&sub_path, &ctx.project_root) && sub_path.exists() {
-                sub_path
+        let (canonical_path, src) = if inc.is_system {
+            let mod_name = if inc.path.ends_with(".e8085") {
+                inc.path.clone()
             } else {
-                cur
+                format!("{}.e8085", inc.path)
+            };
+
+            let stdlib_dir = find_stdlib_dir(Some(base_dir)).or_else(|| find_stdlib_dir(Some(&ctx.project_root)));
+
+            let disk_found = if let Some(ref sdir) = stdlib_dir {
+                let mut cur = sdir.clone();
+                let mut escaped = false;
+                for comp in Path::new(&mod_name).components() {
+                    match comp {
+                        std::path::Component::ParentDir => {
+                            if cur == *sdir || !cur.starts_with(sdir) {
+                                escaped = true;
+                                break;
+                            }
+                            cur.pop();
+                        }
+                        std::path::Component::Normal(part) => {
+                            cur.push(part);
+                        }
+                        _ => {}
+                    }
+                }
+                if escaped || is_outside_root(&cur, sdir) {
+                    return Err(AsmError::new(
+                        inc.span,
+                        AsmErrorKind::IncludeError(format!(
+                            "cannot include '<{}>': path escapes standard library directory",
+                            inc.path
+                        )),
+                    ));
+                }
+                if cur.exists() {
+                    match cur.canonicalize() {
+                        Ok(c) => {
+                            if is_outside_root(&c, sdir) {
+                                return Err(AsmError::new(
+                                    inc.span,
+                                    AsmErrorKind::IncludeError(format!(
+                                        "cannot include '<{}>': path escapes standard library directory",
+                                        inc.path
+                                    )),
+                                ));
+                            }
+                            std::fs::read_to_string(&c).ok().map(|s| (c, s))
+                        }
+                        Err(_) => None,
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            if let Some((canon, text)) = disk_found {
+                (canon, text)
+            } else {
+                // Check embedded stdlib fallback
+                let embedded_match = EMBEDDED_STDLIB.iter().find(|(path, _)| {
+                    *path == mod_name || *path == inc.path
+                });
+                if let Some((embed_path, embed_src)) = embedded_match {
+                    let canon = stdlib_dir
+                        .unwrap_or_else(|| ctx.project_root.join("stdlib"))
+                        .join(embed_path);
+                    (canon, embed_src.to_string())
+                } else {
+                    return Err(AsmError::new(
+                        inc.span,
+                        AsmErrorKind::IncludeError(format!(
+                            "cannot include '<{}>': standard library module not found",
+                            inc.path
+                        )),
+                    ));
+                }
             }
+        } else {
+            let clean_path = inc.path.trim_start_matches('/');
+
+            // Verify resolution does not escape project root step-by-step
+            let mut cur = ctx.project_root.clone();
+            let mut escaped = false;
+            for comp in Path::new(clean_path).components() {
+                match comp {
+                    std::path::Component::ParentDir => {
+                        if cur == ctx.project_root || !cur.starts_with(&ctx.project_root) {
+                            escaped = true;
+                            break;
+                        }
+                        cur.pop();
+                    }
+                    std::path::Component::Normal(part) => {
+                        cur.push(part);
+                    }
+                    _ => {}
+                }
+            }
+
+            if escaped || is_outside_root(&cur, &ctx.project_root) {
+                return Err(AsmError::new(
+                    inc.span,
+                    AsmErrorKind::IncludeError(format!(
+                        "cannot include '{}': path is outside project root",
+                        inc.path
+                    )),
+                ));
+            }
+
+            // Try project root path first: PWD_PATH / clean_path
+            let inc_candidate = if cur.exists() {
+                cur
+            } else {
+                // Secondary fallback for subfolder programs: base_dir / clean_path
+                let sub_path = base_dir.join(clean_path);
+                if !is_outside_root(&sub_path, &ctx.project_root) && sub_path.exists() {
+                    sub_path
+                } else {
+                    cur
+                }
+            };
+
+            // Check 2: Check if file exists and can be canonicalized
+            let canonical_path = inc_candidate.canonicalize().map_err(|e| {
+                AsmError::new(
+                    inc.span,
+                    AsmErrorKind::IncludeError(format!("cannot read '{}': {e}", inc.path)),
+                )
+            })?;
+
+            // Re-verify canonical path against root
+            if is_outside_root(&canonical_path, &ctx.project_root) {
+                return Err(AsmError::new(
+                    inc.span,
+                    AsmErrorKind::IncludeError(format!(
+                        "cannot include '{}': path is outside project root",
+                        inc.path
+                    )),
+                ));
+            }
+
+            let text = std::fs::read_to_string(&canonical_path).map_err(|e| {
+                AsmError::new(
+                    inc.span,
+                    AsmErrorKind::IncludeError(format!("cannot read '{}': {e}", inc.path)),
+                )
+            })?;
+
+            (canonical_path, text)
         };
 
-        // Check 2: Check if file exists and can be canonicalized
-        let canonical_path = inc_candidate.canonicalize().map_err(|e| {
-            AsmError::new(
-                inc.span,
-                AsmErrorKind::IncludeError(format!("cannot read '{}': {e}", inc.path)),
-            )
-        })?;
-
-        // Re-verify canonical path against root
-        if is_outside_root(&canonical_path, &ctx.project_root) {
-            return Err(AsmError::new(
-                inc.span,
-                AsmErrorKind::IncludeError(format!(
-                    "cannot include '{}': path is outside project root",
-                    inc.path
-                )),
-            ));
-        }
+        let inc_display = if inc.is_system {
+            format!("<{}>", inc.path)
+        } else {
+            format!("'{}'", inc.path)
+        };
 
         // Check 3: Self-inclusion check (file includes itself)
         if let Some(current_file) = ctx.active_stack.last() {
@@ -306,8 +481,7 @@ fn resolve_program_includes(
                 return Err(AsmError::new(
                     inc.span,
                     AsmErrorKind::IncludeError(format!(
-                        "file cannot include itself: '{}'",
-                        inc.path
+                        "file cannot include itself: {inc_display}"
                     )),
                 ));
             }
@@ -318,8 +492,7 @@ fn resolve_program_includes(
             return Err(AsmError::new(
                 inc.span,
                 AsmErrorKind::IncludeError(format!(
-                    "circular include detected: '{}'",
-                    inc.path
+                    "circular include detected: {inc_display}"
                 )),
             ));
         }
@@ -329,8 +502,7 @@ fn resolve_program_includes(
             return Err(AsmError::new(
                 inc.span,
                 AsmErrorKind::IncludeError(format!(
-                    "duplicate include: file '{}' has already been included",
-                    inc.path
+                    "duplicate include: file {inc_display} has already been included"
                 )),
             ));
         }
@@ -338,13 +510,6 @@ fn resolve_program_includes(
         // Mark as included and push to active stack
         ctx.included_files.insert(canonical_path.clone());
         ctx.active_stack.push(canonical_path.clone());
-
-        let src = std::fs::read_to_string(&canonical_path).map_err(|e| {
-            AsmError::new(
-                inc.span,
-                AsmErrorKind::IncludeError(format!("cannot read '{}': {e}", inc.path)),
-            )
-        })?;
 
         let file_id = ctx.file_table.len() as u32;
         ctx.file_table.push((canonical_path.clone(), src.clone()));
@@ -617,5 +782,68 @@ use crate::asm::parse;
         assert!(res_bad.is_err(), "expected io.e8085 to fail");
 
         let _ = std::fs::remove_dir_all(&temp_root);
+    }
+
+    #[test]
+    fn test_system_stdlib_resolution() {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let src = "%include <math>\n%include <device/canvas>\nsegment .text\nmain:\n    call divide\n    call canvas_draw_rect\n    hlt\n";
+        let tokens = lex(src).unwrap();
+        let program = parse(tokens).unwrap();
+
+        let resolved = resolve_includes(&manifest_dir, &program).expect("resolve system stdlib");
+        assert!(resolved.externs.is_empty());
+        assert!(!resolved.segments.is_empty());
+
+        // Check file table contains stdlib/math.e8085 and stdlib/device/canvas.e8085
+        let resolved_full = resolve_includes_full(
+            Some(&manifest_dir.join("main.e8085")),
+            Some(src),
+            &manifest_dir,
+            Some(&manifest_dir),
+            &program,
+        )
+        .expect("resolve full system stdlib");
+
+        assert!(resolved_full.file_table.iter().any(|(p, _)| p.ends_with("math.e8085")));
+        assert!(resolved_full.file_table.iter().any(|(p, _)| p.ends_with("canvas.e8085")));
+    }
+
+    #[test]
+    fn test_system_stdlib_embedded_fallback() {
+        let temp_dir = std::env::temp_dir().join("emu8085_isolated_no_stdlib");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let src = "%include <math>\nsegment .text\nmain:\n    call divide\n    hlt\n";
+        let tokens = lex(src).unwrap();
+        let program = parse(tokens).unwrap();
+
+        // Resolving in an isolated directory without a stdlib folder on disk uses embedded fallback
+        let res = resolve_includes_with_main_and_root(
+            Some(&temp_dir.join("main.e8085")),
+            &temp_dir,
+            Some(&temp_dir),
+            &program,
+        );
+        assert!(res.is_ok(), "embedded fallback should resolve <math>: {:?}", res.err());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_find_stdlib_dir_env_var() {
+        let temp_dir = std::env::temp_dir().join("emu8085_custom_stdlib_env");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        unsafe {
+            std::env::set_var("EMU8085_STDLIB_DIR", &temp_dir);
+        }
+        let found = find_stdlib_dir(None);
+        unsafe {
+            std::env::remove_var("EMU8085_STDLIB_DIR");
+        }
+
+        assert_eq!(found, Some(canonicalize_or_norm(&temp_dir)));
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

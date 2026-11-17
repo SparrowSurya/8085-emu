@@ -50,7 +50,7 @@
       "name": "greet",
       "file": "greet.e8085",
       "type": "text_io",
-      "link_libs": ["devices/text_io.e8085"],
+      "link_libs": ["stdlib/device/text_io.e8085"],
       "stdin": "Sparrow",
       "expect_output": "What is your name? Hello, Sparrow\n"
     },

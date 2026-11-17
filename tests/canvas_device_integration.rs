@@ -20,7 +20,7 @@ fn setup_test_machine(src: &str) -> (Machine, CanvasDevice) {
 #[test]
 fn test_canvas_assembly_lifecycle_headless() {
     let src = r#"
-%include "devices/canvas.e8085"
+%include <device/canvas>
 
 segment .data
 title_str byte "Retro Game\0"
@@ -62,7 +62,7 @@ main:
 #[test]
 fn test_canvas_gameloop_timing() {
     let src = r#"
-%include "devices/canvas.e8085"
+%include <device/canvas>
 
 segment .data
 title byte "FPS Test\0"
@@ -102,7 +102,7 @@ main:
 #[test]
 fn test_canvas_drawing_primitives() {
     let src = r#"
-%include "devices/canvas.e8085"
+%include <device/canvas>
 
 segment .data
 title byte "Draw Test\0"
@@ -168,7 +168,7 @@ main:
 #[test]
 fn test_canvas_text_rendering() {
     let src = r#"
-%include "devices/canvas.e8085"
+%include <device/canvas>
 
 segment .data
 title byte "Text Test\0"
@@ -216,7 +216,7 @@ main:
 #[test]
 fn test_canvas_keyboard_simulation() {
     let src = r#"
-%include "devices/canvas.e8085"
+%include <device/canvas>
 
 segment .data
 title byte "Key Test\0"
@@ -259,7 +259,7 @@ main:
 #[test]
 fn test_canvas_complete_pong_gameloop() {
     let src = r#"
-%include "devices/canvas.e8085"
+%include <device/canvas>
 
 segment .data
 title_str byte "8085 Pong Game\0"
@@ -321,7 +321,7 @@ game_exit:
 #[test]
 fn test_canvas_mouse_simulation() {
     let src = r#"
-%include "devices/canvas.e8085"
+%include <device/canvas>
 
 segment .data
 title byte "Mouse Test\0"
@@ -412,7 +412,7 @@ fn test_canvas_mouse_transitions() {
 #[test]
 fn test_canvas_paint_mask_primitive() {
     let src = r#"
-%include "devices/canvas.e8085"
+%include <device/canvas>
 
 segment .data
 title byte "Mask Test\0"

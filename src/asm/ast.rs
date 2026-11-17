@@ -50,11 +50,13 @@ pub struct MacroLine {
     pub span: Span,
 }
 
-/// A `%include "path"` directive.
+/// A `%include` directive (either quoted `%include "path"` or stdlib `%include <path>`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Include {
-    /// The file path to include.
+    /// The file path to include (e.g. "path/to/file.e8085" or "device/canvas").
     pub path: String,
+    /// Whether this is a system/stdlib include (`%include <...>`) or quoted (`%include "..."`).
+    pub is_system: bool,
     /// Source position.
     pub span: Span,
 }

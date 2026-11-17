@@ -275,16 +275,140 @@ impl Parser {
         let span = self.span();
         self.bump(); // %
         self.bump(); // include
-        let path = match self.peek() {
+
+        match self.peek() {
             TokenKind::Str(s) => {
-                let p = s.clone();
+                let path = s.clone();
                 self.bump();
-                p
+                self.expect_newline()?;
+                Ok(Include {
+                    path,
+                    is_system: false,
+                    span,
+                })
             }
-            _ => return Err(self.unexpected("a quoted string path")),
-        };
-        self.expect_newline()?;
-        Ok(Include { path, span })
+            TokenKind::Less => {
+                self.bump(); // <
+                let mut path = String::new();
+                let mut expect_sep = false;
+                while !matches!(
+                    self.peek(),
+                    TokenKind::Greater | TokenKind::Newline | TokenKind::Eof
+                ) {
+                    match self.peek() {
+                        TokenKind::Ident(s) => {
+                            if expect_sep {
+                                return Err(self.err(AsmErrorKind::IncludeError(
+                                    "unexpected whitespace or token in standard library include path; path components must be separated by '/'".to_string(),
+                                )));
+                            }
+                            path.push_str(s);
+                            self.bump();
+                            expect_sep = true;
+                        }
+                        TokenKind::Number(n) => {
+                            if expect_sep {
+                                return Err(self.err(AsmErrorKind::IncludeError(
+                                    "unexpected whitespace or token in standard library include path; path components must be separated by '/'".to_string(),
+                                )));
+                            }
+                            path.push_str(&n.to_string());
+                            self.bump();
+                            expect_sep = true;
+                        }
+                        TokenKind::Slash => {
+                            path.push('/');
+                            self.bump();
+                            expect_sep = false;
+                        }
+                        TokenKind::Period => {
+                            path.push('.');
+                            self.bump();
+                            expect_sep = false;
+                        }
+                        _ => {
+                            return Err(self.err(AsmErrorKind::IncludeError(
+                                "invalid character in standard library include path; only alphanumeric characters, underscores, and '/' are allowed".to_string(),
+                            )));
+                        }
+                    }
+                }
+
+                if matches!(self.peek(), TokenKind::Newline | TokenKind::Eof) {
+                    return Err(self.err(AsmErrorKind::IncludeError(
+                        "expected '>' to close standard library include path".to_string(),
+                    )));
+                }
+
+                self.bump(); // >
+
+                if path.is_empty() {
+                    return Err(self.err(AsmErrorKind::IncludeError(
+                        "standard library include path cannot be empty".to_string(),
+                    )));
+                }
+
+                // Validate path components: alphanumeric and underscores only
+                for segment in path.split('/') {
+                    let seg_name = segment.strip_suffix(".e8085").unwrap_or(segment);
+                    if seg_name.is_empty() || !seg_name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                        return Err(self.err(AsmErrorKind::IncludeError(format!(
+                            "invalid segment '{segment}' in standard library path: only alphanumeric characters and underscores are allowed"
+                        ))));
+                    }
+                }
+
+                self.expect_newline()?;
+                Ok(Include {
+                    path,
+                    is_system: true,
+                    span,
+                })
+            }
+            TokenKind::Ident(_) | TokenKind::Period | TokenKind::Slash => {
+                let mut path = String::new();
+                while !matches!(
+                    self.peek(),
+                    TokenKind::Newline | TokenKind::Eof
+                ) {
+                    match self.peek() {
+                        TokenKind::Ident(s) => {
+                            path.push_str(s);
+                            self.bump();
+                        }
+                        TokenKind::Number(n) => {
+                            path.push_str(&n.to_string());
+                            self.bump();
+                        }
+                        TokenKind::Slash => {
+                            path.push('/');
+                            self.bump();
+                        }
+                        TokenKind::Period => {
+                            path.push('.');
+                            self.bump();
+                        }
+                        _ => {
+                            return Err(self.err(AsmErrorKind::IncludeError(
+                                "invalid character in include path".to_string(),
+                            )));
+                        }
+                    }
+                }
+                if path.is_empty() {
+                    return Err(self.err(AsmErrorKind::IncludeError(
+                        "include path cannot be empty".to_string(),
+                    )));
+                }
+                self.expect_newline()?;
+                Ok(Include {
+                    path,
+                    is_system: false,
+                    span,
+                })
+            }
+            _ => Err(self.unexpected("a quoted string path, raw path, or '<...>'")),
+        }
     }
 
     fn define(&mut self) -> Result<Define, AsmError> {
@@ -694,6 +818,7 @@ fn describe(k: &TokenKind) -> String {
         TokenKind::Comma => "`,`".into(),
         TokenKind::Colon => "`:`".into(),
         TokenKind::Period => "`.`".into(),
+        TokenKind::Slash => "`/`".into(),
         TokenKind::Exclamation => "`!`".into(),
         TokenKind::DoubleEqual => "`==`".into(),
         TokenKind::NotEqual => "`!=`".into(),
@@ -844,6 +969,33 @@ mod tests {
         assert!(matches!(
             perr("segment .text\nmov A B\n"),
             AsmErrorKind::Unexpected { .. }
+        ));
+    }
+
+    #[test]
+    fn test_parse_system_and_quoted_includes() {
+        let p = prog("%include <math>\n%include <device/canvas>\n%include \"my/file.e8085\"\n%include raw/path/lib.e8085\nsegment .text\nhlt\n");
+        assert_eq!(p.includes.len(), 4);
+        assert_eq!(p.includes[0].path, "math");
+        assert!(p.includes[0].is_system);
+        assert_eq!(p.includes[1].path, "device/canvas");
+        assert!(p.includes[1].is_system);
+        assert_eq!(p.includes[2].path, "my/file.e8085");
+        assert!(!p.includes[2].is_system);
+        assert_eq!(p.includes[3].path, "raw/path/lib.e8085");
+        assert!(!p.includes[3].is_system);
+
+        assert!(matches!(
+            perr("%include <>\n"),
+            AsmErrorKind::IncludeError(_)
+        ));
+        assert!(matches!(
+            perr("%include <invalid space>\n"),
+            AsmErrorKind::IncludeError(_)
+        ));
+        assert!(matches!(
+            perr("%include <unclosed\n"),
+            AsmErrorKind::IncludeError(_)
         ));
     }
 }

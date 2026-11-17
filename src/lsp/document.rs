@@ -232,6 +232,36 @@ pub fn resolve_relative_path(doc_uri: &Url, rel_path: &str) -> Option<std::path:
     None
 }
 
+/// Resolves an include target (either standard library `<...>` or quoted `"..."`) against document URI.
+pub fn resolve_include_target(doc_uri: &Url, raw_path: &str, is_system: bool) -> Option<std::path::PathBuf> {
+    if is_system {
+        let mod_name = if raw_path.ends_with(".e8085") {
+            raw_path.to_string()
+        } else {
+            format!("{raw_path}.e8085")
+        };
+        let doc_path = doc_uri.to_file_path().ok();
+        let stdlib_dir = crate::asm::include::find_stdlib_dir(doc_path.as_deref());
+        if let Some(sdir) = stdlib_dir {
+            let target = sdir.join(&mod_name);
+            if target.exists() {
+                return target.canonicalize().ok().or(Some(target));
+            }
+        }
+        // Check embedded stdlib fallback
+        if let Some((embed_path, _)) = crate::asm::include::EMBEDDED_STDLIB.iter().find(|(p, _)| *p == mod_name || *p == raw_path) {
+            let fallback_dir = doc_path
+                .as_ref()
+                .map(|p| crate::asm::include::find_project_root(p).join("stdlib"))
+                .unwrap_or_else(|| std::path::PathBuf::from("stdlib"));
+            return Some(fallback_dir.join(embed_path));
+        }
+        None
+    } else {
+        resolve_relative_path(doc_uri, raw_path)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

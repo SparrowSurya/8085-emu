@@ -1,6 +1,6 @@
 use tower_lsp::lsp_types::{GotoDefinitionResponse, Location, LocationLink, Position, Range, Url};
 
-use super::document::{Document, resolve_relative_path};
+use super::document::Document;
 
 /// Resolves the definition location for a symbol or included file at the given cursor position.
 pub fn get_definition(doc: &Document, position: &Position) -> Option<GotoDefinitionResponse> {
@@ -36,31 +36,66 @@ fn get_include_definition(doc: &Document, position: &Position) -> Option<Locatio
     let trimmed = line.trim();
 
     if trimmed.starts_with("%include") {
-        let quote_char = if line.contains('"') {
+        let char_col = position.character as usize;
+        let (rel_path, is_system, start_col, end_col) = if let Some(start_angle) = line.find('<') {
+            if let Some(end_angle_offset) = line[start_angle + 1..].find('>') {
+                let end_angle = start_angle + 1 + end_angle_offset;
+                if char_col >= start_angle && char_col <= end_angle {
+                    let path = line[start_angle + 1..end_angle].trim();
+                    (path, true, start_angle, end_angle)
+                } else {
+                    return None;
+                }
+            } else {
+                return None;
+            }
+        } else if let Some(quote_char) = if line.contains('"') {
             Some('"')
         } else if line.contains('\'') {
             Some('\'')
         } else {
             None
-        }?;
+        } {
+            let start_quote = line.find(quote_char)?;
+            let end_quote_offset = line[start_quote + 1..].find(quote_char)?;
+            let end_quote = start_quote + 1 + end_quote_offset;
+            if char_col >= start_quote && char_col <= end_quote {
+                let path = &line[start_quote + 1..end_quote];
+                (path, false, start_quote, end_quote)
+            } else {
+                return None;
+            }
+        } else {
+            let inc_end = line.find("%include")? + "%include".len();
+            let after_inc = &line[inc_end..];
+            let spaces = after_inc.chars().take_while(|c| c.is_whitespace()).count();
+            if spaces == 0 {
+                return None;
+            }
+            let raw_start = inc_end + spaces;
+            let raw_end = line[raw_start..]
+                .find(|c: char| c.is_whitespace() || c == ';')
+                .map(|off| raw_start + off)
+                .unwrap_or(line.len());
+            if char_col >= raw_start && char_col <= raw_end {
+                let path = line[raw_start..raw_end].trim();
+                (path, false, raw_start, raw_end.saturating_sub(1))
+            } else {
+                return None;
+            }
+        };
 
-        let start_quote = line.find(quote_char)?;
-        let end_quote_offset = line[start_quote + 1..].find(quote_char)?;
-        let end_quote = start_quote + 1 + end_quote_offset;
-
-        let rel_path = &line[start_quote + 1..end_quote];
-
-        let target_path = resolve_relative_path(&doc.uri, rel_path)?;
+        let target_path = super::document::resolve_include_target(&doc.uri, rel_path, is_system)?;
         let target_uri = Url::from_file_path(target_path).ok()?;
 
         let origin_selection_range = Range {
             start: Position {
                 line: position.line,
-                character: start_quote as u32,
+                character: start_col as u32,
             },
             end: Position {
                 line: position.line,
-                character: (end_quote + 1) as u32,
+                character: (end_col + 1) as u32,
             },
         };
 
@@ -227,16 +262,61 @@ fn find_symbol_in_included_files(doc: &Document, symbol: &str) -> Option<Locatio
     for line in doc.text.lines() {
         let trimmed = line.trim();
         if trimmed.starts_with("%include") {
-            if let Some(start_quote) = line.find('"') {
-                if let Some(end_quote) = line[start_quote + 1..].find('"') {
-                    let rel_path = &line[start_quote + 1..start_quote + 1 + end_quote];
-                    if let Some(full_path) = resolve_relative_path(&doc.uri, rel_path) {
-                        if let Ok(content) = std::fs::read_to_string(&full_path) {
-                            if let Ok(inc_uri) = Url::from_file_path(&full_path) {
-                                let inc_doc = Document::new(inc_uri, 1, content);
-                                if let Some(loc) = find_symbol_definition_in_doc(&inc_doc, symbol) {
-                                    return Some(loc);
-                                }
+            let include_info = if let Some(start_angle) = line.find('<') {
+                if let Some(end_angle_offset) = line[start_angle + 1..].find('>') {
+                    let path = line[start_angle + 1..start_angle + 1 + end_angle_offset].trim();
+                    Some((path.to_string(), true))
+                } else {
+                    None
+                }
+            } else if let Some(q) = if line.contains('"') { Some('"') } else if line.contains('\'') { Some('\'') } else { None } {
+                if let Some(start_q) = line.find(q) {
+                    if let Some(end_q_offset) = line[start_q + 1..].find(q) {
+                        let path = &line[start_q + 1..start_q + 1 + end_q_offset];
+                        Some((path.to_string(), false))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                let after = trimmed.strip_prefix("%include").unwrap().trim();
+                if !after.is_empty() && !after.starts_with(';') {
+                    let raw = after.split_whitespace().next().unwrap_or("").split(';').next().unwrap_or("").trim();
+                    if !raw.is_empty() {
+                        Some((raw.to_string(), false))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            };
+
+            if let Some((rel_path, is_system)) = include_info {
+                if let Some(full_path) = super::document::resolve_include_target(&doc.uri, &rel_path, is_system) {
+                    let content_opt = std::fs::read_to_string(&full_path).ok().or_else(|| {
+                        if is_system {
+                            let mod_name = if rel_path.ends_with(".e8085") {
+                                rel_path.clone()
+                            } else {
+                                format!("{rel_path}.e8085")
+                            };
+                            crate::asm::include::EMBEDDED_STDLIB
+                                .iter()
+                                .find(|(p, _)| *p == mod_name || *p == rel_path)
+                                .map(|(_, s)| s.to_string())
+                        } else {
+                            None
+                        }
+                    });
+
+                    if let Some(content) = content_opt {
+                        if let Ok(inc_uri) = Url::from_file_path(&full_path) {
+                            let inc_doc = Document::new(inc_uri, 1, content);
+                            if let Some(loc) = find_symbol_definition_in_doc(&inc_doc, symbol) {
+                                return Some(loc);
                             }
                         }
                     }
@@ -475,6 +555,58 @@ func_b:
             assert_eq!(loc.range.start.line, 7);
         } else {
             panic!("expected scalar location in func_b scope");
+        }
+    }
+
+    #[test]
+    fn test_goto_system_include_and_imported_symbol() {
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let main_file = manifest.join("main_test.e8085");
+        let uri = Url::from_file_path(&main_file).unwrap();
+        let text = "%include <math>\nsegment .text\nmain:\n    call divide\n    hlt\n".to_string();
+        let doc = Document::new(uri, 1, text);
+
+        // 1. Goto definition on <math>
+        let def_math = get_definition(&doc, &Position { line: 0, character: 12 }).unwrap();
+        if let GotoDefinitionResponse::Link(links) = def_math {
+            assert_eq!(links.len(), 1);
+            assert!(links[0].target_uri.path().ends_with("math.e8085"));
+        } else {
+            panic!("expected Link for <math>");
+        }
+
+        // 2. Goto definition on symbol `divide`
+        let def_divide = get_definition(&doc, &Position { line: 3, character: 11 }).unwrap();
+        if let GotoDefinitionResponse::Scalar(loc) = def_divide {
+            assert!(loc.uri.path().ends_with("math.e8085"));
+        } else {
+            panic!("expected Scalar location for divide");
+        }
+    }
+
+    #[test]
+    fn test_goto_raw_unquoted_include_file_link() {
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let main_file = manifest.join("main_raw_test.e8085");
+        let uri = Url::from_file_path(&main_file).unwrap();
+        let text = "%include stdlib/math.e8085\nsegment .text\nmain:\n    call divide\n    hlt\n".to_string();
+        let doc = Document::new(uri, 1, text);
+
+        // 1. Goto definition on raw path stdlib/math.e8085
+        let def_math = get_definition(&doc, &Position { line: 0, character: 15 }).unwrap();
+        if let GotoDefinitionResponse::Link(links) = def_math {
+            assert_eq!(links.len(), 1);
+            assert!(links[0].target_uri.path().ends_with("math.e8085"));
+        } else {
+            panic!("expected Link for raw include path");
+        }
+
+        // 2. Goto definition on symbol `divide` imported via raw include
+        let def_divide = get_definition(&doc, &Position { line: 3, character: 11 }).unwrap();
+        if let GotoDefinitionResponse::Scalar(loc) = def_divide {
+            assert!(loc.uri.path().ends_with("math.e8085"));
+        } else {
+            panic!("expected Scalar location for divide");
         }
     }
 }

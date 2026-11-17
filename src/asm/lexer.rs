@@ -107,6 +107,10 @@ impl Lexer {
                 self.bump();
                 TokenKind::Period
             }
+            '/' => {
+                self.bump();
+                TokenKind::Slash
+            }
             '!' => {
                 self.bump();
                 if self.peek() == Some('=') {

@@ -40,6 +40,7 @@ impl LanguageServer for E8085LanguageServer {
                         ",".to_string(),
                         "\"".to_string(),
                         "'".to_string(),
+                        "<".to_string(),
                         "/".to_string(),
                     ]),
                     all_commit_characters: None,

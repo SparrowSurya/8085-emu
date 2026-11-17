@@ -1,6 +1,6 @@
-%include "devices/text_io.e8085"
-%include "lib/math.e8085"
-%include "lib/conv.e8085"
+%include <device/text_io>
+%include <math>
+%include <conv>
 
 segment .data
 
