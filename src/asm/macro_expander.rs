@@ -14,11 +14,11 @@ const MAX_MACRO_DEPTH: usize = 64;
 /// and expand all macro invocations in `.text` segments.
 pub fn expand_macros(program: &mut Program) -> Result<(), AsmError> {
     // 1. Gather all macros from top level and .text segments
-    let mut macro_table: HashMap<String, MacroDef> = HashMap::new();
+    let mut macro_table: HashMap<(String, usize), MacroDef> = HashMap::new();
     let mut all_macro_defs: Vec<MacroDef> = Vec::new();
 
     for def in &program.macros {
-        let key = def.name.to_ascii_lowercase();
+        let key = (def.name.to_ascii_lowercase(), def.arg_count);
         if macro_table.contains_key(&key) {
             return Err(AsmError::new(
                 def.span,
@@ -33,7 +33,7 @@ pub fn expand_macros(program: &mut Program) -> Result<(), AsmError> {
         if let Segment::Text(items) = seg {
             for item in items {
                 if let TextItem::MacroDef(def) = item {
-                    let key = def.name.to_ascii_lowercase();
+                    let key = (def.name.to_ascii_lowercase(), def.arg_count);
                     if macro_table.contains_key(&key) {
                         return Err(AsmError::new(
                             def.span,
@@ -164,7 +164,7 @@ pub fn expand_macros(program: &mut Program) -> Result<(), AsmError> {
 
 fn expand_text_items(
     items: Vec<TextItem>,
-    macro_table: &HashMap<String, MacroDef>,
+    macro_table: &HashMap<(String, usize), MacroDef>,
     depth: usize,
 ) -> Result<Vec<TextItem>, AsmError> {
     let mut out = Vec::new();
@@ -176,23 +176,12 @@ fn expand_text_items(
             }
             TextItem::Instr(ins) => {
                 let lower = ins.mnemonic.to_ascii_lowercase();
-                if let Some(macro_def) = macro_table.get(&lower) {
+                let op_len = ins.operands.len();
+                if let Some(macro_def) = macro_table.get(&(lower.clone(), op_len)) {
                     if depth > MAX_MACRO_DEPTH {
                         return Err(AsmError::new(
                             ins.span,
                             AsmErrorKind::MacroRecursionLimitExceeded(macro_def.name.clone()),
-                        ));
-                    }
-
-                    // Validate argument count
-                    if ins.operands.len() != macro_def.arg_count {
-                        return Err(AsmError::new(
-                            ins.span,
-                            AsmErrorKind::MacroArgCountMismatch {
-                                name: macro_def.name.clone(),
-                                expected: macro_def.arg_count,
-                                found: ins.operands.len(),
-                            },
                         ));
                     }
 
@@ -240,6 +229,17 @@ fn expand_text_items(
                     out.push(TextItem::MacroCall(ins.mnemonic.clone(), raw_args, ins.span));
                     out.extend(expanded_items);
                     out.push(TextItem::MacroEnd);
+                } else if let Some((_, other_def)) =
+                    macro_table.iter().find(|((name, _), _)| name == &lower)
+                {
+                    return Err(AsmError::new(
+                        ins.span,
+                        AsmErrorKind::MacroArgCountMismatch {
+                            name: other_def.name.clone(),
+                            expected: other_def.arg_count,
+                            found: ins.operands.len(),
+                        },
+                    ));
                 } else {
                     out.push(TextItem::Instr(ins));
                 }

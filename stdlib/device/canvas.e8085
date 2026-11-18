@@ -2,7 +2,8 @@
 ; Canvas Device Library for Intel 8085 Microprocessor
 ;
 ; Provides hardware definitions, resolution presets, color definitions, key codes,
-; and macros for 2D graphics rendering, text display, and keyboard input on CanvasDevice.
+; subroutines, and subroutine-backed macros for 2D graphics rendering, text display,
+; and user input on the CanvasDevice.
 ;
 ; The CanvasDevice operates in an 8-bit logical coordinate space (0-255).
 ; Physical output is scaled 4x4 into a host window (fixed at initialization).
@@ -68,7 +69,25 @@
 %define MOUSE_BUTTON_RIGHT    1
 %define MOUSE_BUTTON_MIDDLE   2
 
-; --- Standard 16-bit RGBA4444 Colors (8-bit High & Low components) ---
+; --- Standard 16-bit RGBA4444 Colors (Direct 16-bit Constants) ---
+%define COLOR_BLACK           0x000F
+%define COLOR_WHITE           0xFFFF
+%define COLOR_RED             0xF00F
+%define COLOR_GREEN           0x0F0F
+%define COLOR_BLUE            0x00FF
+%define COLOR_YELLOW          0xFF0F
+%define COLOR_CYAN            0x0FFF
+%define COLOR_MAGENTA         0xF0FF
+%define COLOR_GRAY            0x888F
+%define COLOR_TRANSPARENT     0x0000
+
+; Functional directives to construct 16-bit RGBA4444 colors dynamically
+; Rgb: 4-bit r, g, b with 100% alpha (0xF)
+%define Rgb(r, g, b) (((r & 0xF) << 12) | ((g & 0xF) << 8) | ((b & 0xF) << 4) | 0xF)
+; Rgba: 4-bit r, g, b, a
+%define Rgba(r, g, b, a) (((r & 0xF) << 12) | ((g & 0xF) << 8) | ((b & 0xF) << 4) | (a & 0xF))
+
+; Backward compatibility 8-bit split components
 %define COLOR_BLACK_HI        0x00
 %define COLOR_BLACK_LO        0x0F
 %define COLOR_WHITE_HI        0xFF
@@ -216,58 +235,63 @@
 ; --- Lifecycle & Metadata Macros ---
 
 ; Initializes canvas window with logical dimensions and title buffer
+; Signature: InitCanvas(w: imm8, h: imm8, title: addr)
+; Register Setup: B = w, C = h, HL = title
+; Calls: canvas_init
 %macro InitCanvas 3
-    mvi A, CMD_INIT_CANVAS
-    out CANVAS_CMD_PORT
-    mvi A, %1
-    out CANVAS_DATA_PORT
-    mvi A, %2
-    out CANVAS_DATA_PORT
+    mvi B, %1
+    mvi C, %2
     lxi HL, %3
-    call canvas_stream_str
+    call canvas_init
 %end
 
 ; Closes the canvas window and releases resources
+; Signature: DisposeCanvas()
+; Calls: Out to CMD_PORT
 %macro DisposeCanvas 0
     mvi A, CMD_DISPOSE_CANVAS
     out CANVAS_CMD_PORT
 %end
 
 ; Reads active logical canvas dimensions into B (width) and C (height)
+; Signature: GetCanvasSize()
+; Outputs: B = width, C = height
+; Calls: canvas_get_size
 %macro GetCanvasSize 0
-    mvi A, CMD_GET_CANVAS_SIZE
-    out CANVAS_CMD_PORT
-    in CANVAS_DATA_PORT
-    mov B, A
-    in CANVAS_DATA_PORT
-    mov C, A
+    call canvas_get_size
 %end
 
-; Reads window title into memory buffer pointed to by %1 (HL)
+; Reads window title into memory buffer pointed to by buf (HL)
+; Signature: GetCanvasTitle(buf: addr)
+; Register Setup: HL = buf
+; Calls: canvas_get_title
 %macro GetCanvasTitle 1
-    mvi A, CMD_GET_CANVAS_TITLE
-    out CANVAS_CMD_PORT
     lxi HL, %1
-    call canvas_read_str
+    call canvas_get_title
 %end
 
-; Updates window title from null-terminated string at %1
+; Updates window title from null-terminated string at str (HL)
+; Signature: SetCanvasTitle(str: addr)
+; Register Setup: HL = str
+; Calls: canvas_set_title
 %macro SetCanvasTitle 1
-    mvi A, CMD_SET_CANVAS_TITLE
-    out CANVAS_CMD_PORT
     lxi HL, %1
-    call canvas_stream_str
+    call canvas_set_title
 %end
 
 ; --- GameLoop & Timing Macros ---
 
 ; Swaps backbuffer to window, polls OS events, and throttles frame rate
+; Signature: UpdateCanvas()
+; Calls: Out to CMD_PORT
 %macro UpdateCanvas 0
     mvi A, CMD_UPDATE_CANVAS
     out CANVAS_CMD_PORT
 %end
 
 ; Queries if canvas window is still open. Returns 1 in A (and Z=0) if open, 0 if closed
+; Signature: IsCanvasOpen()
+; Outputs: A = 1/0, Zero flag set if closed
 %macro IsCanvasOpen 0
     mvi A, CMD_IS_CANVAS_OPEN
     out CANVAS_CMD_PORT
@@ -276,13 +300,16 @@
 %end
 
 ; Reads target FPS into register A
+; Signature: GetFPS()
+; Outputs: A = target fps
 %macro GetFPS 0
     mvi A, CMD_GET_FPS
     out CANVAS_CMD_PORT
     in CANVAS_DATA_PORT
 %end
 
-; Sets target FPS to %1
+; Sets target FPS
+; Signature: SetFPS(fps: imm8)
 %macro SetFPS 1
     mvi A, CMD_SET_FPS
     out CANVAS_CMD_PORT
@@ -291,6 +318,8 @@
 %end
 
 ; Reads elapsed frame delta in milliseconds into register A
+; Signature: GetDelta()
+; Outputs: A = delta ms
 %macro GetDelta 0
     mvi A, CMD_GET_DELTA
     out CANVAS_CMD_PORT
@@ -299,126 +328,257 @@
 
 ; --- 2D Drawing Macros ---
 
-; Clears entire canvas with 16-bit RGBA4444 color (%1 = hi, %2 = lo)
+; Clears entire canvas with a 16-bit RGBA4444 color
+; Signature: Clear(color: Color)
+; Register Setup: HL = color
+; Calls: canvas_clear
+%macro Clear 1
+    lxi HL, %1
+    call canvas_clear
+%end
+
+; Legacy 2-argument Clear macro
+; Signature: Clear(color_hi: imm8, color_lo: imm8)
+; Register Setup: H = color_hi, L = color_lo
+; Calls: canvas_clear
 %macro Clear 2
-    mvi A, CMD_CLEAR
-    out CANVAS_CMD_PORT
-    mvi A, %1
-    out CANVAS_DATA_PORT
-    mvi A, %2
-    out CANVAS_DATA_PORT
+    mvi H, %1
+    mvi L, %2
+    call canvas_clear
 %end
 
-; Sets logical pixel (%1, %2) to 16-bit RGBA4444 color (%3 = hi, %4 = lo)
+; Sets logical pixel (x, y) to a 16-bit RGBA4444 color
+; Signature: SetPixel(x: imm8, y: imm8, color: Color)
+; Register Setup: B = x, C = y, HL = color
+; Calls: canvas_set_pixel
+%macro SetPixel 3
+    mvi B, %1
+    mvi C, %2
+    lxi HL, %3
+    call canvas_set_pixel
+%end
+
+; Legacy 4-argument SetPixel macro
+; Signature: SetPixel(x: imm8, y: imm8, color_hi: imm8, color_lo: imm8)
+; Register Setup: B = x, C = y, H = color_hi, L = color_lo
+; Calls: canvas_set_pixel
 %macro SetPixel 4
-    mvi A, CMD_SET_PIXEL
-    out CANVAS_CMD_PORT
-    mvi A, %1
-    out CANVAS_DATA_PORT
-    mvi A, %2
-    out CANVAS_DATA_PORT
-    mvi A, %3
-    out CANVAS_DATA_PORT
-    mvi A, %4
-    out CANVAS_DATA_PORT
+    mvi B, %1
+    mvi C, %2
+    mvi H, %3
+    mvi L, %4
+    call canvas_set_pixel
 %end
 
-; Reads 16-bit RGBA4444 color of pixel (%1, %2) into B (color_hi) and C (color_lo)
+; Reads 16-bit RGBA4444 color of pixel (x, y) into B (color_hi) and C (color_lo)
+; Signature: GetPixel(x: imm8, y: imm8)
+; Register Setup: B = x, C = y
+; Outputs: B = color_hi, C = color_lo
+; Calls: canvas_get_pixel
 %macro GetPixel 2
-    mvi A, CMD_GET_PIXEL
-    out CANVAS_CMD_PORT
-    mvi A, %1
-    out CANVAS_DATA_PORT
-    mvi A, %2
-    out CANVAS_DATA_PORT
-    in CANVAS_DATA_PORT
-    mov B, A
-    in CANVAS_DATA_PORT
-    mov C, A
+    mvi B, %1
+    mvi C, %2
+    call canvas_get_pixel
 %end
 
-; Draws straight line from (%1, %2) to (%3, %4) with thickness %5 and color (%6 = hi, %7 = lo)
-%macro Line 7
-    mvi A, CMD_LINE
-    out CANVAS_CMD_PORT
-    mvi A, %1
-    out CANVAS_DATA_PORT
-    mvi A, %2
-    out CANVAS_DATA_PORT
-    mvi A, %3
-    out CANVAS_DATA_PORT
-    mvi A, %4
-    out CANVAS_DATA_PORT
-    mvi A, %5
-    out CANVAS_DATA_PORT
-    mvi A, %6
-    out CANVAS_DATA_PORT
-    mvi A, %7
-    out CANVAS_DATA_PORT
+; Draws filled rectangle at (x, y) with dimensions (w, h) and color
+; Signature: FillRect(x: imm8, y: imm8, w: imm8, h: imm8, color: Color)
+; Register Setup: B = x, C = y, D = w, E = h, HL = color
+; Calls: canvas_draw_rect
+%macro FillRect 5
+    mvi B, %1
+    mvi C, %2
+    mvi D, %3
+    mvi E, %4
+    lxi HL, %5
+    call canvas_draw_rect
 %end
 
-; Draws filled rectangle at (%1, %2) with size (%3, %4) and color (%5 = hi, %6 = lo)
+; Legacy 6-argument FillRectangle macro
+; Signature: FillRectangle(x: imm8, y: imm8, w: imm8, h: imm8, color_hi: imm8, color_lo: imm8)
+; Register Setup: B = x, C = y, D = w, E = h, H = color_hi, L = color_lo
+; Calls: canvas_draw_rect
 %macro FillRectangle 6
-    mvi A, CMD_FILL_RECT
-    out CANVAS_CMD_PORT
-    mvi A, %1
-    out CANVAS_DATA_PORT
-    mvi A, %2
-    out CANVAS_DATA_PORT
-    mvi A, %3
-    out CANVAS_DATA_PORT
-    mvi A, %4
-    out CANVAS_DATA_PORT
-    mvi A, %5
-    out CANVAS_DATA_PORT
-    mvi A, %6
-    out CANVAS_DATA_PORT
+    mvi B, %1
+    mvi C, %2
+    mvi D, %3
+    mvi E, %4
+    mvi H, %5
+    mvi L, %6
+    call canvas_draw_rect
 %end
 
-; Draws outlined rectangle at (%1, %2) with size (%3, %4), thickness %5 and color (%6 = hi, %7 = lo)
+; Draws 1px outlined rectangle at (x, y) with dimensions (w, h) and color
+; Signature: StrokeRect(x: imm8, y: imm8, w: imm8, h: imm8, color: Color)
+; Register Setup: B = x, C = y, D = w, E = h, HL = color
+; Calls: canvas_stroke_rect_1
+%macro StrokeRect 5
+    mvi B, %1
+    mvi C, %2
+    mvi D, %3
+    mvi E, %4
+    lxi HL, %5
+    call canvas_stroke_rect_1
+%end
+
+; Legacy 7-argument StrokeRectangle macro
+; Signature: StrokeRectangle(x: imm8, y: imm8, w: imm8, h: imm8, thickness: imm8, color_hi: imm8, color_lo: imm8)
+; Register Setup: B = x, C = y, D = w, E = h, A = thickness, H = color_hi, L = color_lo
+; Calls: canvas_stroke_rect
 %macro StrokeRectangle 7
-    mvi A, CMD_STROKE_RECT
-    out CANVAS_CMD_PORT
-    mvi A, %1
-    out CANVAS_DATA_PORT
-    mvi A, %2
-    out CANVAS_DATA_PORT
-    mvi A, %3
-    out CANVAS_DATA_PORT
-    mvi A, %4
-    out CANVAS_DATA_PORT
+    mvi B, %1
+    mvi C, %2
+    mvi D, %3
+    mvi E, %4
+    mvi H, %6
+    mvi L, %7
     mvi A, %5
-    out CANVAS_DATA_PORT
-    mvi A, %6
-    out CANVAS_DATA_PORT
-    mvi A, %7
-    out CANVAS_DATA_PORT
+    call canvas_stroke_rect
 %end
 
-; Draws filled ellipse centered at (%1, %2) with radii (%3, %4) and color (%5 = hi, %6 = lo)
+; Draws filled circle at center (cx, cy) with radius r and color
+; Signature: FillCircle(cx: imm8, cy: imm8, r: imm8, color: Color)
+; Register Setup: B = cx, C = cy, D = r, E = r, HL = color
+; Calls: canvas_draw_ellipse
+%macro FillCircle 4
+    mvi B, %1
+    mvi C, %2
+    mvi D, %3
+    mvi E, %3
+    lxi HL, %4
+    call canvas_draw_ellipse
+%end
+
+; Legacy 6-argument FillEllipse macro
+; Signature: FillEllipse(cx: imm8, cy: imm8, rx: imm8, ry: imm8, color_hi: imm8, color_lo: imm8)
+; Register Setup: B = cx, C = cy, D = rx, E = ry, H = color_hi, L = color_lo
+; Calls: canvas_draw_ellipse
 %macro FillEllipse 6
-    mvi A, CMD_FILL_ELLIPSE
-    out CANVAS_CMD_PORT
-    mvi A, %1
-    out CANVAS_DATA_PORT
-    mvi A, %2
-    out CANVAS_DATA_PORT
-    mvi A, %3
-    out CANVAS_DATA_PORT
-    mvi A, %4
-    out CANVAS_DATA_PORT
-    mvi A, %5
-    out CANVAS_DATA_PORT
-    mvi A, %6
-    out CANVAS_DATA_PORT
+    mvi B, %1
+    mvi C, %2
+    mvi D, %3
+    mvi E, %4
+    mvi H, %5
+    mvi L, %6
+    call canvas_draw_ellipse
 %end
 
-; Draws outlined ellipse centered at (%1, %2) with radii (%3, %4), thickness %5 and color (%6 = hi, %7 = lo)
+; Draws 1px outlined circle at center (cx, cy) with radius r and color
+; Signature: StrokeCircle(cx: imm8, cy: imm8, r: imm8, color: Color)
+; Register Setup: B = cx, C = cy, D = r, E = r, HL = color
+; Calls: canvas_stroke_circle_1
+%macro StrokeCircle 4
+    mvi B, %1
+    mvi C, %2
+    mvi D, %3
+    mvi E, %3
+    lxi HL, %4
+    call canvas_stroke_circle_1
+%end
+
+; Legacy 7-argument StrokeEllipse macro
+; Signature: StrokeEllipse(cx: imm8, cy: imm8, rx: imm8, ry: imm8, thickness: imm8, color_hi: imm8, color_lo: imm8)
+; Register Setup: B = cx, C = cy, D = rx, E = ry, A = thickness, H = color_hi, L = color_lo
+; Calls: canvas_stroke_ellipse
 %macro StrokeEllipse 7
-    mvi A, CMD_STROKE_ELLIPSE
+    mvi B, %1
+    mvi C, %2
+    mvi D, %3
+    mvi E, %4
+    mvi H, %6
+    mvi L, %7
+    mvi A, %5
+    call canvas_stroke_ellipse
+%end
+
+; Draws 1px straight line from (x1, y1) to (x2, y2) with color
+; Signature: Line(x1: imm8, y1: imm8, x2: imm8, y2: imm8, color: Color)
+; Register Setup: B = x1, C = y1, D = x2, E = y2, HL = color
+; Calls: canvas_draw_line_1
+%macro Line 5
+    mvi B, %1
+    mvi C, %2
+    mvi D, %3
+    mvi E, %4
+    lxi HL, %5
+    call canvas_draw_line_1
+%end
+
+; Legacy 7-argument Line macro
+; Signature: Line(x1: imm8, y1: imm8, x2: imm8, y2: imm8, thickness: imm8, color_hi: imm8, color_lo: imm8)
+; Register Setup: B = x1, C = y1, D = x2, E = y2, A = thickness, H = color_hi, L = color_lo
+; Calls: canvas_draw_line
+%macro Line 7
+    mvi B, %1
+    mvi C, %2
+    mvi D, %3
+    mvi E, %4
+    mvi H, %6
+    mvi L, %7
+    mvi A, %5
+    call canvas_draw_line
+%end
+
+; Draws horizontal line from (x, y) with length len and color
+; Signature: DrawHLine(x: imm8, y: imm8, len: imm8, color: Color)
+; Register Setup: B = x, C = y, D = len, HL = color
+; Calls: canvas_draw_hline
+%macro DrawHLine 4
+    mvi B, %1
+    mvi C, %2
+    mvi D, %3
+    lxi HL, %4
+    call canvas_draw_hline
+%end
+
+; Draws vertical line from (x, y) with length len and color
+; Signature: DrawVLine(x: imm8, y: imm8, len: imm8, color: Color)
+; Register Setup: B = x, C = y, E = len, HL = color
+; Calls: canvas_draw_vline
+%macro DrawVLine 4
+    mvi B, %1
+    mvi C, %2
+    mvi E, %3
+    lxi HL, %4
+    call canvas_draw_vline
+%end
+
+; Renders solid text string at (x, y) with scale 1 and color
+; Signature: DrawText(str: addr, x: imm8, y: imm8, color: Color)
+; Register Setup: HL = str, B = x, C = y, DE = color
+; Calls: canvas_draw_text_1
+%macro DrawText 4
+    lxi HL, %1
+    mvi B, %2
+    mvi C, %3
+    lxi DE, %4
+    call canvas_draw_text_1
+%end
+
+; Legacy 6-argument FillText macro
+; Signature: FillText(str: addr, x: imm8, y: imm8, scale: imm8, color_hi: imm8, color_lo: imm8)
+; Preserves: B, C, D, E, H, L
+%macro FillText 6
+    push BC
+    push DE
+    push HL
+    lxi HL, %1
+    mvi B, %2
+    mvi C, %3
+    mvi D, %5
+    mvi E, %6
+    mvi A, %4
+    call canvas_draw_text
+    pop HL
+    pop DE
+    pop BC
+%end
+
+; Legacy 7-argument StrokeText macro
+; Signature: StrokeText(str: addr, x: imm8, y: imm8, scale: imm8, thickness: imm8, color_hi: imm8, color_lo: imm8)
+%macro StrokeText 7
+    mvi A, CMD_STROKE_TEXT
     out CANVAS_CMD_PORT
-    mvi A, %1
-    out CANVAS_DATA_PORT
     mvi A, %2
     out CANVAS_DATA_PORT
     mvi A, %3
@@ -431,11 +591,39 @@
     out CANVAS_DATA_PORT
     mvi A, %7
     out CANVAS_DATA_PORT
+    lxi HL, %1
+    call canvas_stream_str
 %end
 
-; Paints a multi-valued masked sprite at (%1, %2) of size (%4 x %5) from memory at %3
-; Matching %6 (or inverted if %9 != 0) with color (%7 = hi, %8 = lo)
-; Mask value 0x00 is always treated as transparent
+; Calculates rendered width of text string at scale; returns width in register A
+; Signature: TextWidth(str: addr, scale: imm8)
+; Register Setup: HL = str, A = scale
+; Outputs: A = width in pixels
+; Calls: canvas_text_width
+%macro TextWidth 2
+    lxi HL, %1
+    mvi A, %2
+    call canvas_text_width
+%end
+
+; Draws a masked sprite at (x, y) of size (w, h) from memory mask with color
+; Mask value 0x00 is transparent; non-zero values are drawn with color
+; Signature: DrawSprite(x: imm8, y: imm8, w: imm8, h: imm8, mask: addr, color: Color)
+; Register Setup: B = x, C = y, D = w, E = h, HL = mask, color saved in static storage
+; Calls: canvas_draw_sprite
+%macro DrawSprite 6
+    lxi HL, %6
+    shld canvas_sprite_color_lo
+    mvi B, %1
+    mvi C, %2
+    mvi D, %3
+    mvi E, %4
+    lxi HL, %5
+    call canvas_draw_sprite
+%end
+
+; Legacy 9-argument PaintMask macro
+; Signature: PaintMask(x, y, mask_addr, w, h, match_val, color_hi, color_lo, invert)
 %macro PaintMask 9
     mvi A, CMD_PAINT_MASK
     out CANVAS_CMD_PORT
@@ -461,144 +649,432 @@
     call canvas_stream_grid
 %end
 
-; --- Text Rendering Macros ---
-
-; Renders solid text %1 at (%2, %3) with scale %4 and color (%5 = hi, %6 = lo)
-%macro FillText 6
-    mvi A, CMD_FILL_TEXT
-    out CANVAS_CMD_PORT
-    mvi A, %2
-    out CANVAS_DATA_PORT
-    mvi A, %3
-    out CANVAS_DATA_PORT
-    mvi A, %4
-    out CANVAS_DATA_PORT
-    mvi A, %5
-    out CANVAS_DATA_PORT
-    mvi A, %6
-    out CANVAS_DATA_PORT
-    lxi HL, %1
-    call canvas_stream_str
-%end
-
-; Renders outlined text %1 at (%2, %3) with scale %4, thickness %5 and color (%6 = hi, %7 = lo)
-%macro StrokeText 7
-    mvi A, CMD_STROKE_TEXT
-    out CANVAS_CMD_PORT
-    mvi A, %2
-    out CANVAS_DATA_PORT
-    mvi A, %3
-    out CANVAS_DATA_PORT
-    mvi A, %4
-    out CANVAS_DATA_PORT
-    mvi A, %5
-    out CANVAS_DATA_PORT
-    mvi A, %6
-    out CANVAS_DATA_PORT
-    mvi A, %7
-    out CANVAS_DATA_PORT
-    lxi HL, %1
-    call canvas_stream_str
-%end
-
-; Calculates rendered width of text %1 at scale %2; returns width in register A
-%macro TextWidth 2
-    mvi A, CMD_TEXT_WIDTH
-    out CANVAS_CMD_PORT
-    mvi A, %2
-    out CANVAS_DATA_PORT
-    lxi HL, %1
-    call canvas_stream_str
-    in CANVAS_DATA_PORT
-%end
-
 ; --- Keyboard Macros ---
 
-; Checks if key %1 was pressed this frame; returns 1 in A (Z=0) if pressed, 0 otherwise
-%macro KeyPress 1
-    mvi A, CMD_KEY_PRESS
-    out CANVAS_CMD_PORT
-    mvi A, %1
-    out CANVAS_DATA_PORT
-    in CANVAS_DATA_PORT
-    cpi 0
-%end
-
-; Checks if key %1 is currently held down; returns 1 in A (Z=0) if down, 0 otherwise
+; Checks if key is currently held down; returns 1 in A (Z=0) if down, 0 otherwise
+; Signature: KeyDown(key: imm8)
+; Register Setup: A = key
+; Outputs: A = 1/0, Zero flag updated
+; Calls: canvas_key_down
 %macro KeyDown 1
-    mvi A, CMD_KEY_DOWN
-    out CANVAS_CMD_PORT
     mvi A, %1
-    out CANVAS_DATA_PORT
-    in CANVAS_DATA_PORT
-    cpi 0
+    call canvas_key_down
 %end
 
-; Checks if key %1 was released this frame; returns 1 in A (Z=0) if released, 0 otherwise
-%macro KeyRelease 1
-    mvi A, CMD_KEY_RELEASE
-    out CANVAS_CMD_PORT
+; Checks if key was pressed this frame; returns 1 in A (Z=0) if pressed, 0 otherwise
+; Signature: KeyPress(key: imm8)
+; Register Setup: A = key
+; Outputs: A = 1/0, Zero flag updated
+; Calls: canvas_key_press
+%macro KeyPress 1
     mvi A, %1
-    out CANVAS_DATA_PORT
-    in CANVAS_DATA_PORT
-    cpi 0
+    call canvas_key_press
+%end
+
+; Checks if key was released this frame; returns 1 in A (Z=0) if released, 0 otherwise
+; Signature: KeyRelease(key: imm8)
+; Register Setup: A = key
+; Outputs: A = 1/0, Zero flag updated
+; Calls: canvas_key_release
+%macro KeyRelease 1
+    mvi A, %1
+    call canvas_key_release
 %end
 
 ; Pops next key code from event queue into register A; updates Z flag
+; Signature: KeyInput()
+; Outputs: A = key code (0 if none), Zero flag updated
+; Calls: canvas_key_input
 %macro KeyInput 0
-    mvi A, CMD_KEY_INPUT
-    out CANVAS_CMD_PORT
-    in CANVAS_DATA_PORT
-    cpi 0
+    call canvas_key_input
 %end
 
 ; --- Mouse Macros ---
 
-; Checks if mouse button %1 was pressed this frame; returns 1 in A (Z=0) if pressed, 0 otherwise
-%macro MousePress 1
-    mvi A, CMD_MOUSE_PRESS
-    out CANVAS_CMD_PORT
-    mvi A, %1
-    out CANVAS_DATA_PORT
-    in CANVAS_DATA_PORT
-    cpi 0
-%end
-
-; Checks if mouse button %1 is currently held down; returns 1 in A (Z=0) if down, 0 otherwise
+; Checks if mouse button is currently held down; returns 1 in A (Z=0) if down, 0 otherwise
+; Signature: MouseDown(button: imm8)
+; Register Setup: A = button
+; Outputs: A = 1/0, Zero flag updated
+; Calls: canvas_mouse_down
 %macro MouseDown 1
-    mvi A, CMD_MOUSE_DOWN
-    out CANVAS_CMD_PORT
     mvi A, %1
-    out CANVAS_DATA_PORT
-    in CANVAS_DATA_PORT
-    cpi 0
+    call canvas_mouse_down
 %end
 
-; Checks if mouse button %1 was released this frame; returns 1 in A (Z=0) if released, 0 otherwise
-%macro MouseRelease 1
-    mvi A, CMD_MOUSE_RELEASE
-    out CANVAS_CMD_PORT
+; Checks if mouse button was pressed this frame; returns 1 in A (Z=0) if pressed, 0 otherwise
+; Signature: MousePress(button: imm8)
+; Register Setup: A = button
+; Outputs: A = 1/0, Zero flag updated
+; Calls: canvas_mouse_press
+%macro MousePress 1
     mvi A, %1
-    out CANVAS_DATA_PORT
-    in CANVAS_DATA_PORT
-    cpi 0
+    call canvas_mouse_press
+%end
+
+; Checks if mouse button was released this frame; returns 1 in A (Z=0) if released, 0 otherwise
+; Signature: MouseRelease(button: imm8)
+; Register Setup: A = button
+; Outputs: A = 1/0, Zero flag updated
+; Calls: canvas_mouse_release
+%macro MouseRelease 1
+    mvi A, %1
+    call canvas_mouse_release
 %end
 
 ; Reads current logical mouse position into B (X) and C (Y)
+; Signature: MousePosition()
+; Outputs: B = X, C = Y
+; Calls: canvas_mouse_pos
 %macro MousePosition 0
-    mvi A, CMD_MOUSE_POS
-    out CANVAS_CMD_PORT
-    in CANVAS_DATA_PORT
-    mov B, A
-    in CANVAS_DATA_PORT
-    mov C, A
+    call canvas_mouse_pos
 %end
+
+; ==============================================================================
+; Canvas Static Data Storage
+; ==============================================================================
+
+segment .bss
+canvas_sprite_color_lo byte 1
+canvas_sprite_color_hi byte 1
 
 ; ==============================================================================
 ; Canvas Subroutines
 ; ==============================================================================
 
 segment .text
+
+; Initializes canvas device
+; Inputs: B = width, C = height, HL = title string pointer
+; Alters: A, flags
+; Preserves: B, C, H, L
+global canvas_init:
+    mvi A, CMD_INIT_CANVAS
+    out CANVAS_CMD_PORT
+    mov A, B
+    out CANVAS_DATA_PORT
+    mov A, C
+    out CANVAS_DATA_PORT
+    call canvas_stream_str
+    ret
+
+; Reads logical canvas dimensions
+; Outputs: B = width, C = height
+; Alters: A, B, C, flags
+; Preserves: D, E, H, L
+global canvas_get_size:
+    mvi A, CMD_GET_CANVAS_SIZE
+    out CANVAS_CMD_PORT
+    in CANVAS_DATA_PORT
+    mov B, A
+    in CANVAS_DATA_PORT
+    mov C, A
+    ret
+
+; Reads window title into memory at HL
+; Inputs: HL = buffer pointer
+; Alters: A, flags
+; Preserves: B, C, D, E, H, L
+global canvas_get_title:
+    mvi A, CMD_GET_CANVAS_TITLE
+    out CANVAS_CMD_PORT
+    call canvas_read_str
+    ret
+
+; Sets window title from string at HL
+; Inputs: HL = string pointer
+; Alters: A, flags
+; Preserves: B, C, D, E, H, L
+global canvas_set_title:
+    mvi A, CMD_SET_CANVAS_TITLE
+    out CANVAS_CMD_PORT
+    call canvas_stream_str
+    ret
+
+; Clears entire canvas with 16-bit color in HL
+; Inputs: H = color_hi, L = color_lo
+; Alters: A, flags
+; Preserves: B, C, D, E, H, L
+global canvas_clear:
+    mvi A, CMD_CLEAR
+    out CANVAS_CMD_PORT
+    mov A, H
+    out CANVAS_DATA_PORT
+    mov A, L
+    out CANVAS_DATA_PORT
+    ret
+
+; Sets pixel (B, C) to 16-bit color in HL
+; Inputs: B = x, C = y, H = color_hi, L = color_lo
+; Alters: A, flags
+; Preserves: B, C, D, E, H, L
+global canvas_set_pixel:
+    mvi A, CMD_SET_PIXEL
+    out CANVAS_CMD_PORT
+    mov A, B
+    out CANVAS_DATA_PORT
+    mov A, C
+    out CANVAS_DATA_PORT
+    mov A, H
+    out CANVAS_DATA_PORT
+    mov A, L
+    out CANVAS_DATA_PORT
+    ret
+
+; Reads pixel color at (B, C) into BC
+; Inputs: B = x, C = y
+; Outputs: B = color_hi, C = color_lo
+; Alters: A, B, C, flags
+; Preserves: D, E, H, L
+global canvas_get_pixel:
+    mvi A, CMD_GET_PIXEL
+    out CANVAS_CMD_PORT
+    mov A, B
+    out CANVAS_DATA_PORT
+    mov A, C
+    out CANVAS_DATA_PORT
+    in CANVAS_DATA_PORT
+    mov B, A
+    in CANVAS_DATA_PORT
+    mov C, A
+    ret
+
+; Draws a filled rectangle with register parameters
+; Inputs: B = x, C = y, D = w, E = h, H = color_hi, L = color_lo
+; Alters: A, flags
+; Preserves: B, C, D, E, H, L
+global canvas_draw_rect:
+    mvi A, CMD_FILL_RECT
+    out CANVAS_CMD_PORT
+    mov A, B
+    out CANVAS_DATA_PORT
+    mov A, C
+    out CANVAS_DATA_PORT
+    mov A, D
+    out CANVAS_DATA_PORT
+    mov A, E
+    out CANVAS_DATA_PORT
+    mov A, H
+    out CANVAS_DATA_PORT
+    mov A, L
+    out CANVAS_DATA_PORT
+    ret
+
+; Draws 1px outlined rectangle
+; Inputs: B = x, C = y, D = w, E = h, H = color_hi, L = color_lo
+; Alters: A, flags
+; Preserves: B, C, D, E, H, L
+global canvas_stroke_rect_1:
+    mvi A, 1
+
+; Draws an outlined rectangle with register parameters
+; Inputs: B = x, C = y, D = w, E = h, H = color_hi, L = color_lo, A = thickness
+; Alters: A, flags
+; Preserves: B, C, D, E, H, L
+global canvas_stroke_rect:
+    push PSW
+    mvi A, CMD_STROKE_RECT
+    out CANVAS_CMD_PORT
+    mov A, B
+    out CANVAS_DATA_PORT
+    mov A, C
+    out CANVAS_DATA_PORT
+    mov A, D
+    out CANVAS_DATA_PORT
+    mov A, E
+    out CANVAS_DATA_PORT
+    pop PSW
+    out CANVAS_DATA_PORT
+    mov A, H
+    out CANVAS_DATA_PORT
+    mov A, L
+    out CANVAS_DATA_PORT
+    ret
+
+; Draws a filled ellipse / circle with register parameters
+; Inputs: B = cx, C = cy, D = rx, E = ry, H = color_hi, L = color_lo
+; Alters: A, flags
+; Preserves: B, C, D, E, H, L
+global canvas_draw_ellipse:
+    mvi A, CMD_FILL_ELLIPSE
+    out CANVAS_CMD_PORT
+    mov A, B
+    out CANVAS_DATA_PORT
+    mov A, C
+    out CANVAS_DATA_PORT
+    mov A, D
+    out CANVAS_DATA_PORT
+    mov A, E
+    out CANVAS_DATA_PORT
+    mov A, H
+    out CANVAS_DATA_PORT
+    mov A, L
+    out CANVAS_DATA_PORT
+    ret
+
+; Draws 1px outlined circle / ellipse
+; Inputs: B = cx, C = cy, D = rx, E = ry, H = color_hi, L = color_lo
+; Alters: A, flags
+; Preserves: B, C, D, E, H, L
+global canvas_stroke_circle_1:
+    mvi A, 1
+
+; Draws an outlined ellipse with register parameters
+; Inputs: B = cx, C = cy, D = rx, E = ry, H = color_hi, L = color_lo, A = thickness
+; Alters: A, flags
+; Preserves: B, C, D, E, H, L
+global canvas_stroke_ellipse:
+    push PSW
+    mvi A, CMD_STROKE_ELLIPSE
+    out CANVAS_CMD_PORT
+    mov A, B
+    out CANVAS_DATA_PORT
+    mov A, C
+    out CANVAS_DATA_PORT
+    mov A, D
+    out CANVAS_DATA_PORT
+    mov A, E
+    out CANVAS_DATA_PORT
+    pop PSW
+    out CANVAS_DATA_PORT
+    mov A, H
+    out CANVAS_DATA_PORT
+    mov A, L
+    out CANVAS_DATA_PORT
+    ret
+
+; Draws 1px straight line
+; Inputs: B = x1, C = y1, D = x2, E = y2, H = color_hi, L = color_lo
+; Alters: A, flags
+; Preserves: B, C, D, E, H, L
+global canvas_draw_line_1:
+    mvi A, 1
+
+; Draws a straight line with register parameters
+; Inputs: B = x1, C = y1, D = x2, E = y2, H = color_hi, L = color_lo, A = thickness
+; Alters: A, flags
+; Preserves: B, C, D, E, H, L
+global canvas_draw_line:
+    push PSW
+    mvi A, CMD_LINE
+    out CANVAS_CMD_PORT
+    mov A, B
+    out CANVAS_DATA_PORT
+    mov A, C
+    out CANVAS_DATA_PORT
+    mov A, D
+    out CANVAS_DATA_PORT
+    mov A, E
+    out CANVAS_DATA_PORT
+    pop PSW
+    out CANVAS_DATA_PORT
+    mov A, H
+    out CANVAS_DATA_PORT
+    mov A, L
+    out CANVAS_DATA_PORT
+    ret
+
+; Draws horizontal line from (B, C) with length D
+; Inputs: B = x, C = y, D = len, H = color_hi, L = color_lo
+; Alters: A, D, E, flags
+; Preserves: B, C, H, L
+global canvas_draw_hline:
+    mov A, B
+    add D
+    mov D, A
+    mov E, C
+    jmp canvas_draw_line_1
+
+; Draws vertical line from (B, C) with length E
+; Inputs: B = x, C = y, E = len, H = color_hi, L = color_lo
+; Alters: A, D, E, flags
+; Preserves: B, C, H, L
+global canvas_draw_vline:
+    mov D, B
+    mov A, C
+    add E
+    mov E, A
+    jmp canvas_draw_line_1
+
+; Draws text with scale = 1
+; Inputs: HL = string pointer, B = x, C = y, D = color_hi, E = color_lo
+; Alters: A, flags
+; Preserves: B, C, D, E, H, L
+global canvas_draw_text_1:
+    mvi A, 1
+
+; Draws text with custom scale
+; Inputs: HL = string pointer, B = x, C = y, D = color_hi, E = color_lo, A = scale
+; Alters: A, flags
+; Preserves: B, C, D, E, H, L
+global canvas_draw_text:
+    push PSW
+    mvi A, CMD_FILL_TEXT
+    out CANVAS_CMD_PORT
+    mov A, B
+    out CANVAS_DATA_PORT
+    mov A, C
+    out CANVAS_DATA_PORT
+    pop PSW
+    out CANVAS_DATA_PORT
+    mov A, D
+    out CANVAS_DATA_PORT
+    mov A, E
+    out CANVAS_DATA_PORT
+    call canvas_stream_str
+    ret
+
+; Calculates rendered text width
+; Inputs: HL = string pointer, A = scale
+; Outputs: A = width in pixels
+; Alters: A, flags
+; Preserves: B, C, D, E, H, L
+global canvas_text_width:
+    push PSW
+    mvi A, CMD_TEXT_WIDTH
+    out CANVAS_CMD_PORT
+    pop PSW
+    out CANVAS_DATA_PORT
+    call canvas_stream_str
+    in CANVAS_DATA_PORT
+    ret
+
+; Draws masked sprite from memory
+; Inputs: B = x, C = y, D = w, E = h, HL = mask pointer
+;         canvas_sprite_color_lo/hi = 16-bit color
+; Alters: A, flags
+; Preserves: B, C, D, E, H, L
+global canvas_draw_sprite:
+    push BC
+    push DE
+    push HL
+
+    mvi A, CMD_PAINT_MASK
+    out CANVAS_CMD_PORT
+    mov A, B
+    out CANVAS_DATA_PORT
+    mov A, C
+    out CANVAS_DATA_PORT
+    mov A, D
+    out CANVAS_DATA_PORT
+    mov A, E
+    out CANVAS_DATA_PORT
+    mvi A, 1
+    out CANVAS_DATA_PORT ; match_val = 1
+    mvi A, 0
+    out CANVAS_DATA_PORT ; invert = 0
+    lda canvas_sprite_color_hi
+    out CANVAS_DATA_PORT
+    lda canvas_sprite_color_lo
+    out CANVAS_DATA_PORT
+
+    ; Stream grid from HL with width D and height E
+    mov C, E ; canvas_stream_grid expects D = w, C = h
+    call canvas_stream_grid
+
+    pop HL
+    pop DE
+    pop BC
+    ret
 
 ; Streams a null-terminated string at HL to CANVAS_DATA_PORT with leading length
 ; Alters: A, flags (preserves B, C, D, E, H, L)
@@ -792,86 +1268,4 @@ global canvas_mouse_pos:
     mov B, A
     in CANVAS_DATA_PORT
     mov C, A
-    ret
-
-; Draws a filled rectangle with register parameters
-; Inputs: B = x, C = y, D = w, E = h, H = color_hi, L = color_lo
-global canvas_draw_rect:
-    mvi A, CMD_FILL_RECT
-    out CANVAS_CMD_PORT
-    mov A, B
-    out CANVAS_DATA_PORT
-    mov A, C
-    out CANVAS_DATA_PORT
-    mov A, D
-    out CANVAS_DATA_PORT
-    mov A, E
-    out CANVAS_DATA_PORT
-    mov A, H
-    out CANVAS_DATA_PORT
-    mov A, L
-    out CANVAS_DATA_PORT
-    ret
-
-; Draws an outlined rectangle with register parameters
-; Inputs: B = x, C = y, D = w, E = h, H = color_hi, L = color_lo, Stack/A = thickness
-global canvas_stroke_rect:
-    push PSW
-    mvi A, CMD_STROKE_RECT
-    out CANVAS_CMD_PORT
-    mov A, B
-    out CANVAS_DATA_PORT
-    mov A, C
-    out CANVAS_DATA_PORT
-    mov A, D
-    out CANVAS_DATA_PORT
-    mov A, E
-    out CANVAS_DATA_PORT
-    pop PSW
-    out CANVAS_DATA_PORT
-    mov A, H
-    out CANVAS_DATA_PORT
-    mov A, L
-    out CANVAS_DATA_PORT
-    ret
-
-; Draws a filled ellipse with register parameters
-; Inputs: B = cx, C = cy, D = rx, E = ry, H = color_hi, L = color_lo
-global canvas_draw_ellipse:
-    mvi A, CMD_FILL_ELLIPSE
-    out CANVAS_CMD_PORT
-    mov A, B
-    out CANVAS_DATA_PORT
-    mov A, C
-    out CANVAS_DATA_PORT
-    mov A, D
-    out CANVAS_DATA_PORT
-    mov A, E
-    out CANVAS_DATA_PORT
-    mov A, H
-    out CANVAS_DATA_PORT
-    mov A, L
-    out CANVAS_DATA_PORT
-    ret
-
-; Draws an outlined ellipse with register parameters
-; Inputs: B = cx, C = cy, D = rx, E = ry, H = color_hi, L = color_lo, Stack/A = thickness
-global canvas_stroke_ellipse:
-    push PSW
-    mvi A, CMD_STROKE_ELLIPSE
-    out CANVAS_CMD_PORT
-    mov A, B
-    out CANVAS_DATA_PORT
-    mov A, C
-    out CANVAS_DATA_PORT
-    mov A, D
-    out CANVAS_DATA_PORT
-    mov A, E
-    out CANVAS_DATA_PORT
-    pop PSW
-    out CANVAS_DATA_PORT
-    mov A, H
-    out CANVAS_DATA_PORT
-    mov A, L
-    out CANVAS_DATA_PORT
     ret

@@ -133,27 +133,26 @@ game_loop:
 
 .render:
     ; 5. Clear background (Dark Navy Blue)
-    Clear 0x00, 0x2F
+    Clear 0x002F
 
-    ; 6. Draw Field Center Line (White, thickness 1)
-    Line 80, 0, 80, 90, 1, COLOR_GRAY_HI, COLOR_GRAY_LO
+    ; 6. Draw Field Center Line (Gray, 1px)
+    Line 80, 0, 80, 90, COLOR_GRAY
 
     ; 7. Draw Field Border (Yellow Outline)
-    StrokeRectangle 2, 2, 156, 86, 1, COLOR_YELLOW_HI, COLOR_YELLOW_LO
+    StrokeRect 2, 2, 156, 86, COLOR_YELLOW
 
     ; 8. Draw Paddle (Green Filled Rectangle)
     lda paddle_y
-    ; x=10, y=paddle_y, w=4, h=20, color=GREEN
-    FillRectangle 10, 35, 4, 20, COLOR_GREEN_HI, COLOR_GREEN_LO
+    FillRect 10, 35, 4, 20, COLOR_GREEN
 
-    ; 9. Draw Ball (Cyan Filled Ellipse: rx=3, ry=3)
-    FillEllipse 80, 45, 3, 3, COLOR_CYAN_HI, COLOR_CYAN_LO
+    ; 9. Draw Ball (Cyan Filled Circle: r=3)
+    FillCircle 80, 45, 3, COLOR_CYAN
 
     ; 10. Render Score / Header Text
-    FillText score_lbl, 25, 6, 1, COLOR_WHITE_HI, COLOR_WHITE_LO
+    DrawText score_lbl, 25, 6, COLOR_WHITE
 
     ; 11. Render Exit Instructions
-    FillText exit_msg, 25, 78, 1, COLOR_GRAY_HI, COLOR_GRAY_LO
+    DrawText exit_msg, 25, 78, COLOR_GRAY
 
     ; 12. Swap backbuffer to physical window, poll events, sync to 30 FPS
     UpdateCanvas

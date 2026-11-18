@@ -27,19 +27,23 @@ The **Canvas Device** is an interactive 2D graphics, text rendering, and keyboar
   - **Green**: 4 bits (`0x0` to `0xF`, 16 levels)
   - **Blue**: 4 bits (`0x0` to `0xF`, 16 levels)
   - **Alpha**: 4 bits (`0x0` to `0xF`, 16 levels, `0x0` = transparent, `0xF` = fully opaque)
-- **Binary Layout**: `0xRGBA` (e.g., High Byte = `(R << 4) | G`, Low Byte = `(B << 4) | A`).
-- **Standard 1-Byte Color Component Definitions**:
-  In accordance with `emu8085`'s 1-byte `%define` constraint, color constants are defined as 8-bit High (`_HI`) and Low (`_LO`) byte components:
-  - `COLOR_BLACK_HI` / `_LO`       = `0x00`, `0x0F`
-  - `COLOR_WHITE_HI` / `_LO`       = `0xFF`, `0xFF`
-  - `COLOR_RED_HI` / `_LO`         = `0xF0`, `0x0F`
-  - `COLOR_GREEN_HI` / `_LO`       = `0x0F`, `0x0F`
-  - `COLOR_BLUE_HI` / `_LO`        = `0x00`, `0xFF`
-  - `COLOR_YELLOW_HI` / `_LO`      = `0xFF`, `0x0F`
-  - `COLOR_CYAN_HI` / `_LO`        = `0x0F`, `0xFF`
-  - `COLOR_MAGENTA_HI` / `_LO`     = `0xF0`, `0xFF`
-  - `COLOR_GRAY_HI` / `_LO`        = `0x88`, `0x8F`
-  - `COLOR_TRANSPARENT_HI` / `_LO` = `0x00`, `0x00`
+- **Binary Layout**: `0xRGBA` (High Byte = `(R << 4) | G`, Low Byte = `(B << 4) | A`).
+- **Standard 16-bit Color Constants**:
+  - `COLOR_BLACK`       = `0x000F`
+  - `COLOR_WHITE`       = `0xFFFF`
+  - `COLOR_RED`         = `0xF00F`
+  - `COLOR_GREEN`       = `0x0F0F`
+  - `COLOR_BLUE`        = `0x00FF`
+  - `COLOR_YELLOW`      = `0xFF0F`
+  - `COLOR_CYAN`        = `0x0FFF`
+  - `COLOR_MAGENTA`     = `0xF0FF`
+  - `COLOR_GRAY`        = `0x888F`
+  - `COLOR_TRANSPARENT` = `0x0000`
+- **Functional Directive Helpers**:
+  - `Rgb(r, g, b)`: Constructs 16-bit RGBA4444 with full alpha (`0xF`).
+  - `Rgba(r, g, b, a)`: Constructs 16-bit RGBA4444 with custom alpha channel.
+- **Backward Compatibility 8-bit Component Aliases**:
+  - Split constants (`COLOR_*_HI` and `COLOR_*_LO`) are preserved for existing codebase compatibility.
 
 ### 1.3 Recommended 1-Byte Game Resolutions & Presets
 
@@ -152,141 +156,114 @@ No intermediary parameter buffers or memory blocks in 8085 RAM are required.
 
 ## 4. API Catalog: Macros & Subroutines
 
+Canvas macros provide a clean, high-level interface that loads parameters into 8085 register pairs and calls shared library subroutines. This eliminates inline I/O streaming duplication, shrinking call-site binary size by 50% to 64%.
+
 ### 4.1 Canvas Lifecycle
-- **`InitCanvas(width, height, title)`**:
-  - Initializes canvas window with logical dimensions (`width`, `height`) and title string.
-  - Fixes the physical display window size to `(width * 4) x (height * 4)` by applying the internal **4x4 physical pixel scaling**.
-  - **Immutability**: Dimensions and the 4x4 scaling are locked at initialization and cannot be changed later.
+- **`InitCanvas(w: imm8, h: imm8, title: addr)`**:
+  - Initializes canvas window with logical dimensions (`w`, `h`) and title string.
+  - Setup: `B = w`, `C = h`, `HL = title`. Calls `canvas_init`.
 - **`DisposeCanvas()`**:
   - Closes the active window and frees all host resources.
 - **`GetCanvasSize()`**:
-  - Reads active logical width and height into registers (`B = width`, `C = height`).
-- **`GetCanvasTitle(buf_ptr)`**:
-  - Copies current window title into memory buffer pointed to by `HL`.
-- **`SetCanvasTitle(title)`**:
-  - Updates window title string.
+  - Reads active logical dimensions into registers (`B = width`, `C = height`). Calls `canvas_get_size`.
+- **`GetCanvasTitle(buf: addr)`**:
+  - Copies window title into memory buffer pointed to by `HL`. Calls `canvas_get_title`.
+- **`SetCanvasTitle(str: addr)`**:
+  - Updates window title from null-terminated string at `HL`. Calls `canvas_set_title`.
 
 ### 4.2 GameLoop & Timing
 - **`UpdateCanvas()`**:
-  - Flushes the backbuffer to the physical display window.
-  - Pumps OS window events (keyboard, close events).
-  - Sleeps / throttles to lock execution to the configured FPS.
+  - Flushes backbuffer to the physical display window, polls OS events, and throttles frame rate.
 - **`IsCanvasOpen()`**:
-  - Returns `1` in register `A` if window is open; `0` if user closed window.
-  - Sets the Zero flag (`Z`) so programs can branch immediately (`jz exit`).
+  - Returns `1` in register `A` if window is open; `0` if user closed window. Sets `Z` flag (`jz exit`).
 - **`GetFPS()`**:
   - Returns current target FPS in register `A`.
-- **`SetFPS(fps)`**:
+- **`SetFPS(fps: imm8)`**:
   - Sets target frame rate (default: `30` FPS).
 - **`GetDelta()`**:
   - Returns elapsed milliseconds since previous frame in register `A`.
 
 ### 4.3 2D Drawing Primitives
-All coordinates are 8-bit (`0` to `255`). Colors are 16-bit RGBA4444.
-- **`Clear(color)`**:
-  - Fills entire logical canvas with the specified 16-bit color.
-- **`SetPixel(x, y, color)`**:
-  - Sets logical pixel $(x, y)$ to 16-bit color.
-- **`GetPixel(x, y)`**:
-  - Returns 16-bit color of pixel $(x, y)$ in register pair `BC` (High byte `B = RG`, Low byte `C = BA`).
-- **`Line(x1, y1, x2, y2, color, thickness)`**:
-  - Draws a line between $(x1, y1)$ and $(x2, y2)$ with 8-bit thickness.
-- **`FillRectangle(x, y, width, height, color)`**:
-  - Draws a solid filled rectangle with top-left corner at $(x, y)$.
-- **`StrokeRectangle(x, y, width, height, color, thickness)`**:
-  - Draws an outlined rectangle with border thickness.
-- **`FillEllipse(cx, cy, rx, ry, color)`**:
-  - Draws a solid filled ellipse centered at $(cx, cy)$ with horizontal radius $rx$ and vertical radius $ry$.
-- **`StrokeEllipse(cx, cy, rx, ry, color, thickness)`**:
-  - Draws an outlined ellipse with border thickness.
-- **`PaintMask(x, y, mask_address, width, height, mask_value, color, mask_invert)`**:
-  - Rasterizes a 2D multi-valued sprite mask from memory at `mask_address`.
-  - Overwrites pixels matching `mask_value` (or `!= mask_value` if `mask_invert != 0`) with `color`.
-  - Mask value `0x00` is always transparent. Fast hardware-accelerated drawing.
+All coordinates are 8-bit (`0` to `255`). Colors are 16-bit RGBA4444 values loaded via `LXI`.
+
+- **`Clear(color: Color)`**:
+  - Fills entire logical canvas with 16-bit color.
+  - Setup: `HL = color`. Calls `canvas_clear`.
+- **`SetPixel(x: imm8, y: imm8, color: Color)`**:
+  - Sets pixel at $(x, y)$ to 16-bit color.
+  - Setup: `B = x`, `C = y`, `HL = color`. Calls `canvas_set_pixel`.
+- **`GetPixel(x: imm8, y: imm8)`**:
+  - Reads 16-bit color of pixel $(x, y)$ into register pair `BC` (`B = color_hi`, `C = color_lo`).
+  - Setup: `B = x`, `C = y`. Calls `canvas_get_pixel`.
+- **`FillRect(x: imm8, y: imm8, w: imm8, h: imm8, color: Color)`**:
+  - Draws a solid filled rectangle with top-left corner at $(x, y)$ of dimensions $(w, h)$.
+  - Setup: `B = x`, `C = y`, `D = w`, `E = h`, `HL = color`. Calls `canvas_draw_rect`.
+- **`StrokeRect(x: imm8, y: imm8, w: imm8, h: imm8, color: Color)`**:
+  - Draws an outlined rectangle of dimensions $(w, h)$ with 1px border.
+  - Setup: `B = x`, `C = y`, `D = w`, `E = h`, `HL = color`. Calls `canvas_stroke_rect_1`.
+- **`FillCircle(cx: imm8, cy: imm8, r: imm8, color: Color)`**:
+  - Draws a solid filled circle centered at $(cx, cy)$ with radius $r$.
+  - Setup: `B = cx`, `C = cy`, `D = r`, `E = r`, `HL = color`. Calls `canvas_draw_ellipse`.
+- **`StrokeCircle(cx: imm8, cy: imm8, r: imm8, color: Color)`**:
+  - Draws an outlined circle centered at $(cx, cy)$ with radius $r$ and 1px border.
+  - Setup: `B = cx`, `C = cy`, `D = r`, `E = r`, `HL = color`. Calls `canvas_stroke_circle_1`.
+- **`Line(x1: imm8, y1: imm8, x2: imm8, y2: imm8, color: Color)`**:
+  - Draws a 1px straight line between $(x1, y1)$ and $(x2, y2)$.
+  - Setup: `B = x1`, `C = y1`, `D = x2`, `E = y2`, `HL = color`. Calls `canvas_draw_line_1`.
+- **`DrawHLine(x: imm8, y: imm8, len: imm8, color: Color)`**:
+  - Fast horizontal line from $(x, y)$ with length `len`.
+  - Setup: `B = x`, `C = y`, `D = len`, `HL = color`. Calls `canvas_draw_hline`.
+- **`DrawVLine(x: imm8, y: imm8, len: imm8, color: Color)`**:
+  - Fast vertical line from $(x, y)$ with length `len`.
+  - Setup: `B = x`, `C = y`, `E = len`, `HL = color`. Calls `canvas_draw_vline`.
+- **`DrawSprite(x: imm8, y: imm8, w: imm8, h: imm8, mask: addr, color: Color)`**:
+  - Rasterizes a 2D masked sprite from memory at `mask`.
+  - Setup: `B = x`, `C = y`, `D = w`, `E = h`, `HL = mask`, color in static storage. Calls `canvas_draw_sprite`.
 
 ### 4.4 Text Rendering
-- **`FillText(text, x, y, size, color)`**:
-  - Renders solid filled text string at $(x, y)$ using built-in font.
-  - `size`: font scale multiplier (`1` = 8x8, `2` = 16x16, etc.).
-  - `color`: 16-bit RGBA4444 text color.
-- **`StrokeText(text, x, y, size, color, thickness)`**:
-  - Renders outlined text string at $(x, y)$.
-  - `size`: font scale multiplier (`1` = 8x8, `2` = 16x16, etc.).
-  - `color`: 16-bit RGBA4444 outline color.
-  - `thickness`: outline border thickness in pixels.
-- **`TextWidth(text, size)`**:
-  - Computes the rendered pixel width of string; returns width in register `A`.
+- **`DrawText(str: addr, x: imm8, y: imm8, color: Color)`**:
+  - Renders solid text string at $(x, y)$ with scale 1.
+  - Setup: `HL = str`, `B = x`, `C = y`, `DE = color`. Calls `canvas_draw_text_1`.
+- **`TextWidth(str: addr, scale: imm8)`**:
+  - Computes rendered pixel width of string; returns width in register `A`.
+  - Setup: `HL = str`, `A = scale`. Calls `canvas_text_width`.
 
 ### 4.5 Keyboard Input
-- **`KeyPress(key)`**:
-  - Checks if `key` transitioned from unpressed to pressed in current frame.
-  - Returns `1` in `A` if true, `0` if false. Sets `Z` flag (`jnz pressed`).
-- **`KeyDown(key)`**:
-  - Checks if `key` is currently held down.
-  - Returns `1` in `A` if true, `0` if false. Sets `Z` flag.
-- **`KeyRelease(key)`**:
-  - Checks if `key` was released in current frame.
-  - Returns `1` in `A` if true, `0` if false. Sets `Z` flag.
+- **`KeyPress(key: imm8)`**:
+  - Checks if key transitioned to pressed this frame. Returns `1` in `A` if true, `0` if false (`jnz pressed`).
+- **`KeyDown(key: imm8)`**:
+  - Checks if key is currently held down. Returns `1` in `A` if true, `0` if false.
+- **`KeyRelease(key: imm8)`**:
+  - Checks if key was released this frame. Returns `1` in `A` if true, `0` if false.
 - **`KeyInput()`**:
-  - Returns the next key code from the input queue in `A`, or `0` if queue is empty. Sets `Z` flag.
+  - Returns next key code from event queue in `A`, or `0` if empty.
 
 ### 4.6 Mouse Input
-- **`MousePress(mousebutton)`**:
-  - Checks if `mousebutton` transitioned from unpressed to pressed in current frame.
-  - Returns `1` in `A` if true, `0` if false. Sets `Z` flag (`jnz clicked`).
-- **`MouseDown(mousebutton)`**:
-  - Checks if `mousebutton` is currently held down.
-  - Returns `1` in `A` if true, `0` if false. Sets `Z` flag (`jnz held`).
-- **`MouseRelease(mousebutton)`**:
-  - Checks if `mousebutton` was released in current frame.
-  - Returns `1` in `A` if true, `0` if false. Sets `Z` flag.
+- **`MousePress(button: imm8)`**:
+  - Checks if mouse button transitioned to pressed this frame. Returns `1` in `A` if true, `0` if false.
+- **`MouseDown(button: imm8)`**:
+  - Checks if mouse button is currently held down. Returns `1` in `A` if true, `0` if false.
+- **`MouseRelease(button: imm8)`**:
+  - Checks if mouse button was released this frame. Returns `1` in `A` if true, `0` if false.
 - **`MousePosition()`**:
-  - Reads the current logical mouse coordinates relative to the canvas.
-  - Loads logical $X$ into register `B`, and logical $Y$ into register `C`.
-  - Coordinates automatically account for the fixed $4\times 4$ physical scaling:
-    $$X = \min\left(255, \left\lfloor \frac{px}{4} \right\rfloor\right), \quad Y = \min\left(255, \left\lfloor \frac{py}{4} \right\rfloor\right)$$
+  - Loads logical cursor $X$ into register `B`, and logical $Y$ into register `C`.
 
 ---
 
-## 5. Subroutine Parameter Passing Convention
+## 5. Register Calling Conventions
 
-### 5.1 Macro Direct Streaming Convention
-Because 8085 registers are limited, high-level macros stream parameters directly to `CANVAS_DATA_PORT` (`0x11`). This eliminates the need for RAM parameter blocks.
+Subroutines use Intel 8085 register pairs for zero-overhead parameter passing:
 
-#### Example Macro Implementation:
-```e8085
-; SetPixel x, y, color_hi, color_lo
-%macro SetPixel 4
-    mvi A, CMD_SET_PIXEL
-    out CANVAS_CMD_PORT
-    mvi A, %1                   ; x coordinate (u8)
-    out CANVAS_DATA_PORT
-    mvi A, %2                   ; y coordinate (u8)
-    out CANVAS_DATA_PORT
-    mvi A, %3                   ; color high byte (RG)
-    out CANVAS_DATA_PORT
-    mvi A, %4                   ; color low byte (BA)
-    out CANVAS_DATA_PORT
-%end
-```
+| Register / Pair | Common Role | Preserved by Subroutines |
+| :--- | :--- | :--- |
+| **`BC`** | `B = x` (or `x1`), `C = y` (or `y1`) | Yes (except `get_pixel`, `get_size`, `mouse_pos`) |
+| **`DE`** | `D = w`, `E = h` (or `D = x2`, `E = y2` or `color` in `draw_text`) | Yes |
+| **`HL`** | `H = color_hi`, `L = color_lo` (or pointer to string / mask) | Yes |
+| **`A`** | Command byte, thickness, scale, query results | Return value / alters |
 
-#### Example Query Subroutine Convention:
-Queries pass parameters in registers and return status in `A` with flags updated:
-```e8085
-; Inputs: A = Key code
-; Outputs: A = 1 (true) or 0 (false), Zero flag updated
-global canvas_key_down:
-    push BC
-    mov  B, A
-    mvi  A, CMD_KEY_DOWN
-    out  CANVAS_CMD_PORT
-    mov  A, B
-    out  CANVAS_DATA_PORT
-    in   CANVAS_DATA_PORT       ; read result (1 or 0)
-    cpi  0                      ; update Zero flag for branching
-    pop  BC
-    ret
-```
+#### Code Size Comparison:
+- **Legacy Inline Streaming**: 28 bytes per rectangle call site.
+- **Subroutine-backed Macro**: 14 bytes per rectangle call site (50% reduction).
 
 ---
 

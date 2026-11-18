@@ -1,3 +1,51 @@
+; ==============================================================================
+; Hello Canvas Example for Intel 8085 Microprocessor
+; Demonstrates basic initialization, drawing primitives, and text display.
+; ==============================================================================
+
+%include <device/canvas>
+
+segment .data
+title_str byte "Hello Canvas 8085\0"
+hello_str byte "HELLO CANVAS!\0"
+
 segment .text
 main:
+    ; 1. Initialize Canvas window (160x90 logical, 4x scaled)
+    InitCanvas RES_DEFAULT_W, RES_DEFAULT_H, title_str
+    SetFPS 30
+
+    ; 2. Clear background with Dark Navy Blue
+    Clear 0x002F
+
+    ; 3. Draw a decorative yellow border
+    StrokeRect 4, 4, 152, 82, COLOR_YELLOW
+
+    ; 4. Draw a central decorative cyan circle
+    FillCircle 80, 45, 12, COLOR_CYAN
+
+    ; 5. Draw a green accent rectangle
+    FillRect 30, 40, 100, 10, COLOR_GREEN
+
+    ; 6. Draw greeting text centered
+    DrawText hello_str, 38, 41, COLOR_WHITE
+
+    ; 7. Present frame
+    UpdateCanvas
+
+wait_loop:
+    ; Check if window is still open
+    IsCanvasOpen
+    jz done
+
+    ; Check for ESC key
+    KeyDown K_ESCAPE
+    jnz done
+
+    ; Frame throttle
+    UpdateCanvas
+    jmp wait_loop
+
+done:
+    DisposeCanvas
     hlt

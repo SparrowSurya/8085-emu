@@ -452,3 +452,132 @@ main:
     // (11, 11) was 2 -> painted Green (0x0F0F)
     assert_eq!(dev.get_pixel_value(11, 11), 0x0F0F);
 }
+
+#[test]
+fn test_canvas_streamlined_drawing_macros() {
+    let src = r#"
+%include <device/canvas>
+
+segment .data
+title byte "Optimized Test\0"
+msg byte "OK\0"
+sprite_mask byte 1, 1, 1, 1
+
+segment .text
+main:
+    InitCanvas 160, 90, title
+
+    ; 1. Clear background to Red (0xF00F) using 1-arg macro
+    Clear COLOR_RED
+
+    ; 2. Set Pixel at (10, 10) to Blue (0x00FF) using 3-arg macro
+    SetPixel 10, 10, COLOR_BLUE
+
+    ; 3. Draw Green line from (20, 20) to (25, 20) using 5-arg macro
+    Line 20, 20, 25, 20, COLOR_GREEN
+
+    ; 4. Draw White filled rectangle at (30, 30) of size (5, 5) using 5-arg macro
+    FillRect 30, 30, 5, 5, COLOR_WHITE
+
+    ; 5. Draw Yellow stroked rectangle at (40, 40) of size (6, 6) using 5-arg macro
+    StrokeRect 40, 40, 6, 6, COLOR_YELLOW
+
+    ; 6. Draw Magenta filled circle centered at (60, 60), r=4 using 4-arg macro
+    FillCircle 60, 60, 4, COLOR_MAGENTA
+
+    ; 7. Draw Cyan stroked circle centered at (75, 75), r=5 using 4-arg macro
+    StrokeCircle 75, 75, 5, COLOR_CYAN
+
+    ; 8. Draw horizontal line at (10, 50), len=20, Red
+    DrawHLine 10, 50, 20, COLOR_RED
+
+    ; 9. Draw vertical line at (50, 10), len=20, Blue
+    DrawVLine 50, 10, 20, COLOR_BLUE
+
+    ; 10. Draw text with 4-arg macro
+    DrawText msg, 2, 2, COLOR_WHITE
+
+    ; 11. Draw sprite with 6-arg macro and functional Rgb
+    DrawSprite 80, 80, 2, 2, sprite_mask, Rgb(0, 0xF, 0)
+
+    ; 12. Read back pixel at (10, 10) into B:C
+    GetPixel 10, 10
+
+    hlt
+"#;
+
+    let (mut machine, canvas) = setup_test_machine(src);
+    machine.attach_device(Box::new(canvas), &[0x10, 0x11, 0x12]);
+
+    machine.run();
+    assert!(machine.cpu.is_halt);
+
+    // B = 0x00, C = 0xFF (COLOR_BLUE)
+    assert_eq!(machine.cpu.regs.b, 0x00);
+    assert_eq!(machine.cpu.regs.c, 0xFF);
+
+    let dev = machine.devices.find_device::<CanvasDevice>().unwrap();
+    // Background is red
+    assert_eq!(dev.get_pixel_value(0, 0), COLOR_RED);
+    // Blue pixel at (10, 10)
+    assert_eq!(dev.get_pixel_value(10, 10), COLOR_BLUE);
+    // Green line at (22, 20)
+    assert_eq!(dev.get_pixel_value(22, 20), COLOR_GREEN);
+    // White rectangle at (32, 32)
+    assert_eq!(dev.get_pixel_value(32, 32), COLOR_WHITE);
+    // Yellow stroke rect border at (40, 40)
+    assert_eq!(dev.get_pixel_value(40, 40), COLOR_YELLOW);
+    // Magenta filled circle at (60, 60)
+    assert_eq!(dev.get_pixel_value(60, 60), COLOR_MAGENTA);
+    // Cyan stroked circle at (75, 70)
+    assert_eq!(dev.get_pixel_value(75, 70), COLOR_CYAN);
+    // Horizontal line at (20, 50)
+    assert_eq!(dev.get_pixel_value(20, 50), COLOR_RED);
+    // Vertical line at (50, 20)
+    assert_eq!(dev.get_pixel_value(50, 20), COLOR_BLUE);
+    // Sprite pixel at (80, 80) is Green (0x0F0F)
+    assert_eq!(dev.get_pixel_value(80, 80), COLOR_GREEN);
+}
+
+#[test]
+fn test_canvas_call_site_code_size_efficiency() {
+    let base_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples");
+    let fake_file = base_dir.join("test_code_size.e8085");
+
+    // Measure size of 10 FillRect macro calls
+    let src = r#"
+%include <device/canvas>
+
+segment .text
+main:
+    FillRect 0, 0, 10, 10, COLOR_RED
+    FillRect 1, 1, 10, 10, COLOR_GREEN
+    FillRect 2, 2, 10, 10, COLOR_BLUE
+    FillRect 3, 3, 10, 10, COLOR_YELLOW
+    FillRect 4, 4, 10, 10, COLOR_CYAN
+    FillRect 5, 5, 10, 10, COLOR_MAGENTA
+    FillRect 6, 6, 10, 10, COLOR_WHITE
+    FillRect 7, 7, 10, 10, COLOR_BLACK
+    FillRect 8, 8, 10, 10, COLOR_GRAY
+    FillRect 9, 9, 10, 10, COLOR_RED
+    hlt
+"#;
+
+    let image = assemble_and_link_with_file(Some(&fake_file), src, Some(&base_dir), None, &[])
+        .expect("assembly must succeed");
+
+    // Each FillRect 5 is:
+    // mvi B (2) + mvi C (2) + mvi D (2) + mvi E (2) + lxi HL (3) + call (3) = 14 bytes
+    // 10 calls = 140 bytes! (Legacy inline streaming was 28 bytes per call = 280 bytes)
+    // The main routine should have 140 bytes of calls + 1 byte hlt = 141 bytes.
+    let main_addr = image.entry as usize;
+    // Check opcode at main: MVI B is 0x06
+    assert_eq!(image.bytes[main_addr], 0x06);
+    // Verify each call site is exactly 14 bytes apart
+    for i in 0..10 {
+        assert_eq!(image.bytes[main_addr + i * 14], 0x06, "MVI B at start of call {}", i);
+        assert_eq!(image.bytes[main_addr + i * 14 + 11], 0xCD, "CALL canvas_draw_rect in call {}", i);
+    }
+    // Instruction after 10 calls should be HLT (0x76)
+    assert_eq!(image.bytes[main_addr + 140], 0x76);
+}
