@@ -19,6 +19,12 @@
 
 %include <device/canvas>
 
+; Additional custom 16-bit colors
+%define COLOR_SKY            0x4CFF
+%define COLOR_DIRT           0x852F
+%define COLOR_BEAK           0xF50F
+%define COLOR_PIPE_BORDER    0x0A0F
+
 segment .data
 title_str    byte "8085 Flappy Bird\0"
 ready_str    byte "PRESS SPACE TO FLAP\0"
@@ -133,7 +139,7 @@ state_ready:
 .render:
     call render_scene
     ; Draw "PRESS SPACE TO FLAP"
-    FillText ready_str, 48, 55, 1, COLOR_WHITE_HI, COLOR_WHITE_LO
+    DrawText ready_str, 48, 55, COLOR_WHITE
     UpdateCanvas
     jmp game_loop
 
@@ -314,8 +320,8 @@ state_gameover:
 
     call render_scene
     ; Draw Game Over banner
-    FillText gameover_str, 84, 45, 1, COLOR_RED_HI, COLOR_RED_LO
-    FillText retry_str, 44, 65, 1, COLOR_WHITE_HI, COLOR_WHITE_LO
+    DrawText gameover_str, 84, 45, COLOR_RED
+    DrawText retry_str, 44, 65, COLOR_WHITE
 
     UpdateCanvas
     jmp game_loop
@@ -324,8 +330,8 @@ state_gameover:
 ; Subroutine: Render Scene (Sky, Pipes, Ground, Authentic Bird Sprite, Score)
 ; ------------------------------------------------------------------------------
 render_scene:
-    ; 1. Clear Sky (Soft Retro Sky Blue: 0x4C, 0xFF)
-    Clear 0x4C, 0xFF
+    ; 1. Clear Sky (Soft Retro Sky Blue)
+    Clear COLOR_SKY
 
     ; 2. Draw Pipes (Pipe 1 and Pipe 2)
     lda pipe1_x
@@ -342,15 +348,15 @@ render_scene:
 
     ; 3. Draw Ground
     ; Top green grass strip: y=116..120
-    FillRectangle 0, 116, 240, 4, COLOR_GREEN_HI, COLOR_GREEN_LO
+    FillRect 0, 116, 240, 4, COLOR_GREEN
     ; Dirt base: y=120..136
-    FillRectangle 0, 120, 240, 16, 0x85, 0x2F
+    FillRect 0, 120, 240, 16, COLOR_DIRT
 
     ; 4. Draw Authentic Flappy Bird 17x12 Sprite
     call draw_bird_sprite
 
     ; 5. Draw Score Header
-    FillText score_lbl, 8, 6, 1, COLOR_WHITE_HI, COLOR_WHITE_LO
+    DrawText score_lbl, 8, 6, COLOR_WHITE
 
     ; Format 2-digit score into score_buf
     lda score
@@ -375,7 +381,7 @@ render_scene:
     mov M, A
 
     ; Render score number
-    FillText score_buf, 64, 6, 1, COLOR_YELLOW_HI, COLOR_YELLOW_LO
+    DrawText score_buf, 64, 6, COLOR_YELLOW
     ret
 
 ; ------------------------------------------------------------------------------
@@ -398,18 +404,13 @@ draw_bird_sprite:
     cpi 0
     jz .next_pixel   ; 0 = transparent, skip
 
-    ; Not transparent: SetPixel (E, D, color)
     push BC
-    push PSW
-    mvi A, CMD_SET_PIXEL
-    out CANVAS_CMD_PORT
-    mov A, E         ; X
-    out CANVAS_DATA_PORT
-    mov A, D         ; Y
-    out CANVAS_DATA_PORT
+    push DE
+    push HL
 
-    ; Select color based on palette index in stack
-    pop PSW
+    mov B, E         ; B = X
+    mov C, D         ; C = Y
+
     cpi 1
     jz .color_black
     cpi 2
@@ -417,34 +418,25 @@ draw_bird_sprite:
     cpi 3
     jz .color_yellow
 
-    ; Palette 4: Orange Beak (0xF50F)
-    mvi A, 0xF5
-    out CANVAS_DATA_PORT
-    mvi A, 0x0F
-    out CANVAS_DATA_PORT
-    jmp .pixel_done
+    ; Palette 4: Orange Beak
+    lxi HL, COLOR_BEAK
+    jmp .draw_pix
 
 .color_black:
-    mvi A, COLOR_BLACK_HI
-    out CANVAS_DATA_PORT
-    mvi A, COLOR_BLACK_LO
-    out CANVAS_DATA_PORT
-    jmp .pixel_done
+    lxi HL, COLOR_BLACK
+    jmp .draw_pix
 
 .color_white:
-    mvi A, COLOR_WHITE_HI
-    out CANVAS_DATA_PORT
-    mvi A, COLOR_WHITE_LO
-    out CANVAS_DATA_PORT
-    jmp .pixel_done
+    lxi HL, COLOR_WHITE
+    jmp .draw_pix
 
 .color_yellow:
-    mvi A, COLOR_YELLOW_HI
-    out CANVAS_DATA_PORT
-    mvi A, COLOR_YELLOW_LO
-    out CANVAS_DATA_PORT
+    lxi HL, COLOR_YELLOW
 
-.pixel_done:
+.draw_pix:
+    call canvas_set_pixel
+    pop HL
+    pop DE
     pop BC
 
 .next_pixel:
@@ -468,39 +460,23 @@ draw_pipe:
     cpi 240
     rnc
 
-    ; Top Pipe: (C, 0) of size (18, D)
-    mvi A, CMD_FILL_RECT
-    out CANVAS_CMD_PORT
-    mov A, C
-    out CANVAS_DATA_PORT
-    xra A
-    out CANVAS_DATA_PORT
-    mvi A, 18
-    out CANVAS_DATA_PORT
-    mov A, D
-    out CANVAS_DATA_PORT
-    mvi A, COLOR_GREEN_HI
-    out CANVAS_DATA_PORT
-    mvi A, COLOR_GREEN_LO
-    out CANVAS_DATA_PORT
+    push BC
+    push DE
 
-    ; Top pipe border
-    mvi A, CMD_STROKE_RECT
-    out CANVAS_CMD_PORT
-    mov A, C
-    out CANVAS_DATA_PORT
-    xra A
-    out CANVAS_DATA_PORT
-    mvi A, 18
-    out CANVAS_DATA_PORT
-    mov A, D
-    out CANVAS_DATA_PORT
-    mvi A, 1
-    out CANVAS_DATA_PORT
-    mvi A, 0x0A
-    out CANVAS_DATA_PORT
-    mvi A, 0x0F
-    out CANVAS_DATA_PORT
+    ; Top Pipe: FillRect (C, 0, 18, D, COLOR_GREEN)
+    mov B, C
+    mvi C, 0
+    mov E, D
+    mvi D, 18
+    lxi HL, COLOR_GREEN
+    call canvas_draw_rect
+
+    ; Top pipe border: StrokeRect (B, 0, 18, E, COLOR_PIPE_BORDER)
+    lxi HL, COLOR_PIPE_BORDER
+    call canvas_stroke_rect_1
+
+    pop DE
+    pop BC
 
     ; Bottom Pipe: (C, D + 40) down to ground (y=116)
     mov A, D
@@ -508,39 +484,21 @@ draw_pipe:
     mov E, A ; E = bottom pipe y start
     mvi A, 116
     sub E
-    mov B, A ; B = bottom pipe height
+    ; A = bottom pipe height
 
-    mvi A, CMD_FILL_RECT
-    out CANVAS_CMD_PORT
-    mov A, C
-    out CANVAS_DATA_PORT
-    mov A, E
-    out CANVAS_DATA_PORT
-    mvi A, 18
-    out CANVAS_DATA_PORT
-    mov A, B
-    out CANVAS_DATA_PORT
-    mvi A, COLOR_GREEN_HI
-    out CANVAS_DATA_PORT
-    mvi A, COLOR_GREEN_LO
-    out CANVAS_DATA_PORT
+    push BC
 
-    mvi A, CMD_STROKE_RECT
-    out CANVAS_CMD_PORT
-    mov A, C
-    out CANVAS_DATA_PORT
-    mov A, E
-    out CANVAS_DATA_PORT
-    mvi A, 18
-    out CANVAS_DATA_PORT
-    mov A, B
-    out CANVAS_DATA_PORT
-    mvi A, 1
-    out CANVAS_DATA_PORT
-    mvi A, 0x0A
-    out CANVAS_DATA_PORT
-    mvi A, 0x0F
-    out CANVAS_DATA_PORT
+    mov B, C ; B = x
+    mov C, E ; C = y
+    mov E, A ; E = h
+    mvi D, 18 ; D = w
+    lxi HL, COLOR_GREEN
+    call canvas_draw_rect
+
+    lxi HL, COLOR_PIPE_BORDER
+    call canvas_stroke_rect_1
+
+    pop BC
     ret
 
 ; ------------------------------------------------------------------------------
