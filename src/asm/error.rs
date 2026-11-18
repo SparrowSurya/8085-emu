@@ -212,6 +212,18 @@ pub enum AsmErrorKind {
     DivisionByZero,
     /// Malformed or invalid static expression in a directive.
     InvalidExpression(String),
+
+    // ---- functional defines ----
+    /// A functional macro was invoked with the wrong number of arguments.
+    FuncMacroArgCountMismatch {
+        name: String,
+        expected: usize,
+        found: usize,
+    },
+    /// A functional macro definition had an invalid parameter list.
+    InvalidFuncMacroDef(String),
+    /// Functional macro recursion limit exceeded.
+    FuncMacroRecursionLimitExceeded(String),
 }
 
 impl fmt::Display for AsmErrorKind {
@@ -293,6 +305,9 @@ impl fmt::Display for AsmErrorKind {
             ElifAfterElse => write!(f, "%elif cannot follow %else in %if block"),
             UnexpectedEnd => write!(f, "unexpected %end or %endif without matching opening directive"),
             InvalidCondition(s) => write!(f, "invalid condition expression: {s}"),
+            FuncMacroArgCountMismatch { name, expected, found } => write!(f, "functional macro '{name}' expects {expected} argument(s) but {found} were given"),
+            InvalidFuncMacroDef(s) => write!(f, "invalid functional macro definition: {s}"),
+            FuncMacroRecursionLimitExceeded(s) => write!(f, "functional macro recursion limit exceeded in '{s}'"),
         }
     }
 }

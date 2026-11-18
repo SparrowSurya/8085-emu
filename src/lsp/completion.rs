@@ -1014,7 +1014,8 @@ fn extract_variables_and_constants(doc: &Document) -> (Vec<VariableInfo>, Vec<St
         if code_line.to_lowercase().starts_with("%define") {
             let parts: Vec<&str> = code_line.split_whitespace().collect();
             if parts.len() >= 2 {
-                constants.push(parts[1].to_string());
+                let name = parts[1].split('(').next().unwrap_or(parts[1]);
+                constants.push(name.to_string());
             }
             continue;
         }
@@ -1083,7 +1084,8 @@ fn extract_variables_and_constants(doc: &Document) -> (Vec<VariableInfo>, Vec<St
             if inc_code.to_lowercase().starts_with("%define") {
                 let parts: Vec<&str> = inc_code.split_whitespace().collect();
                 if parts.len() >= 2 {
-                    constants.push(parts[1].to_string());
+                    let name = parts[1].split('(').next().unwrap_or(parts[1]);
+                    constants.push(name.to_string());
                 }
                 continue;
             }

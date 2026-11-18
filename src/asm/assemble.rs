@@ -905,12 +905,12 @@ impl<'a> Assembler<'a> {
     fn define_value(&self, v: &Value, span: Span) -> Result<DVal, AsmError> {
         match v {
             Value::Number(n) => {
-                if *n > 0xFF {
+                if *n > 0xFFFF {
                     return Err(AsmError::new(
                         span,
                         AsmErrorKind::ImmediateOutOfRange {
                             value: *n,
-                            max: 0xFF,
+                            max: 0xFFFF,
                         },
                     ));
                 }
@@ -1652,7 +1652,13 @@ mod tests {
             assemble("extern func\nsegment .text\nfunc:\nhlt\nmain:\ncall func\nhlt\n").is_ok()
         );
         assert!(matches!(
-            assemble("%define BIG 0x100\nsegment .text\nmain:\nhlt\n")
+            assemble("%define BIG 0x10000\nsegment .text\nmain:\nhlt\n")
+                .unwrap_err()
+                .kind,
+            AsmErrorKind::ImmediateOutOfRange { .. }
+        ));
+        assert!(matches!(
+            assemble("%define BIG 0x100\nsegment .text\nmain:\nmvi A, BIG\nhlt\n")
                 .unwrap_err()
                 .kind,
             AsmErrorKind::ImmediateOutOfRange { .. }
@@ -1796,5 +1802,51 @@ main:
         let main_addr = ((img.bytes[2] as u16) << 8) | (img.bytes[1] as u16);
         assert_eq!(img.bytes[main_addr as usize], 0x3E);
         assert_eq!(img.bytes[main_addr as usize + 1], 42);
+    }
+
+    #[test]
+    fn test_functional_directive_assemble() {
+        let src = r#"%define RED 0xF00F
+%define Hi(x) (x >> 8)
+%define Lo(x) (x & 0xFF)
+%define Color(x) Hi(x), Lo(x)
+
+segment .data
+pixel BYTE Color(RED)
+
+segment .text
+main:
+    mvi B, Hi(RED)
+    mvi C, Lo(RED)
+    hlt
+"#;
+        let (img, symbols, _listing) = assemble_full(src, None, &[]).unwrap();
+        // Check pixel data bytes (0xF0, 0x0F)
+        let pixel_addr = *symbols.get("pixel").unwrap();
+        assert_eq!(img.bytes[pixel_addr as usize], 0xF0);
+        assert_eq!(img.bytes[pixel_addr as usize + 1], 0x0F);
+
+        // Check instructions: mvi B, 0xF0 (0x06, 0xF0) and mvi C, 0x0F (0x0E, 0x0F)
+        let main_addr = *symbols.get("main").unwrap();
+        assert_eq!(img.bytes[main_addr as usize], 0x06); // MVI B
+        assert_eq!(img.bytes[main_addr as usize + 1], 0xF0);
+        assert_eq!(img.bytes[main_addr as usize + 2], 0x0E); // MVI C
+        assert_eq!(img.bytes[main_addr as usize + 3], 0x0F);
+        assert_eq!(img.bytes[main_addr as usize + 4], 0x76); // HLT
+    }
+
+    #[test]
+    fn test_examples_functional_directive_assembles() {
+        let src = include_str!("../../examples/functional_directive.e8085");
+        let (img, symbols, _listing) = assemble_full(src, None, &[]).unwrap();
+        let red_pixel_addr = *symbols.get("red_pixel").unwrap();
+        assert_eq!(img.bytes[red_pixel_addr as usize], 0xF0);
+        assert_eq!(img.bytes[red_pixel_addr as usize + 1], 0x0F);
+        let green_pixel_addr = *symbols.get("green_pixel").unwrap();
+        assert_eq!(img.bytes[green_pixel_addr as usize], 0x0F);
+        assert_eq!(img.bytes[green_pixel_addr as usize + 1], 0x0F);
+        let blue_pixel_addr = *symbols.get("blue_pixel").unwrap();
+        assert_eq!(img.bytes[blue_pixel_addr as usize], 0x00);
+        assert_eq!(img.bytes[blue_pixel_addr as usize + 1], 0xFF);
     }
 }

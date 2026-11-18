@@ -1,0 +1,38 @@
+; Demonstration of functional directives in %define for custom static macros
+
+; Constants
+%define RED 0xF00F
+%define GREEN 0x0F0F
+%define BLUE 0x00FF
+
+; Custom functional directives
+%define Hi(x) (x >> 8)
+%define Lo(x) (x & 0xFF)
+%define Color(x) Hi(x), Lo(x)
+%define MakeWord(hi, lo) (hi << 8) | lo
+%define Add(a, b) a + b
+%define Offset(x, y, pitch) (y * pitch) + x
+
+; Scalar defines evaluating functional directives
+%define RED_HI Hi(RED)
+%define RED_LO Lo(RED)
+%define COMBINED MakeWord(0x12, 0x34)
+%define START_POS Offset(4, 2, 8)
+
+segment .data
+; Unpacking 16-bit color into high and low byte pairs
+red_pixel    BYTE Color(RED)
+green_pixel  BYTE Color(GREEN)
+blue_pixel   BYTE Color(BLUE)
+
+segment .text
+main:
+    ; Loading decomposed high and low bytes
+    mvi B, Hi(RED)
+    mvi C, Lo(RED)
+
+    ; Evaluating mathematical expressions
+    mvi D, Add(10, 25)
+    mvi E, START_POS
+
+    hlt

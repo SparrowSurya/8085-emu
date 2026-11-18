@@ -260,24 +260,27 @@ fn find_symbol_definition_in_doc(doc: &Document, symbol: &str) -> Option<Locatio
         }
 
         // 3. Check %define macro
-        if trimmed.starts_with("%define") && parts.len() >= 2 && parts[1].eq_ignore_ascii_case(symbol) {
-            let char_offset = line
-                .to_lowercase()
-                .find(&sym_lower)
-                .unwrap_or(0) as u32;
-            return Some(Location {
-                uri: doc.uri.clone(),
-                range: Range {
-                    start: Position {
-                        line: i as u32,
-                        character: char_offset,
+        if trimmed.starts_with("%define") && parts.len() >= 2 {
+            let def_name = parts[1].split('(').next().unwrap_or(parts[1]);
+            if def_name.eq_ignore_ascii_case(symbol) {
+                let char_offset = line
+                    .to_lowercase()
+                    .find(&sym_lower)
+                    .unwrap_or(0) as u32;
+                return Some(Location {
+                    uri: doc.uri.clone(),
+                    range: Range {
+                        start: Position {
+                            line: i as u32,
+                            character: char_offset,
+                        },
+                        end: Position {
+                            line: i as u32,
+                            character: char_offset + symbol.len() as u32,
+                        },
                     },
-                    end: Position {
-                        line: i as u32,
-                        character: char_offset + symbol.len() as u32,
-                    },
-                },
-            });
+                });
+            }
         }
 
         // 4. Check %macro definition
@@ -629,5 +632,19 @@ func_b:
         }
 
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_goto_functional_define() {
+        let uri = Url::parse("file:///workspace/func_test.e8085").unwrap();
+        let text = "%define Color(x) (x >> 8), (x & 0xFF)\nsegment .text\nmain:\n    mvi A, Color(0xF00F)\n    hlt\n".to_string();
+        let doc = Document::new(uri, 1, text);
+
+        let def = get_definition(&doc, &Position { line: 3, character: 13 }).unwrap();
+        if let GotoDefinitionResponse::Scalar(loc) = def {
+            assert_eq!(loc.range.start.line, 0);
+        } else {
+            panic!("expected scalar location for functional define definition");
+        }
     }
 }

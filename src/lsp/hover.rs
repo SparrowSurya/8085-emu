@@ -1424,21 +1424,25 @@ fn get_user_symbol_hover_in_single_doc(
         if trimmed.starts_with("%define") {
             let without_comment = trimmed.split(';').next().unwrap_or("").trim();
             let parts: Vec<&str> = without_comment.split_whitespace().collect();
-            if parts.len() >= 2 && parts[1].eq_ignore_ascii_case(symbol) {
-                let val = if parts.len() == 2 {
-                    "1".to_string()
-                } else {
-                    without_comment[without_comment.find(parts[2]).unwrap_or(0)..]
-                        .trim()
-                        .to_string()
-                };
-                let doc_comment = collect_preceding_comments(lines, i);
-                let mut out = format!("```\n%define {} {}\n```", parts[1], val);
-                if !doc_comment.is_empty() {
-                    out.push_str("\n\n");
-                    out.push_str(&doc_comment);
+            if parts.len() >= 2 {
+                let def_name = parts[1].split('(').next().unwrap_or(parts[1]);
+                if def_name.eq_ignore_ascii_case(symbol) {
+                    let doc_comment = collect_preceding_comments(lines, i);
+                    let header = if parts[1].contains('(') {
+                        without_comment.to_string()
+                    } else if parts.len() == 2 {
+                        format!("%define {} 1", parts[1])
+                    } else {
+                        let val = without_comment[without_comment.find(parts[2]).unwrap_or(0)..].trim();
+                        format!("%define {} {}", parts[1], val)
+                    };
+                    let mut out = format!("```\n{header}\n```");
+                    if !doc_comment.is_empty() {
+                        out.push_str("\n\n");
+                        out.push_str(&doc_comment);
+                    }
+                    return Some(out);
                 }
-                return Some(out);
             }
         }
     }
@@ -2485,6 +2489,20 @@ main:
             assert!(m.value.contains("*Imported from <device/canvas>*"));
         } else {
             panic!("expected markup for case-insensitive imported macro");
+        }
+    }
+
+    #[test]
+    fn test_hover_functional_define() {
+        let uri = Url::parse("file:///workspace/func_app.e8085").unwrap();
+        let text = "%define Color(x) (x >> 8), (x & 0xFF)\nsegment .text\nmain:\nmvi A, Color(0xF00F)\nhlt\n".to_string();
+        let doc = Document::new(uri, 1, text);
+
+        let h = get_hover(&doc, &Position { line: 3, character: 9 }).unwrap();
+        if let HoverContents::Markup(m) = h.contents {
+            assert!(m.value.contains("%define Color(x) (x >> 8), (x & 0xFF)"));
+        } else {
+            panic!("expected markup for functional define hover");
         }
     }
 }
