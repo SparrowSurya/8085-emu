@@ -59,6 +59,24 @@ pub enum TokenKind {
     AmpAmp,
     /// `||` — logical OR
     PipePipe,
+    /// `+` — addition
+    Plus,
+    /// `-` — subtraction or negation
+    Minus,
+    /// `*` — multiplication
+    Star,
+    /// `<<` — bitwise left shift
+    Shl,
+    /// `>>` — bitwise right shift
+    Shr,
+    /// `&` — bitwise AND
+    Amp,
+    /// `|` — bitwise OR
+    Pipe,
+    /// `~` — bitwise NOT
+    Tilde,
+    /// `^` — bitwise XOR
+    Caret,
     /// `(` — left parenthesis
     LParen,
     /// `)` — right parenthesis

@@ -11,6 +11,7 @@ pub mod ast;
 pub mod container;
 pub mod encode;
 pub mod error;
+pub mod expr;
 pub mod fmt;
 pub mod include;
 pub mod inspect;

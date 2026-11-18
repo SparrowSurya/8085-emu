@@ -456,6 +456,14 @@
           "match": "(&&|\\|\\||!)"
         },
         {
+          "name": "keyword.operator.bitwise.e8085",
+          "match": "(<<|>>|&|\\||~|\\^)"
+        },
+        {
+          "name": "keyword.operator.arithmetic.e8085",
+          "match": "(\\+|-|\\*|/|%)"
+        },
+        {
           "name": "punctuation.separator.comma.e8085",
           "match": ","
         },

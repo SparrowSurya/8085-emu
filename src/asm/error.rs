@@ -206,12 +206,20 @@ pub enum AsmErrorKind {
     UnexpectedEnd,
     /// Malformed or invalid condition expression.
     InvalidCondition(String),
+
+    // ---- static expressions ----
+    /// Division or modulo by zero in a static expression.
+    DivisionByZero,
+    /// Malformed or invalid static expression in a directive.
+    InvalidExpression(String),
 }
 
 impl fmt::Display for AsmErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use AsmErrorKind::*;
         match self {
+            DivisionByZero => write!(f, "division by zero in expression"),
+            InvalidExpression(s) => write!(f, "invalid expression: {s}"),
             UnterminatedString => write!(f, "unterminated string literal"),
             EmptyCharLiteral => write!(f, "empty character literal"),
             MultiCharLiteral => write!(f, "character literal must be exactly one character"),

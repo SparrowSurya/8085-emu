@@ -111,6 +111,26 @@ impl Lexer {
                 self.bump();
                 TokenKind::Slash
             }
+            '+' => {
+                self.bump();
+                TokenKind::Plus
+            }
+            '-' => {
+                self.bump();
+                TokenKind::Minus
+            }
+            '*' => {
+                self.bump();
+                TokenKind::Star
+            }
+            '~' => {
+                self.bump();
+                TokenKind::Tilde
+            }
+            '^' => {
+                self.bump();
+                TokenKind::Caret
+            }
             '!' => {
                 self.bump();
                 if self.peek() == Some('=') {
@@ -134,6 +154,9 @@ impl Lexer {
                 if self.peek() == Some('=') {
                     self.bump();
                     TokenKind::LessEqual
+                } else if self.peek() == Some('<') {
+                    self.bump();
+                    TokenKind::Shl
                 } else {
                     TokenKind::Less
                 }
@@ -143,6 +166,9 @@ impl Lexer {
                 if self.peek() == Some('=') {
                     self.bump();
                     TokenKind::GreaterEqual
+                } else if self.peek() == Some('>') {
+                    self.bump();
+                    TokenKind::Shr
                 } else {
                     TokenKind::Greater
                 }
@@ -153,7 +179,7 @@ impl Lexer {
                     self.bump();
                     TokenKind::AmpAmp
                 } else {
-                    return Err(AsmError::new(start, AsmErrorKind::UnexpectedChar('&')));
+                    TokenKind::Amp
                 }
             }
             '|' => {
@@ -162,7 +188,7 @@ impl Lexer {
                     self.bump();
                     TokenKind::PipePipe
                 } else {
-                    return Err(AsmError::new(start, AsmErrorKind::UnexpectedChar('|')));
+                    TokenKind::Pipe
                 }
             }
             '(' => {

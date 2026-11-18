@@ -300,8 +300,24 @@ impl<'a> Preprocessor<'a> {
                                 }
                                 "define" => {
                                     if self.is_currently_active() {
-                                        self.record_define(&line_tokens[first_idx + 2..])?;
-                                        out.extend(line_tokens);
+                                        let evaluated_num = self.record_define(&line_tokens[first_idx + 2..])?;
+                                        if let Some(num) = evaluated_num {
+                                            let mut rewritten = Vec::new();
+                                            rewritten.push(line_tokens[first_idx].clone());
+                                            rewritten.push(line_tokens[first_idx + 1].clone());
+                                            rewritten.push(line_tokens[first_idx + 2].clone());
+                                            let val_span = line_tokens
+                                                .get(first_idx + 3)
+                                                .map(|t| t.span)
+                                                .unwrap_or(line_tokens[first_idx].span);
+                                            rewritten.push(Token::new(TokenKind::Number(num as u32), val_span));
+                                            if let Some(nl) = newline_tok {
+                                                rewritten.push(nl);
+                                            }
+                                            out.extend(rewritten);
+                                        } else {
+                                            out.extend(line_tokens);
+                                        }
                                     } else if let Some(nl) = newline_tok {
                                         out.push(nl);
                                     }
@@ -518,14 +534,14 @@ impl<'a> Preprocessor<'a> {
         Err(AsmError::new(span, err_if_none))
     }
 
-    fn record_define(&mut self, line_tokens: &[Token]) -> Result<(), AsmError> {
+    fn record_define(&mut self, line_tokens: &[Token]) -> Result<Option<i64>, AsmError> {
         let useful: Vec<&Token> = line_tokens
             .iter()
             .filter(|t| t.kind != TokenKind::Newline && t.kind != TokenKind::Eof)
             .collect();
 
         if useful.is_empty() {
-            return Ok(());
+            return Ok(None);
         }
 
         if let TokenKind::Ident(ref name) = useful[0].kind {
@@ -533,16 +549,31 @@ impl<'a> Preprocessor<'a> {
             if useful.len() == 1 {
                 // %define NAME -> defaults to 1
                 self.defines.insert(key, 1);
+                return Ok(None);
+            } else if useful.len() == 2 && matches!(useful[1].kind, TokenKind::Str(_) | TokenKind::Char(_)) {
+                if let TokenKind::Str(ref s) = useful[1].kind {
+                    let v = if s.is_empty() { 0 } else { 1 };
+                    self.defines.insert(key, v);
+                } else if let TokenKind::Char(c) = useful[1].kind {
+                    self.defines.insert(key, c as i64);
+                }
+                return Ok(None);
             } else {
                 // Value expression following name
                 let val_tokens: Vec<Token> = useful[1..].iter().map(|&t| t.clone()).collect();
                 let span = val_tokens[0].span;
-                let val = eval_condition(&val_tokens, self.defines, span).unwrap_or(1);
+                let val = crate::asm::expr::eval_expr(
+                    &val_tokens,
+                    |k| self.defines.get(&k.to_ascii_lowercase()).copied(),
+                    span,
+                    false,
+                )?;
                 self.defines.insert(key, val);
+                return Ok(Some(val));
             }
         }
 
-        Ok(())
+        Ok(None)
     }
 
     fn scan_include(&mut self, line_tokens: &[Token]) -> Result<(), AsmError> {
@@ -686,226 +717,16 @@ pub fn eval_condition(
     defines: &HashMap<String, i64>,
     span: Span,
 ) -> Result<i64, AsmError> {
-    let clean: Vec<Token> = tokens
-        .iter()
-        .filter(|t| t.kind != TokenKind::Newline && t.kind != TokenKind::Eof)
-        .cloned()
-        .collect();
-
-    if clean.is_empty() {
-        return Err(AsmError::new(
-            span,
-            AsmErrorKind::InvalidCondition("empty condition expression".to_string()),
-        ));
-    }
-
-    let mut parser = CondExprParser::new(&clean, defines, span);
-    let result = parser.parse_expr()?;
-    if parser.pos < clean.len() {
-        return Err(AsmError::new(
-            clean[parser.pos].span,
-            AsmErrorKind::InvalidCondition(format!("unexpected token '{:?}'", clean[parser.pos].kind)),
-        ));
-    }
-    Ok(result)
-}
-
-struct CondExprParser<'a> {
-    tokens: &'a [Token],
-    pos: usize,
-    defines: &'a HashMap<String, i64>,
-    default_span: Span,
-}
-
-impl<'a> CondExprParser<'a> {
-    fn new(tokens: &'a [Token], defines: &'a HashMap<String, i64>, default_span: Span) -> Self {
-        Self {
-            tokens,
-            pos: 0,
-            defines,
-            default_span,
-        }
-    }
-
-    fn peek(&self) -> Option<&TokenKind> {
-        self.tokens.get(self.pos).map(|t| &t.kind)
-    }
-
-    fn span(&self) -> Span {
-        self.tokens
-            .get(self.pos)
-            .map(|t| t.span)
-            .unwrap_or(self.default_span)
-    }
-
-    fn bump(&mut self) -> Option<&TokenKind> {
-        let k = self.tokens.get(self.pos).map(|t| &t.kind);
-        if self.pos < self.tokens.len() {
-            self.pos += 1;
-        }
-        k
-    }
-
-    fn parse_expr(&mut self) -> Result<i64, AsmError> {
-        self.parse_or()
-    }
-
-    fn parse_or(&mut self) -> Result<i64, AsmError> {
-        let mut left = self.parse_and()?;
-        while let Some(TokenKind::PipePipe) = self.peek() {
-            self.bump();
-            let right = self.parse_and()?;
-            left = if left != 0 || right != 0 { 1 } else { 0 };
-        }
-        Ok(left)
-    }
-
-    fn parse_and(&mut self) -> Result<i64, AsmError> {
-        let mut left = self.parse_equality()?;
-        while let Some(TokenKind::AmpAmp) = self.peek() {
-            self.bump();
-            let right = self.parse_equality()?;
-            left = if left != 0 && right != 0 { 1 } else { 0 };
-        }
-        Ok(left)
-    }
-
-    fn parse_equality(&mut self) -> Result<i64, AsmError> {
-        let mut left = self.parse_relational()?;
-        while let Some(k) = self.peek() {
-            match k {
-                TokenKind::DoubleEqual => {
-                    self.bump();
-                    let right = self.parse_relational()?;
-                    left = if left == right { 1 } else { 0 };
-                }
-                TokenKind::NotEqual => {
-                    self.bump();
-                    let right = self.parse_relational()?;
-                    left = if left != right { 1 } else { 0 };
-                }
-                _ => break,
-            }
-        }
-        Ok(left)
-    }
-
-    fn parse_relational(&mut self) -> Result<i64, AsmError> {
-        let mut left = self.parse_primary()?;
-        while let Some(k) = self.peek() {
-            match k {
-                TokenKind::Less => {
-                    self.bump();
-                    let right = self.parse_primary()?;
-                    left = if left < right { 1 } else { 0 };
-                }
-                TokenKind::LessEqual => {
-                    self.bump();
-                    let right = self.parse_primary()?;
-                    left = if left <= right { 1 } else { 0 };
-                }
-                TokenKind::Greater => {
-                    self.bump();
-                    let right = self.parse_primary()?;
-                    left = if left > right { 1 } else { 0 };
-                }
-                TokenKind::GreaterEqual => {
-                    self.bump();
-                    let right = self.parse_primary()?;
-                    left = if left >= right { 1 } else { 0 };
-                }
-                _ => break,
-            }
-        }
-        Ok(left)
-    }
-
-    fn parse_primary(&mut self) -> Result<i64, AsmError> {
-        let sp = self.span();
-        match self.peek() {
-            Some(TokenKind::Exclamation) => {
-                self.bump();
-                let val = self.parse_primary()?;
-                Ok(if val == 0 { 1 } else { 0 })
-            }
-            Some(TokenKind::LParen) => {
-                self.bump();
-                let val = self.parse_expr()?;
-                if let Some(TokenKind::RParen) = self.peek() {
-                    self.bump();
-                    Ok(val)
-                } else {
-                    Err(AsmError::new(
-                        self.span(),
-                        AsmErrorKind::InvalidCondition("missing closing ')'".to_string()),
-                    ))
-                }
-            }
-            Some(TokenKind::Number(n)) => {
-                let v = *n as i64;
-                self.bump();
-                Ok(v)
-            }
-            Some(TokenKind::Char(c)) => {
-                let v = *c as i64;
-                self.bump();
-                Ok(v)
-            }
-            Some(TokenKind::Str(s)) => {
-                let v = if s.is_empty() { 0 } else { 1 };
-                self.bump();
-                Ok(v)
-            }
-            Some(TokenKind::Ident(s)) => {
-                let ident = s.clone();
-                self.bump();
-
-                // Check for defined(NAME)
-                if ident.eq_ignore_ascii_case("defined") && matches!(self.peek(), Some(TokenKind::LParen)) {
-                    self.bump(); // consume '('
-                    let name = match self.peek() {
-                        Some(TokenKind::Ident(n)) => {
-                            let n = n.clone();
-                            self.bump();
-                            n
-                        }
-                        _ => {
-                            return Err(AsmError::new(
-                                self.span(),
-                                AsmErrorKind::InvalidCondition(
-                                    "expected identifier inside defined(...)".to_string(),
-                                ),
-                            ));
-                        }
-                    };
-                    if !matches!(self.peek(), Some(TokenKind::RParen)) {
-                        return Err(AsmError::new(
-                            self.span(),
-                            AsmErrorKind::InvalidCondition(
-                                "missing ')' after defined(NAME)".to_string(),
-                            ),
-                        ));
-                    }
-                    self.bump(); // consume ')'
-
-                    let is_def = self.defines.contains_key(&name.to_ascii_lowercase());
-                    return Ok(if is_def { 1 } else { 0 });
-                }
-
-                // Normal identifier lookup
-                let val = self
-                    .defines
-                    .get(&ident.to_ascii_lowercase())
-                    .copied()
-                    .unwrap_or(0);
-                Ok(val)
-            }
-            other => Err(AsmError::new(
-                sp,
-                AsmErrorKind::InvalidCondition(format!("unexpected token '{other:?}'")),
-            )),
-        }
-    }
+    crate::asm::expr::eval_expr(
+        tokens,
+        |k| defines.get(&k.to_ascii_lowercase()).copied(),
+        span,
+        true,
+    )
+    .map_err(|e| match e.kind {
+        AsmErrorKind::InvalidExpression(s) => AsmError::new(e.span, AsmErrorKind::InvalidCondition(s)),
+        _ => e,
+    })
 }
 
 #[cfg(test)]

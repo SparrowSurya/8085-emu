@@ -1709,4 +1709,92 @@ mod tests {
         assert_eq!(rows[3].bytes, vec![0x76]); // HLT
         assert_eq!(rows[3].source, "hlt");
     }
+
+    #[test]
+    fn test_directive_expressions_arithmetic_and_bitwise() {
+        let src = r#"%define ROWS 10
+%define COLS 12
+%define CELLS ROWS*COLS
+%define MASK (1 << 3) | (1 << 5)
+%define SHIFT 32 >> 2
+%define XOR_VAL 0xFF ^ 0x0F
+%define MOD_VAL 10 % 3
+%define BUFFER_SIZE (CELLS + 4) / 2
+
+segment .data
+grid BYTE CELLS
+
+segment .bss
+buf BYTE BUFFER_SIZE
+
+segment .text
+main:
+    mvi A, CELLS
+    mvi B, MASK
+    mvi C, SHIFT
+    mvi D, XOR_VAL
+    mvi E, MOD_VAL
+    hlt
+"#;
+        let img = assemble(src).unwrap();
+        // CELLS = 120 (0x78)
+        // MASK = 8 | 32 = 40 (0x28)
+        // SHIFT = 8
+        // XOR_VAL = 0xF0
+        // MOD_VAL = 1
+        // In data segment at 0x0040: grid has byte 120 (0x78)
+        assert_eq!(img.bytes[0x40], 120);
+
+        // Find main entry point (bytes after JMP 0x0000..0x0003)
+        // Main is after 1 byte of .data and 62 bytes of .bss
+        // Let's check instructions:
+        // mvi A, 120 -> 3E 78
+        // mvi B, 40 -> 06 28
+        // mvi C, 8 -> 0E 08
+        // mvi D, 0xF0 -> 16 F0
+        // mvi E, 1 -> 1E 01
+        // hlt -> 76
+        let main_addr = ((img.bytes[2] as u16) << 8) | (img.bytes[1] as u16);
+        let code = &img.bytes[main_addr as usize..main_addr as usize + 11];
+        assert_eq!(code, &[0x3E, 120, 0x06, 40, 0x0E, 8, 0x16, 0xF0, 0x1E, 1, 0x76]);
+    }
+
+    #[test]
+    fn test_directive_expression_errors() {
+        assert_eq!(
+            assemble("%define BAD 10 / 0\nsegment .text\nmain:\nhlt\n").unwrap_err().kind,
+            AsmErrorKind::DivisionByZero
+        );
+        assert_eq!(
+            assemble("%define BAD 10 % 0\nsegment .text\nmain:\nhlt\n").unwrap_err().kind,
+            AsmErrorKind::DivisionByZero
+        );
+        assert!(matches!(
+            assemble("%define BAD ROWS * 2\nsegment .text\nmain:\nhlt\n").unwrap_err().kind,
+            AsmErrorKind::UndefinedName(name) if name == "ROWS"
+        ));
+    }
+
+    #[test]
+    fn test_directive_expression_in_conditional() {
+        let src = r#"%define ROWS 10
+%define COLS 12
+%define CELLS ROWS*COLS
+%if CELLS == 120
+segment .text
+main:
+    mvi A, 42
+    hlt
+%else
+segment .text
+main:
+    mvi A, 99
+    hlt
+%end
+"#;
+        let img = assemble(src).unwrap();
+        let main_addr = ((img.bytes[2] as u16) << 8) | (img.bytes[1] as u16);
+        assert_eq!(img.bytes[main_addr as usize], 0x3E);
+        assert_eq!(img.bytes[main_addr as usize + 1], 42);
+    }
 }

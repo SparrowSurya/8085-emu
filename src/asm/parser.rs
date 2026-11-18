@@ -26,6 +26,7 @@ pub fn parse_with_base_dir(
         pos: 0,
         seen_globals: std::collections::HashSet::new(),
         seen_externs: std::collections::HashSet::new(),
+        known_defines: std::collections::HashMap::new(),
     }
     .program()
 }
@@ -40,6 +41,7 @@ pub fn parse_text_item(mut tokens: Vec<Token>) -> Result<TextItem, AsmError> {
         pos: 0,
         seen_globals: std::collections::HashSet::new(),
         seen_externs: std::collections::HashSet::new(),
+        known_defines: std::collections::HashMap::new(),
     }
     .parse_single_text_item()
 }
@@ -49,6 +51,7 @@ struct Parser {
     pos: usize,
     seen_globals: std::collections::HashSet<String>,
     seen_externs: std::collections::HashSet<String>,
+    known_defines: std::collections::HashMap<String, i64>,
 }
 
 impl Parser {
@@ -418,9 +421,36 @@ impl Parser {
         let (name, _) = self.name()?;
         let value = match self.peek() {
             TokenKind::Newline | TokenKind::Eof => Value::Number(1),
-            _ => self.value()?,
+            TokenKind::Str(_) if matches!(self.peek_at(1), TokenKind::Newline | TokenKind::Eof) => {
+                self.value()?
+            }
+            TokenKind::Char(c) if matches!(self.peek_at(1), TokenKind::Newline | TokenKind::Eof) => {
+                let c_val = *c;
+                self.bump();
+                Value::Char(c_val)
+            }
+            _ => {
+                let mut expr_tokens = Vec::new();
+                let expr_span = self.span();
+                while !matches!(self.peek(), TokenKind::Newline | TokenKind::Eof) {
+                    expr_tokens.push(self.toks[self.pos].clone());
+                    self.bump();
+                }
+                let num = crate::asm::expr::eval_expr(
+                    &expr_tokens,
+                    |k| self.known_defines.get(&k.to_ascii_lowercase()).copied(),
+                    expr_span,
+                    false,
+                )?;
+                Value::Number(num as u32)
+            }
         };
         self.expect_newline()?;
+        if let Value::Number(n) = value {
+            self.known_defines.insert(name.to_ascii_lowercase(), n as i64);
+        } else if let Value::Char(c) = value {
+            self.known_defines.insert(name.to_ascii_lowercase(), c as i64);
+        }
         Ok(Define { name, value, span })
     }
 
@@ -819,6 +849,15 @@ fn describe(k: &TokenKind) -> String {
         TokenKind::Colon => "`:`".into(),
         TokenKind::Period => "`.`".into(),
         TokenKind::Slash => "`/`".into(),
+        TokenKind::Plus => "`+`".into(),
+        TokenKind::Minus => "`-`".into(),
+        TokenKind::Star => "`*`".into(),
+        TokenKind::Shl => "`<<`".into(),
+        TokenKind::Shr => "`>>`".into(),
+        TokenKind::Amp => "`&`".into(),
+        TokenKind::Pipe => "`|`".into(),
+        TokenKind::Tilde => "`~`".into(),
+        TokenKind::Caret => "`^`".into(),
         TokenKind::Exclamation => "`!`".into(),
         TokenKind::DoubleEqual => "`==`".into(),
         TokenKind::NotEqual => "`!=`".into(),
