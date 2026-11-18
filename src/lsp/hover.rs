@@ -1,4 +1,4 @@
-use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position, Range, Url};
+use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position, Range};
 
 use super::document::Document;
 
@@ -1328,9 +1328,8 @@ fn get_user_symbol_hover(doc: &Document, symbol: &str, position: &Position) -> O
         return Some(hover);
     }
 
-    // 2. If not defined locally, search in %include imported files
-    let mut visited = std::collections::HashSet::new();
-    find_user_symbol_hover_in_included_files(doc, symbol, &mut visited)
+    // 2. If not defined locally, search in %include imported files (transitive)
+    find_user_symbol_hover_in_included_files(doc, symbol)
 }
 
 fn get_user_symbol_hover_in_single_doc(
@@ -1343,10 +1342,10 @@ fn get_user_symbol_hover_in_single_doc(
         let trimmed = line.trim();
         if let Some(rest) = trimmed.strip_prefix("extern ") {
             let name = rest.trim();
-            if name == symbol {
+            if name.eq_ignore_ascii_case(symbol) {
                 let doc_comment = collect_preceding_comments(lines, i);
                 // let mut out = format!("**Extern** `{}`", symbol);
-                let mut out = format!("```\nextern {}\n```", symbol);
+                let mut out = format!("```\nextern {}\n```", name);
                 if !doc_comment.is_empty() {
                     out.push_str("\n\n");
                     out.push_str(&doc_comment);
@@ -1388,9 +1387,9 @@ fn get_user_symbol_hover_in_single_doc(
 
             if let Some(rest) = trimmed.strip_suffix(':') {
                 let clean = rest.trim();
-                if clean == symbol {
+                if clean.eq_ignore_ascii_case(symbol) {
                     let doc_comment = collect_preceding_comments(lines, line_num);
-                    let mut out = format!("```\n{}{}:\n```", parent_name, symbol);
+                    let mut out = format!("```\n{}{}:\n```", parent_name, clean);
                     if !doc_comment.is_empty() {
                         out.push_str("\n\n");
                         out.push_str(&doc_comment);
@@ -1407,9 +1406,9 @@ fn get_user_symbol_hover_in_single_doc(
         if let Some(rest) = trimmed.strip_suffix(':') {
             let label_ident = rest.strip_prefix("global ").unwrap_or(rest).trim();
 
-            if label_ident == symbol {
+            if label_ident.eq_ignore_ascii_case(symbol) {
                 let doc_comment = collect_preceding_comments(lines, i);
-                let mut out = format!("```\n{}:\n```", symbol);
+                let mut out = format!("```\n{}:\n```", label_ident);
                 if !doc_comment.is_empty() {
                     out.push_str("\n\n");
                     out.push_str(&doc_comment);
@@ -1425,7 +1424,7 @@ fn get_user_symbol_hover_in_single_doc(
         if trimmed.starts_with("%define") {
             let without_comment = trimmed.split(';').next().unwrap_or("").trim();
             let parts: Vec<&str> = without_comment.split_whitespace().collect();
-            if parts.len() >= 2 && parts[1] == symbol {
+            if parts.len() >= 2 && parts[1].eq_ignore_ascii_case(symbol) {
                 let val = if parts.len() == 2 {
                     "1".to_string()
                 } else {
@@ -1434,7 +1433,7 @@ fn get_user_symbol_hover_in_single_doc(
                         .to_string()
                 };
                 let doc_comment = collect_preceding_comments(lines, i);
-                let mut out = format!("```\n%define {} {}\n```", symbol, val);
+                let mut out = format!("```\n%define {} {}\n```", parts[1], val);
                 if !doc_comment.is_empty() {
                     out.push_str("\n\n");
                     out.push_str(&doc_comment);
@@ -1449,7 +1448,7 @@ fn get_user_symbol_hover_in_single_doc(
         let trimmed = line.trim();
         if trimmed.starts_with("%macro") {
             let parts: Vec<&str> = trimmed.split_whitespace().collect();
-            if parts.len() >= 2 && parts[1] == symbol {
+            if parts.len() >= 2 && parts[1].eq_ignore_ascii_case(symbol) {
                 let arg_count = parts.get(2).unwrap_or(&"0");
                 let mut doc_comment = collect_preceding_comments(lines, i);
                 if doc_comment.is_empty() && i + 1 < lines.len() {
@@ -1458,7 +1457,7 @@ fn get_user_symbol_hover_in_single_doc(
                         doc_comment = comment.trim().to_string();
                     }
                 }
-                let mut out = format!("```\n%macro {} {}\n```", symbol, arg_count);
+                let mut out = format!("```\n%macro {} {}\n```", parts[1], arg_count);
                 if !doc_comment.is_empty() {
                     out.push_str("\n\n");
                     out.push_str(&doc_comment);
@@ -1469,21 +1468,52 @@ fn get_user_symbol_hover_in_single_doc(
     }
 
     // 5. Check Variables in .data / .bss
+    let mut curr_seg: Option<super::document::SegmentKind> = None;
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
-        if trimmed.starts_with("segment ") || trimmed.starts_with('%') {
+        if trimmed.to_lowercase().starts_with("segment ") || trimmed.to_lowercase().starts_with("section ") {
+            let seg_name = trimmed[8..].trim().to_lowercase();
+            if seg_name == ".text" || seg_name == "text" {
+                curr_seg = Some(super::document::SegmentKind::Text);
+            } else if seg_name == ".data" || seg_name == "data" {
+                curr_seg = Some(super::document::SegmentKind::Data);
+            } else if seg_name == ".bss" || seg_name == "bss" {
+                curr_seg = Some(super::document::SegmentKind::Bss);
+            }
+            continue;
+        }
+        if trimmed.starts_with('%') || curr_seg == Some(super::document::SegmentKind::Text) {
             continue;
         }
 
         let parts: Vec<&str> = trimmed.split_whitespace().collect();
-        if !parts.is_empty() && parts[0] == symbol {
+        if !parts.is_empty() && parts[0].eq_ignore_ascii_case(symbol) && !super::definition::is_reserved_keyword(parts[0]) {
+            let is_var_decl = match curr_seg {
+                Some(super::document::SegmentKind::Data) | Some(super::document::SegmentKind::Bss) => true,
+                _ => {
+                    if parts.len() >= 2 {
+                        let second = parts[1].to_lowercase();
+                        second == "byte"
+                            || second == "word"
+                            || second.starts_with('"')
+                            || second.starts_with('\'')
+                            || second.starts_with("%repeat")
+                            || second.starts_with("%len")
+                    } else {
+                        false
+                    }
+                }
+            };
+            if !is_var_decl {
+                continue;
+            }
             let doc_comment = collect_preceding_comments(lines, i);
             let decl_rest = trimmed[parts[0].len()..].trim();
 
             let mut out = if decl_rest.starts_with('"') || decl_rest.starts_with('\'') {
-                format!("```\n{} byte {}\n```", symbol, decl_rest)
+                format!("```\n{} byte {}\n```", parts[0], decl_rest)
             } else {
-                format!("```\n{} {}\n```", symbol, decl_rest)
+                format!("```\n{} {}\n```", parts[0], decl_rest)
             };
 
             if !doc_comment.is_empty() {
@@ -1500,83 +1530,17 @@ fn get_user_symbol_hover_in_single_doc(
 fn find_user_symbol_hover_in_included_files(
     doc: &Document,
     symbol: &str,
-    visited: &mut std::collections::HashSet<std::path::PathBuf>,
 ) -> Option<String> {
-    for line in doc.text.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("%include") {
-            let include_info = if let Some(start_angle) = line.find('<') {
-                if let Some(end_angle_offset) = line[start_angle + 1..].find('>') {
-                    let path = line[start_angle + 1..start_angle + 1 + end_angle_offset].trim();
-                    Some((path.to_string(), true))
-                } else {
-                    None
-                }
-            } else if let Some(q) = if line.contains('"') { Some('"') } else if line.contains('\'') { Some('\'') } else { None } {
-                if let Some(start_q) = line.find(q) {
-                    if let Some(end_q_offset) = line[start_q + 1..].find(q) {
-                        let path = &line[start_q + 1..start_q + 1 + end_q_offset];
-                        Some((path.to_string(), false))
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
+    let included_docs = super::document::collect_all_included_documents(doc);
+    for inc_doc in &included_docs {
+        let inc_lines: Vec<&str> = inc_doc.content.lines().collect();
+        if let Some(hover) = get_user_symbol_hover_in_single_doc(&inc_lines, symbol, None) {
+            let origin = if inc_doc.is_system {
+                format!("<{}>", inc_doc.spec)
             } else {
-                let after = trimmed.strip_prefix("%include").unwrap().trim();
-                if !after.is_empty() && !after.starts_with(';') {
-                    let raw = after.split_whitespace().next().unwrap_or("").split(';').next().unwrap_or("").trim();
-                    if !raw.is_empty() {
-                        Some((raw.to_string(), false))
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
+                format!("\"{}\"", inc_doc.spec)
             };
-
-            if let Some((rel_path, is_system)) = include_info {
-                if let Some(target_path) = super::document::resolve_include_target(&doc.uri, &rel_path, is_system) {
-                    if visited.insert(target_path.clone()) {
-                        let content_opt = std::fs::read_to_string(&target_path).ok().or_else(|| {
-                            if is_system {
-                                let mod_name = if rel_path.ends_with(".e8085") {
-                                    rel_path.clone()
-                                } else {
-                                    format!("{rel_path}.e8085")
-                                };
-                                crate::asm::include::EMBEDDED_STDLIB
-                                    .iter()
-                                    .find(|(p, _)| *p == mod_name || *p == rel_path)
-                                    .map(|(_, s)| s.to_string())
-                            } else {
-                                None
-                            }
-                        });
-
-                        if let Some(content) = content_opt {
-                            let inc_lines: Vec<&str> = content.lines().collect();
-                            if let Some(hover) = get_user_symbol_hover_in_single_doc(
-                                &inc_lines, symbol, None,
-                            ) {
-                                return Some(hover);
-                            }
-                            if let Ok(inc_uri) = Url::from_file_path(&target_path) {
-                                let inc_doc = Document::new(inc_uri, 1, content);
-                                if let Some(hover) =
-                                    find_user_symbol_hover_in_included_files(
-                                        &inc_doc, symbol, visited,
-                                    )
-                                {
-                                    return Some(hover);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            return Some(format!("{hover}\n\n*Imported from {origin}*"));
         }
     }
 
@@ -2488,6 +2452,39 @@ main:
             assert!(!m.value.contains("%end"));
         } else {
             panic!("expected markup");
+        }
+    }
+
+    #[test]
+    fn test_hover_imported_macro_and_origin() {
+        let uri = Url::parse("file:///workspace/canvas_app.e8085").unwrap();
+        let text = "%include <device/canvas>\nsegment .text\nmain:\n    InitCanvas 256, 256, 0\n    hlt\n".to_string();
+        let doc = Document::new(uri, 1, text);
+
+        // Hover over `InitCanvas` at line 3, character 6
+        let h_macro = get_hover(&doc, &Position { line: 3, character: 6 }).unwrap();
+        if let HoverContents::Markup(m) = h_macro.contents {
+            assert!(m.value.contains("%macro InitCanvas 3"));
+            assert!(m.value.contains("Initializes canvas window"));
+            assert!(m.value.contains("*Imported from <device/canvas>*"));
+        } else {
+            panic!("expected markup for imported macro");
+        }
+    }
+
+    #[test]
+    fn test_hover_case_insensitive_imported_symbol() {
+        let uri = Url::parse("file:///workspace/canvas_app.e8085").unwrap();
+        let text = "%include <device/canvas>\nsegment .text\nmain:\n    initcanvas 256, 256, 0\n    hlt\n".to_string();
+        let doc = Document::new(uri, 1, text);
+
+        // Hover over lowercase `initcanvas` at line 3, character 6
+        let h_macro = get_hover(&doc, &Position { line: 3, character: 6 }).unwrap();
+        if let HoverContents::Markup(m) = h_macro.contents {
+            assert!(m.value.contains("%macro InitCanvas 3"));
+            assert!(m.value.contains("*Imported from <device/canvas>*"));
+        } else {
+            panic!("expected markup for case-insensitive imported macro");
         }
     }
 }

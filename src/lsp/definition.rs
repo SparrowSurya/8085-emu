@@ -176,13 +176,32 @@ fn find_local_label_definition(
 }
 
 fn find_symbol_definition_in_doc(doc: &Document, symbol: &str) -> Option<Location> {
+    let sym_lower = symbol.to_lowercase();
+    let mut curr_seg: Option<super::document::SegmentKind> = None;
     for (i, line) in doc.text.lines().enumerate() {
         let trimmed = line.trim();
 
+        if trimmed.to_lowercase().starts_with("segment ") || trimmed.to_lowercase().starts_with("section ") {
+            let seg_name = trimmed[8..].trim().to_lowercase();
+            if seg_name == ".text" || seg_name == "text" {
+                curr_seg = Some(super::document::SegmentKind::Text);
+            } else if seg_name == ".data" || seg_name == "data" {
+                curr_seg = Some(super::document::SegmentKind::Data);
+            } else if seg_name == ".bss" || seg_name == "bss" {
+                curr_seg = Some(super::document::SegmentKind::Bss);
+            }
+            continue;
+        }
+
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+
         // 1. Check label definition (e.g. `main:`, `global print:`, `multiply:`)
         if let Some(label) = extract_label_name(trimmed) {
-            if label == symbol {
-                let char_offset = line.find(label).unwrap_or(0) as u32;
+            if label.eq_ignore_ascii_case(symbol) {
+                let char_offset = line
+                    .to_lowercase()
+                    .find(&sym_lower)
+                    .unwrap_or(0) as u32;
                 return Some(Location {
                     uri: doc.uri.clone(),
                     range: Range {
@@ -200,27 +219,52 @@ fn find_symbol_definition_in_doc(doc: &Document, symbol: &str) -> Option<Locatio
         }
 
         // 2. Check variable declaration (e.g. `prompt "Hello"`, `buffer BYTE 32`)
-        let parts: Vec<&str> = trimmed.split_whitespace().collect();
-        if !parts.is_empty() && parts[0] == symbol && !is_reserved_keyword(parts[0]) {
-            let char_offset = line.find(symbol).unwrap_or(0) as u32;
-            return Some(Location {
-                uri: doc.uri.clone(),
-                range: Range {
-                    start: Position {
-                        line: i as u32,
-                        character: char_offset,
-                    },
-                    end: Position {
-                        line: i as u32,
-                        character: char_offset + symbol.len() as u32,
-                    },
-                },
-            });
+        if curr_seg != Some(super::document::SegmentKind::Text) {
+            if !parts.is_empty() && parts[0].eq_ignore_ascii_case(symbol) && !is_reserved_keyword(parts[0]) {
+                let is_var_decl = match curr_seg {
+                    Some(super::document::SegmentKind::Data) | Some(super::document::SegmentKind::Bss) => true,
+                    _ => {
+                        if parts.len() >= 2 {
+                            let second = parts[1].to_lowercase();
+                            second == "byte"
+                                || second == "word"
+                                || second.starts_with('"')
+                                || second.starts_with('\'')
+                                || second.starts_with("%repeat")
+                                || second.starts_with("%len")
+                        } else {
+                            false
+                        }
+                    }
+                };
+                if is_var_decl {
+                    let char_offset = line
+                        .to_lowercase()
+                        .find(&sym_lower)
+                        .unwrap_or(0) as u32;
+                    return Some(Location {
+                        uri: doc.uri.clone(),
+                        range: Range {
+                            start: Position {
+                                line: i as u32,
+                                character: char_offset,
+                            },
+                            end: Position {
+                                line: i as u32,
+                                character: char_offset + symbol.len() as u32,
+                            },
+                        },
+                    });
+                }
+            }
         }
 
         // 3. Check %define macro
-        if trimmed.starts_with("%define") && parts.len() >= 2 && parts[1] == symbol {
-            let char_offset = line.find(symbol).unwrap_or(0) as u32;
+        if trimmed.starts_with("%define") && parts.len() >= 2 && parts[1].eq_ignore_ascii_case(symbol) {
+            let char_offset = line
+                .to_lowercase()
+                .find(&sym_lower)
+                .unwrap_or(0) as u32;
             return Some(Location {
                 uri: doc.uri.clone(),
                 range: Range {
@@ -237,8 +281,11 @@ fn find_symbol_definition_in_doc(doc: &Document, symbol: &str) -> Option<Locatio
         }
 
         // 4. Check %macro definition
-        if trimmed.starts_with("%macro") && parts.len() >= 2 && parts[1] == symbol {
-            let char_offset = line.find(symbol).unwrap_or(0) as u32;
+        if trimmed.starts_with("%macro") && parts.len() >= 2 && parts[1].eq_ignore_ascii_case(symbol) {
+            let char_offset = line
+                .to_lowercase()
+                .find(&sym_lower)
+                .unwrap_or(0) as u32;
             return Some(Location {
                 uri: doc.uri.clone(),
                 range: Range {
@@ -259,69 +306,11 @@ fn find_symbol_definition_in_doc(doc: &Document, symbol: &str) -> Option<Locatio
 }
 
 fn find_symbol_in_included_files(doc: &Document, symbol: &str) -> Option<Location> {
-    for line in doc.text.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("%include") {
-            let include_info = if let Some(start_angle) = line.find('<') {
-                if let Some(end_angle_offset) = line[start_angle + 1..].find('>') {
-                    let path = line[start_angle + 1..start_angle + 1 + end_angle_offset].trim();
-                    Some((path.to_string(), true))
-                } else {
-                    None
-                }
-            } else if let Some(q) = if line.contains('"') { Some('"') } else if line.contains('\'') { Some('\'') } else { None } {
-                if let Some(start_q) = line.find(q) {
-                    if let Some(end_q_offset) = line[start_q + 1..].find(q) {
-                        let path = &line[start_q + 1..start_q + 1 + end_q_offset];
-                        Some((path.to_string(), false))
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            } else {
-                let after = trimmed.strip_prefix("%include").unwrap().trim();
-                if !after.is_empty() && !after.starts_with(';') {
-                    let raw = after.split_whitespace().next().unwrap_or("").split(';').next().unwrap_or("").trim();
-                    if !raw.is_empty() {
-                        Some((raw.to_string(), false))
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            };
-
-            if let Some((rel_path, is_system)) = include_info {
-                if let Some(full_path) = super::document::resolve_include_target(&doc.uri, &rel_path, is_system) {
-                    let content_opt = std::fs::read_to_string(&full_path).ok().or_else(|| {
-                        if is_system {
-                            let mod_name = if rel_path.ends_with(".e8085") {
-                                rel_path.clone()
-                            } else {
-                                format!("{rel_path}.e8085")
-                            };
-                            crate::asm::include::EMBEDDED_STDLIB
-                                .iter()
-                                .find(|(p, _)| *p == mod_name || *p == rel_path)
-                                .map(|(_, s)| s.to_string())
-                        } else {
-                            None
-                        }
-                    });
-
-                    if let Some(content) = content_opt {
-                        if let Ok(inc_uri) = Url::from_file_path(&full_path) {
-                            let inc_doc = Document::new(inc_uri, 1, content);
-                            if let Some(loc) = find_symbol_definition_in_doc(&inc_doc, symbol) {
-                                return Some(loc);
-                            }
-                        }
-                    }
-                }
-            }
+    let included_docs = super::document::collect_all_included_documents(doc);
+    for inc_doc in &included_docs {
+        let inc_lsp_doc = Document::new(inc_doc.uri.clone(), 1, inc_doc.content.clone());
+        if let Some(loc) = find_symbol_definition_in_doc(&inc_lsp_doc, symbol) {
+            return Some(loc);
         }
     }
 
@@ -346,7 +335,7 @@ fn is_parent_label_def(trimmed_line: &str) -> bool {
     }
 }
 
-fn is_reserved_keyword(word: &str) -> bool {
+pub(crate) fn is_reserved_keyword(word: &str) -> bool {
     matches!(
         word.to_uppercase().as_str(),
         "MOV"
@@ -608,5 +597,37 @@ func_b:
         } else {
             panic!("expected Scalar location for divide");
         }
+    }
+
+    #[test]
+    fn test_goto_definition_transitive_and_case_insensitive() {
+        let temp_dir = std::env::temp_dir().join("emu8085_test_transitive_def");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        let _ = std::fs::create_dir_all(&temp_dir);
+
+        let sub2 = temp_dir.join("sub2.e8085");
+        let sub1 = temp_dir.join("sub1.e8085");
+        let main = temp_dir.join("main.e8085");
+
+        std::fs::write(&sub2, "%macro TargetMacro 1\n    nop\n%end\n").unwrap();
+        std::fs::write(&sub1, "%include \"sub2.e8085\"\n").unwrap();
+        std::fs::write(&main, "%include \"sub1.e8085\"\nsegment .text\nmain:\n    targetmacro 5\n    hlt\n").unwrap();
+
+        let doc = Document::new(
+            Url::from_file_path(&main).unwrap(),
+            1,
+            std::fs::read_to_string(&main).unwrap(),
+        );
+
+        // Jump from `targetmacro` (case-insensitive) at line 3
+        let def = get_definition(&doc, &Position { line: 3, character: 8 }).unwrap();
+        if let GotoDefinitionResponse::Scalar(loc) = def {
+            assert!(loc.uri.path().ends_with("sub2.e8085"));
+            assert_eq!(loc.range.start.line, 0);
+        } else {
+            panic!("expected scalar location for transitive macro definition");
+        }
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

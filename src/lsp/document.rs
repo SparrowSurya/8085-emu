@@ -262,6 +262,128 @@ pub fn resolve_include_target(doc_uri: &Url, raw_path: &str, is_system: bool) ->
     }
 }
 
+/// Extracts the path and whether it is a system `<...>` include from a line of code.
+pub fn extract_include_info(line: &str) -> Option<(String, bool)> {
+    let trimmed = line.trim();
+    if !trimmed.starts_with("%include") {
+        return None;
+    }
+    if let Some(start_angle) = line.find('<') {
+        if let Some(end_angle_offset) = line[start_angle + 1..].find('>') {
+            let path = &line[start_angle + 1..start_angle + 1 + end_angle_offset];
+            return Some((path.trim().to_string(), true));
+        }
+    }
+    for q in ['"', '\''] {
+        if let Some(start_q) = line.find(q) {
+            if let Some(end_q_offset) = line[start_q + 1..].find(q) {
+                let path = &line[start_q + 1..start_q + 1 + end_q_offset];
+                return Some((path.trim().to_string(), false));
+            }
+        }
+    }
+    // Check raw unquoted include
+    let rest = trimmed.strip_prefix("%include").unwrap().trim();
+    if !rest.is_empty() && !rest.starts_with(';') {
+        let raw = rest
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .trim();
+        if !raw.is_empty() {
+            return Some((raw.to_string(), false));
+        }
+    }
+    None
+}
+
+/// Segment kind in 8085 assembly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SegmentKind {
+    Text,
+    Data,
+    Bss,
+}
+
+/// Represents an included document resolved from an `%include` directive.
+#[derive(Debug, Clone)]
+pub struct IncludedDocument {
+    pub uri: Url,
+    pub path: std::path::PathBuf,
+    pub content: String,
+    pub is_system: bool,
+    pub spec: String,
+}
+
+/// Recursively traverses and collects all transitively included documents starting from `doc`.
+/// Employs a visited set to avoid infinite cycles.
+pub fn collect_all_included_documents(doc: &Document) -> Vec<IncludedDocument> {
+    let mut results = Vec::new();
+    let mut visited = std::collections::HashSet::new();
+    if let Ok(doc_path) = doc.uri.to_file_path() {
+        let key = doc_path.canonicalize().unwrap_or(doc_path);
+        visited.insert(key);
+    }
+    collect_from_doc(doc, &mut visited, &mut results);
+    results
+}
+
+fn collect_from_doc(
+    doc: &Document,
+    visited: &mut std::collections::HashSet<std::path::PathBuf>,
+    results: &mut Vec<IncludedDocument>,
+) {
+    for line in doc.text.lines() {
+        let code_line = line.split(';').next().unwrap_or("").trim();
+        if let Some((rel_path, is_system)) = extract_include_info(code_line) {
+            if let Some(target_path) = resolve_include_target(&doc.uri, &rel_path, is_system) {
+                let key = target_path.canonicalize().unwrap_or_else(|_| target_path.clone());
+                if visited.insert(key) {
+                    let content_opt = std::fs::read_to_string(&target_path).ok().or_else(|| {
+                        if is_system {
+                            let mod_name = if rel_path.ends_with(".e8085") {
+                                rel_path.clone()
+                            } else {
+                                format!("{rel_path}.e8085")
+                            };
+                            crate::asm::include::EMBEDDED_STDLIB
+                                .iter()
+                                .find(|(p, _)| *p == mod_name || *p == rel_path)
+                                .map(|(_, s)| s.to_string())
+                        } else {
+                            None
+                        }
+                    });
+
+                    if let Some(content) = content_opt {
+                        let abs_path = if target_path.is_absolute() {
+                            target_path.clone()
+                        } else {
+                            std::env::current_dir()
+                                .unwrap_or_default()
+                                .join(&target_path)
+                        };
+                        let inc_uri = Url::from_file_path(&abs_path)
+                            .unwrap_or_else(|_| doc.uri.clone());
+                        let inc_doc = Document::new(inc_uri.clone(), 1, content.clone());
+                        results.push(IncludedDocument {
+                            uri: inc_uri,
+                            path: target_path,
+                            content,
+                            is_system,
+                            spec: rel_path,
+                        });
+                        collect_from_doc(&inc_doc, visited, results);
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -333,5 +455,48 @@ mod tests {
 
         store.remove(&uri);
         assert!(store.get(&uri).is_none());
+    }
+
+    #[test]
+    fn test_extract_include_info_and_collect_all() {
+        assert_eq!(
+            extract_include_info("%include <device/canvas>"),
+            Some(("device/canvas".to_string(), true))
+        );
+        assert_eq!(
+            extract_include_info("%include \"lib/math.e8085\""),
+            Some(("lib/math.e8085".to_string(), false))
+        );
+        assert_eq!(
+            extract_include_info("%include 'lib/sys.e8085'"),
+            Some(("lib/sys.e8085".to_string(), false))
+        );
+        assert_eq!(
+            extract_include_info("%include stdlib/device/canvas.e8085"),
+            Some(("stdlib/device/canvas.e8085".to_string(), false))
+        );
+
+        let root_dir = std::env::temp_dir().join("emu8085_test_include_collect");
+        let _ = std::fs::remove_dir_all(&root_dir);
+        let _ = std::fs::create_dir_all(&root_dir);
+
+        let a_path = root_dir.join("a.e8085");
+        let b_path = root_dir.join("b.e8085");
+        let c_path = root_dir.join("c.e8085");
+
+        std::fs::write(&a_path, "%include \"b.e8085\"\nmain:\n    hlt\n").unwrap();
+        std::fs::write(&b_path, "%include \"c.e8085\"\nb_fn:\n    ret\n").unwrap();
+        // c.e8085 includes a.e8085 to test cyclic resolution
+        std::fs::write(&c_path, "%include \"a.e8085\"\n%define C_VAL 99\n").unwrap();
+
+        let a_uri = Url::from_file_path(&a_path).unwrap();
+        let a_doc = Document::new(a_uri, 1, std::fs::read_to_string(&a_path).unwrap());
+
+        let docs = collect_all_included_documents(&a_doc);
+        assert_eq!(docs.len(), 2, "Should collect b and c without infinite cycle");
+        assert!(docs.iter().any(|d| d.content.contains("b_fn:")));
+        assert!(docs.iter().any(|d| d.content.contains("%define C_VAL 99")));
+
+        let _ = std::fs::remove_dir_all(&root_dir);
     }
 }

@@ -5,6 +5,9 @@
   "patterns": [
     { "include": "#comments" },
     { "include": "#directives" },
+    { "include": "#text_segment" },
+    { "include": "#data_segment" },
+    { "include": "#bss_segment" },
     { "include": "#segments" },
     { "include": "#modular_keywords" },
     { "include": "#characters" },
@@ -14,8 +17,8 @@
     { "include": "#control_instructions" },
     { "include": "#memory_instructions" },
     { "include": "#mnemonics" },
-    { "include": "#var_declarations" },
     { "include": "#macro_calls" },
+    { "include": "#var_declarations" },
     { "include": "#registers" },
     { "include": "#constants" },
     { "include": "#numbers" },
@@ -104,6 +107,71 @@
         }
       ]
     },
+    "text_segment": {
+      "begin": "(?i)^\\s*(segment|section)\\s+(\\.(text)|text)\\b",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.segment.e8085" },
+        "2": { "name": "entity.name.section.segment.e8085 storage.type.section.e8085" }
+      },
+      "end": "(?=(?i)^\\s*(segment|section)\\s+(\\.(data|bss)|data|bss)\\b)",
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#directives" },
+        { "include": "#modular_keywords" },
+        { "include": "#characters" },
+        { "include": "#strings" },
+        { "include": "#types" },
+        { "include": "#labels" },
+        { "include": "#control_instructions" },
+        { "include": "#memory_instructions" },
+        { "include": "#mnemonics" },
+        { "include": "#macro_calls" },
+        { "include": "#registers" },
+        { "include": "#constants" },
+        { "include": "#numbers" },
+        { "include": "#local_variables" },
+        { "include": "#variables" },
+        { "include": "#punctuation" }
+      ]
+    },
+    "data_segment": {
+      "begin": "(?i)^\\s*(segment|section)\\s+(\\.(data)|data)\\b",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.segment.e8085" },
+        "2": { "name": "entity.name.section.segment.e8085 storage.type.section.e8085" }
+      },
+      "end": "(?=(?i)^\\s*(segment|section)\\s+(\\.(text|bss)|text|bss)\\b)",
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#directives" },
+        { "include": "#types" },
+        { "include": "#strings" },
+        { "include": "#characters" },
+        { "include": "#data_var_declarations" },
+        { "include": "#constants" },
+        { "include": "#numbers" },
+        { "include": "#variables" },
+        { "include": "#punctuation" }
+      ]
+    },
+    "bss_segment": {
+      "begin": "(?i)^\\s*(segment|section)\\s+(\\.(bss)|bss)\\b",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.segment.e8085" },
+        "2": { "name": "entity.name.section.segment.e8085 storage.type.section.e8085" }
+      },
+      "end": "(?=(?i)^\\s*(segment|section)\\s+(\\.(text|data)|text|data)\\b)",
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#directives" },
+        { "include": "#types" },
+        { "include": "#data_var_declarations" },
+        { "include": "#constants" },
+        { "include": "#numbers" },
+        { "include": "#variables" },
+        { "include": "#punctuation" }
+      ]
+    },
     "segments": {
       "patterns": [
         {
@@ -150,7 +218,7 @@
       "patterns": [
         {
           "name": "storage.type.e8085",
-          "match": "(?i)\\b(BYTE|WORD)\\b"
+          "match": "(?i)\\b(BYTE|WORD|DB|DW|DS)\\b"
         }
       ]
     },
@@ -175,14 +243,27 @@
     "var_declarations": {
       "patterns": [
         {
-          "match": "^\\s*(?!(?i:MOV|MVI|LXI|LDA|STA|LDAX|STAX|LHLD|SHLD|XCHG|XTHL|SPHL|PCHL|ADD|ADI|ADC|ACI|SUB|SUI|SBB|SBI|INR|DCR|INX|DCX|DAD|DAA|ANA|ANI|XRA|XRI|ORA|ORI|CMP|CPI|CMA|CMC|STC|RLC|RRC|RAL|RAR|PUSH|POP|IN|OUT|NOP|HLT|EI|DI|RIM|SIM|JMP|JZ|JNZ|JC|JNC|JP|JM|JPE|JPO|CALL|CZ|CNZ|CC|CNC|CP|CM|CPE|CPO|RET|RZ|RNZ|RC|RNC|RP|RM|RPE|RPO|RST|DB|DW|DS|GLOBAL|EXTERN)\\b)([a-zA-Z_][a-zA-Z0-9_]*)\\s+((?i:BYTE|WORD))\\b",
+          "match": "^\\s*(?!(?i:MOV|MVI|LXI|LDA|STA|LDAX|STAX|LHLD|SHLD|XCHG|XTHL|SPHL|PCHL|ADD|ADI|ADC|ACI|SUB|SUI|SBB|SBI|INR|DCR|INX|DCX|DAD|DAA|ANA|ANI|XRA|XRI|ORA|ORI|CMP|CPI|CMA|CMC|STC|RLC|RRC|RAL|RAR|PUSH|POP|IN|OUT|NOP|HLT|EI|DI|RIM|SIM|JMP|JZ|JNZ|JC|JNC|JP|JM|JPE|JPO|CALL|CZ|CNZ|CC|CNC|CP|CM|CPE|CPO|RET|RZ|RNZ|RC|RNC|RP|RM|RPE|RPO|RST|GLOBAL|EXTERN|SEGMENT|SECTION)\\b)([a-zA-Z_][a-zA-Z0-9_]*)\\s+((?i:BYTE|WORD|DB|DW|DS))\\b",
           "captures": {
             "1": { "name": "variable.other.declaration.e8085" },
             "2": { "name": "storage.type.e8085" }
           }
         },
         {
-          "match": "^\\s*(?!(?i:MOV|MVI|LXI|LDA|STA|LDAX|STAX|LHLD|SHLD|XCHG|XTHL|SPHL|PCHL|ADD|ADI|ADC|ACI|SUB|SUI|SBB|SBI|INR|DCR|INX|DCX|DAD|DAA|ANA|ANI|XRA|XRI|ORA|ORI|CMP|CPI|CMA|CMC|STC|RLC|RRC|RAL|RAR|PUSH|POP|IN|OUT|NOP|HLT|EI|DI|RIM|SIM|JMP|JZ|JNZ|JC|JNC|JP|JM|JPE|JPO|CALL|CZ|CNZ|CC|CNC|CP|CM|CPE|CPO|RET|RZ|RNZ|RC|RNC|RP|RM|RPE|RPO|RST|DB|DW|DS|GLOBAL|EXTERN)\\b)([a-zA-Z_][a-zA-Z0-9_]*)\\s+(?=\"[^\"]*\"|'[^']*'|0[xXbBoO]|%repeat|[0-9])",
+          "match": "^\\s*(?!(?i:MOV|MVI|LXI|LDA|STA|LDAX|STAX|LHLD|SHLD|XCHG|XTHL|SPHL|PCHL|ADD|ADI|ADC|ACI|SUB|SUI|SBB|SBI|INR|DCR|INX|DCX|DAD|DAA|ANA|ANI|XRA|XRI|ORA|ORI|CMP|CPI|CMA|CMC|STC|RLC|RRC|RAL|RAR|PUSH|POP|IN|OUT|NOP|HLT|EI|DI|RIM|SIM|JMP|JZ|JNZ|JC|JNC|JP|JM|JPE|JPO|CALL|CZ|CNZ|CC|CNC|CP|CM|CPE|CPO|RET|RZ|RNZ|RC|RNC|RP|RM|RPE|RPO|RST|DB|DW|DS|GLOBAL|EXTERN|SEGMENT|SECTION)\\b)([a-zA-Z_][a-zA-Z0-9_]*)\\s+(?=\"[^\"]*\"|'[^']*'|%repeat)",
+          "captures": {
+            "1": { "name": "variable.other.declaration.e8085" }
+          }
+        }
+      ]
+    },
+    "data_var_declarations": {
+      "patterns": [
+        {
+          "include": "#var_declarations"
+        },
+        {
+          "match": "^\\s*(?!(?i:MOV|MVI|LXI|LDA|STA|LDAX|STAX|LHLD|SHLD|XCHG|XTHL|SPHL|PCHL|ADD|ADI|ADC|ACI|SUB|SUI|SBB|SBI|INR|DCR|INX|DCX|DAD|DAA|ANA|ANI|XRA|XRI|ORA|ORI|CMP|CPI|CMA|CMC|STC|RLC|RRC|RAL|RAR|PUSH|POP|IN|OUT|NOP|HLT|EI|DI|RIM|SIM|JMP|JZ|JNZ|JC|JNC|JP|JM|JPE|JPO|CALL|CZ|CNZ|CC|CNC|CP|CM|CPE|CPO|RET|RZ|RNZ|RC|RNC|RP|RM|RPE|RPO|RST|DB|DW|DS|GLOBAL|EXTERN|SEGMENT|SECTION)\\b)([a-zA-Z_][a-zA-Z0-9_]*)\\s+(?=0[xXbBoO]|[0-9])",
           "captures": {
             "1": { "name": "variable.other.declaration.e8085" }
           }
@@ -253,15 +334,15 @@
     "macro_calls": {
       "patterns": [
         {
-          "match": "(?<=:)\\s*(?!(?i:MOV|MVI|LXI|LDA|STA|LDAX|STAX|LHLD|SHLD|XCHG|XTHL|SPHL|PCHL|ADD|ADI|ADC|ACI|SUB|SUI|SBB|SBI|INR|DCR|INX|DCX|DAD|DAA|ANA|ANI|XRA|XRI|ORA|ORI|CMP|CPI|CMA|CMC|STC|RLC|RRC|RAL|RAR|PUSH|POP|IN|OUT|NOP|HLT|EI|DI|RIM|SIM|JMP|JZ|JNZ|JC|JNC|JP|JM|JPE|JPO|CALL|CZ|CNZ|CC|CNC|CP|CM|CPE|CPO|RET|RZ|RNZ|RC|RNC|RP|RM|RPE|RPO|RST|DB|DW|DS|GLOBAL|EXTERN|SEGMENT|BYTE|WORD)\\b)([a-zA-Z_][a-zA-Z0-9_]*)\\b",
+          "match": "(?<=:)\\s*(?!(?i:MOV|MVI|LXI|LDA|STA|LDAX|STAX|LHLD|SHLD|XCHG|XTHL|SPHL|PCHL|ADD|ADI|ADC|ACI|SUB|SUI|SBB|SBI|INR|DCR|INX|DCX|DAD|DAA|ANA|ANI|XRA|XRI|ORA|ORI|CMP|CPI|CMA|CMC|STC|RLC|RRC|RAL|RAR|PUSH|POP|IN|OUT|NOP|HLT|EI|DI|RIM|SIM|JMP|JZ|JNZ|JC|JNC|JP|JM|JPE|JPO|CALL|CZ|CNZ|CC|CNC|CP|CM|CPE|CPO|RET|RZ|RNZ|RC|RNC|RP|RM|RPE|RPO|RST|DB|DW|DS|GLOBAL|EXTERN|SEGMENT|SECTION|BYTE|WORD)\\b)([a-zA-Z_][a-zA-Z0-9_]*)(?!\\s+((?i:BYTE|WORD|DB|DW|DS))\\b)\\b",
           "captures": {
-            "1": { "name": "keyword.control.directive.macro.call.e8085 keyword.control.directive.e8085" }
+            "1": { "name": "entity.name.function.macro.call.e8085 keyword.control.directive.macro.call.e8085 keyword.control.directive.e8085" }
           }
         },
         {
-          "match": "^\\s*(?!(?i:MOV|MVI|LXI|LDA|STA|LDAX|STAX|LHLD|SHLD|XCHG|XTHL|SPHL|PCHL|ADD|ADI|ADC|ACI|SUB|SUI|SBB|SBI|INR|DCR|INX|DCX|DAD|DAA|ANA|ANI|XRA|XRI|ORA|ORI|CMP|CPI|CMA|CMC|STC|RLC|RRC|RAL|RAR|PUSH|POP|IN|OUT|NOP|HLT|EI|DI|RIM|SIM|JMP|JZ|JNZ|JC|JNC|JP|JM|JPE|JPO|CALL|CZ|CNZ|CC|CNC|CP|CM|CPE|CPO|RET|RZ|RNZ|RC|RNC|RP|RM|RPE|RPO|RST|DB|DW|DS|GLOBAL|EXTERN|SEGMENT|BYTE|WORD)\\b)([a-zA-Z_][a-zA-Z0-9_]*)\\b",
+          "match": "^\\s*(?!(?i:MOV|MVI|LXI|LDA|STA|LDAX|STAX|LHLD|SHLD|XCHG|XTHL|SPHL|PCHL|ADD|ADI|ADC|ACI|SUB|SUI|SBB|SBI|INR|DCR|INX|DCX|DAD|DAA|ANA|ANI|XRA|XRI|ORA|ORI|CMP|CPI|CMA|CMC|STC|RLC|RRC|RAL|RAR|PUSH|POP|IN|OUT|NOP|HLT|EI|DI|RIM|SIM|JMP|JZ|JNZ|JC|JNC|JP|JM|JPE|JPO|CALL|CZ|CNZ|CC|CNC|CP|CM|CPE|CPO|RET|RZ|RNZ|RC|RNC|RP|RM|RPE|RPO|RST|DB|DW|DS|GLOBAL|EXTERN|SEGMENT|SECTION|BYTE|WORD)\\b)([a-zA-Z_][a-zA-Z0-9_]*)(?!\\s+((?i:BYTE|WORD|DB|DW|DS))\\b)\\b",
           "captures": {
-            "1": { "name": "keyword.control.directive.macro.call.e8085 keyword.control.directive.e8085" }
+            "1": { "name": "entity.name.function.macro.call.e8085 keyword.control.directive.macro.call.e8085 keyword.control.directive.e8085" }
           }
         }
       ]

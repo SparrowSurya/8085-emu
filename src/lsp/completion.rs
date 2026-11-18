@@ -4,14 +4,7 @@ use tower_lsp::lsp_types::{
     InsertTextFormat, Position, Range, TextEdit,
 };
 
-use super::document::{Document, resolve_relative_path};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum SegmentKind {
-    Text,
-    Data,
-    Bss,
-}
+use super::document::{Document, SegmentKind};
 
 /// Detects all segment kinds declared in the current document.
 fn get_present_segments(doc: &Document) -> HashSet<SegmentKind> {
@@ -315,36 +308,6 @@ pub fn get_completions(doc: &Document, position: &Position) -> Option<Completion
         is_incomplete: false,
         items,
     }))
-}
-
-fn extract_include_info(line: &str) -> Option<(String, bool)> {
-    let trimmed = line.trim();
-    if !trimmed.starts_with("%include") {
-        return None;
-    }
-    if let Some(start_angle) = line.find('<') {
-        if let Some(end_angle_offset) = line[start_angle + 1..].find('>') {
-            let path = &line[start_angle + 1..start_angle + 1 + end_angle_offset];
-            return Some((path.trim().to_string(), true));
-        }
-    }
-    for q in ['"', '\''] {
-        if let Some(start_q) = line.find(q) {
-            if let Some(end_q_offset) = line[start_q + 1..].find(q) {
-                let path = &line[start_q + 1..start_q + 1 + end_q_offset];
-                return Some((path.trim().to_string(), false));
-            }
-        }
-    }
-    // Check raw unquoted include
-    let rest = trimmed.strip_prefix("%include").unwrap().trim();
-    if !rest.is_empty() && !rest.starts_with(';') {
-        let raw = rest.split_whitespace().next().unwrap_or("").split(';').next().unwrap_or("").trim();
-        if !raw.is_empty() {
-            return Some((raw.to_string(), false));
-        }
-    }
-    None
 }
 
 fn get_include_path_completions(
@@ -991,48 +954,25 @@ fn get_label_completions(doc: &Document, position: &Position) -> Vec<CompletionI
         }
     }
 
-    // 4. Labels from %include imported files
-    for line in &raw_lines {
-        let code_line = line.split(';').next().unwrap_or("").trim();
-        if let Some((rel_path, is_system)) = extract_include_info(code_line) {
-            if let Some(target_path) = super::document::resolve_include_target(&doc.uri, &rel_path, is_system) {
-                let content_opt = std::fs::read_to_string(&target_path).ok().or_else(|| {
-                    if is_system {
-                        let mod_name = if rel_path.ends_with(".e8085") {
-                            rel_path.clone()
-                        } else {
-                            format!("{rel_path}.e8085")
-                        };
-                        crate::asm::include::EMBEDDED_STDLIB
-                            .iter()
-                            .find(|(p, _)| *p == mod_name || *p == rel_path)
-                            .map(|(_, s)| s.to_string())
-                    } else {
-                        None
-                    }
-                });
-
-                if let Some(content) = content_opt {
-                    for inc_line in content.lines() {
-                        let inc_code = inc_line.split(';').next().unwrap_or("").trim();
-                        if let Some(rest) = inc_code.strip_suffix(':') {
-                            let clean =
-                                rest.strip_prefix("global ").unwrap_or(rest).trim();
-                            if !clean.starts_with('.') && !clean.is_empty() {
-                                let origin = if is_system {
-                                    format!("<{rel_path}>")
-                                } else {
-                                    format!("\"{rel_path}\"")
-                                };
-                                items.push(CompletionItem {
-                                    label: clean.to_string(),
-                                    kind: Some(CompletionItemKind::FUNCTION),
-                                    detail: Some(format!("Imported from {origin}")),
-                                    ..Default::default()
-                                });
-                            }
-                        }
-                    }
+    // 4. Labels from %include imported files (transitive)
+    let included_docs = super::document::collect_all_included_documents(doc);
+    for inc_doc in &included_docs {
+        let origin = if inc_doc.is_system {
+            format!("<{}>", inc_doc.spec)
+        } else {
+            format!("\"{}\"", inc_doc.spec)
+        };
+        for inc_line in inc_doc.content.lines() {
+            let inc_code = inc_line.split(';').next().unwrap_or("").trim();
+            if let Some(rest) = inc_code.strip_suffix(':') {
+                let clean = rest.strip_prefix("global ").unwrap_or(rest).trim();
+                if !clean.starts_with('.') && !clean.is_empty() {
+                    items.push(CompletionItem {
+                        label: clean.to_string(),
+                        kind: Some(CompletionItemKind::FUNCTION),
+                        detail: Some(format!("Imported from {origin}")),
+                        ..Default::default()
+                    });
                 }
             }
         }
@@ -1118,97 +1058,71 @@ fn extract_variables_and_constants(doc: &Document) -> (Vec<VariableInfo>, Vec<St
         }
     }
 
-    // 2. Scan %include files
-    for line in doc.text.lines() {
-        let code_line = line.split(';').next().unwrap_or("").trim();
-        if let Some((rel_path, is_system)) = extract_include_info(code_line) {
-            if let Some(target_path) = super::document::resolve_include_target(&doc.uri, &rel_path, is_system) {
-                let content_opt = std::fs::read_to_string(&target_path).ok().or_else(|| {
-                    if is_system {
-                        let mod_name = if rel_path.ends_with(".e8085") {
-                            rel_path.clone()
-                        } else {
-                            format!("{rel_path}.e8085")
-                        };
-                        crate::asm::include::EMBEDDED_STDLIB
-                            .iter()
-                            .find(|(p, _)| *p == mod_name || *p == rel_path)
-                            .map(|(_, s)| s.to_string())
-                    } else {
-                        None
-                    }
-                });
-
-                if let Some(content) = content_opt {
-                    let mut inc_seg: Option<SegmentKind> = None;
-                                for inc_line in content.lines() {
-                                    let inc_code = inc_line.split(';').next().unwrap_or("").trim();
-                                    if inc_code.is_empty() {
-                                        continue;
-                                    }
-                                    if inc_code.to_lowercase().starts_with("segment ")
-                                        || inc_code.to_lowercase().starts_with("section ")
-                                    {
-                                        let seg_name = inc_code[8..].trim().to_lowercase();
-                                        if seg_name == ".text" || seg_name == "text" {
-                                            inc_seg = Some(SegmentKind::Text);
-                                        } else if seg_name == ".data" || seg_name == "data" {
-                                            inc_seg = Some(SegmentKind::Data);
-                                        } else if seg_name == ".bss" || seg_name == "bss" {
-                                            inc_seg = Some(SegmentKind::Bss);
-                                        }
-                                        continue;
-                                    }
-                                    if inc_code.to_lowercase().starts_with("%define") {
-                                        let parts: Vec<&str> =
-                                            inc_code.split_whitespace().collect();
-                                        if parts.len() >= 2 {
-                                            constants.push(parts[1].to_string());
-                                        }
-                                        continue;
-                                    }
-                                    let parts: Vec<&str> = inc_code.split_whitespace().collect();
-                                    if parts.is_empty() {
-                                        continue;
-                                    }
-                                    let first = parts[0].trim_end_matches(':');
-                                    if is_reserved_keyword(first)
-                                        || first.starts_with('%')
-                                        || first.is_empty()
-                                    {
-                                        continue;
-                                    }
-                                    let lower_inc = inc_code.to_lowercase();
-                                    match inc_seg {
-                                        Some(SegmentKind::Data) => {
-                                            vars.push(VariableInfo {
-                                                name: first.to_string(),
-                                                detail: format!("Data Variable from {}", rel_path),
-                                            });
-                                        }
-                                        Some(SegmentKind::Bss) => {
-                                            vars.push(VariableInfo {
-                                                name: first.to_string(),
-                                                detail: format!("BSS Buffer from {}", rel_path),
-                                            });
-                                        }
-                                        _ => {
-                                            if lower_inc.contains("byte")
-                                                || lower_inc.contains("word")
-                                                || lower_inc.contains('"')
-                                            {
-                                                vars.push(VariableInfo {
-                                                    name: first.to_string(),
-                                                    detail: format!("Variable from {}", rel_path),
-                                                });
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+    // 2. Scan %include files (transitive)
+    let included_docs = super::document::collect_all_included_documents(doc);
+    for inc_doc in &included_docs {
+        let mut inc_seg: Option<SegmentKind> = None;
+        for inc_line in inc_doc.content.lines() {
+            let inc_code = inc_line.split(';').next().unwrap_or("").trim();
+            if inc_code.is_empty() {
+                continue;
+            }
+            if inc_code.to_lowercase().starts_with("segment ")
+                || inc_code.to_lowercase().starts_with("section ")
+            {
+                let seg_name = inc_code[8..].trim().to_lowercase();
+                if seg_name == ".text" || seg_name == "text" {
+                    inc_seg = Some(SegmentKind::Text);
+                } else if seg_name == ".data" || seg_name == "data" {
+                    inc_seg = Some(SegmentKind::Data);
+                } else if seg_name == ".bss" || seg_name == "bss" {
+                    inc_seg = Some(SegmentKind::Bss);
+                }
+                continue;
+            }
+            if inc_code.to_lowercase().starts_with("%define") {
+                let parts: Vec<&str> = inc_code.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    constants.push(parts[1].to_string());
+                }
+                continue;
+            }
+            let parts: Vec<&str> = inc_code.split_whitespace().collect();
+            if parts.is_empty() {
+                continue;
+            }
+            let first = parts[0].trim_end_matches(':');
+            if is_reserved_keyword(first) || first.starts_with('%') || first.is_empty() {
+                continue;
+            }
+            let lower_inc = inc_code.to_lowercase();
+            match inc_seg {
+                Some(SegmentKind::Data) => {
+                    vars.push(VariableInfo {
+                        name: first.to_string(),
+                        detail: format!("Data Variable from {}", inc_doc.spec),
+                    });
+                }
+                Some(SegmentKind::Bss) => {
+                    vars.push(VariableInfo {
+                        name: first.to_string(),
+                        detail: format!("BSS Buffer from {}", inc_doc.spec),
+                    });
+                }
+                _ => {
+                    if lower_inc.contains("byte")
+                        || lower_inc.contains("word")
+                        || lower_inc.contains('"')
+                    {
+                        vars.push(VariableInfo {
+                            name: first.to_string(),
+                            detail: format!("Variable from {}", inc_doc.spec),
+                        });
                     }
                 }
+            }
+        }
+    }
 
     (vars, constants)
 }
@@ -1304,25 +1218,14 @@ fn get_macro_arg_count(doc: &Document, macro_name: &str) -> Option<usize> {
             }
         }
     }
-    for line in doc.text.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("%include") {
-            if let Some(start_quote) = line.find('"') {
-                if let Some(end_quote) = line[start_quote + 1..].find('"') {
-                    let rel_path = &line[start_quote + 1..start_quote + 1 + end_quote];
-                    if let Some(target_path) = resolve_relative_path(&doc.uri, rel_path) {
-                        if let Ok(content) = std::fs::read_to_string(&target_path) {
-                            for inc_line in content.lines() {
-                                let inc_trimmed = inc_line.trim();
-                                if inc_trimmed.starts_with("%macro") {
-                                    let parts: Vec<&str> = inc_trimmed.split_whitespace().collect();
-                                    if parts.len() >= 2 && parts[1].eq_ignore_ascii_case(macro_name) {
-                                        return Some(parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0));
-                                    }
-                                }
-                            }
-                        }
-                    }
+    let included_docs = super::document::collect_all_included_documents(doc);
+    for inc_doc in &included_docs {
+        for inc_line in inc_doc.content.lines() {
+            let inc_trimmed = inc_line.trim();
+            if inc_trimmed.starts_with("%macro") {
+                let parts: Vec<&str> = inc_trimmed.split_whitespace().collect();
+                if parts.len() >= 2 && parts[1].eq_ignore_ascii_case(macro_name) {
+                    return Some(parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0));
                 }
             }
         }
@@ -1364,53 +1267,43 @@ fn get_macro_completions(doc: &Document) -> Vec<CompletionItem> {
         }
     }
 
-    // Included files
-    for line in doc.text.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("%include") {
-            let quote_char = if line.contains('"') {
-                Some('"')
-            } else if line.contains('\'') {
-                Some('\'')
-            } else {
-                None
-            };
-            if let Some(q) = quote_char {
-                if let Some(start_quote) = line.find(q) {
-                    if let Some(end_quote_offset) = line[start_quote + 1..].find(q) {
-                        let rel_path = &line[start_quote + 1..start_quote + 1 + end_quote_offset];
-                        if let Some(target_path) = resolve_relative_path(&doc.uri, rel_path) {
-                            if let Ok(content) = std::fs::read_to_string(&target_path) {
-                                for inc_line in content.lines() {
-                                    let inc_trimmed = inc_line.trim();
-                                    if inc_trimmed.starts_with("%macro") {
-                                        let parts: Vec<&str> = inc_trimmed.split_whitespace().collect();
-                                        if parts.len() >= 2 {
-                                            let name = parts[1];
-                                            let count: usize = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
-                                            if seen.insert(name.to_lowercase()) {
-                                                let insert_text = if count == 0 {
-                                                    name.to_string()
-                                                } else {
-                                                    let placeholders: Vec<String> = (1..=count)
-                                                        .map(|i| format!("${{{}:arg{}}}", i, i))
-                                                        .collect();
-                                                    format!("{} {}", name, placeholders.join(", "))
-                                                };
-                                                items.push(CompletionItem {
-                                                    label: name.to_string(),
-                                                    kind: Some(CompletionItemKind::FUNCTION),
-                                                    detail: Some(format!("Macro ({} arg{})", count, if count == 1 { "" } else { "s" })),
-                                                    insert_text: Some(insert_text),
-                                                    insert_text_format: Some(InsertTextFormat::SNIPPET),
-                                                    ..Default::default()
-                                                });
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+    // Included files (transitive)
+    let included_docs = super::document::collect_all_included_documents(doc);
+    for inc_doc in &included_docs {
+        let origin = if inc_doc.is_system {
+            format!("<{}>", inc_doc.spec)
+        } else {
+            format!("\"{}\"", inc_doc.spec)
+        };
+        for inc_line in inc_doc.content.lines() {
+            let inc_trimmed = inc_line.trim();
+            if inc_trimmed.starts_with("%macro") {
+                let parts: Vec<&str> = inc_trimmed.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    let name = parts[1];
+                    let count: usize = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+                    if seen.insert(name.to_lowercase()) {
+                        let insert_text = if count == 0 {
+                            name.to_string()
+                        } else {
+                            let placeholders: Vec<String> = (1..=count)
+                                .map(|i| format!("${{{}:arg{}}}", i, i))
+                                .collect();
+                            format!("{} {}", name, placeholders.join(", "))
+                        };
+                        items.push(CompletionItem {
+                            label: name.to_string(),
+                            kind: Some(CompletionItemKind::FUNCTION),
+                            detail: Some(format!(
+                                "Macro ({} arg{}) from {}",
+                                count,
+                                if count == 1 { "" } else { "s" },
+                                origin
+                            )),
+                            insert_text: Some(insert_text),
+                            insert_text_format: Some(InsertTextFormat::SNIPPET),
+                            ..Default::default()
+                        });
                     }
                 }
             }
@@ -1727,43 +1620,21 @@ fn get_extern_symbol_completions(doc: &Document) -> Vec<CompletionItem> {
         }
     }
 
-    // 2. Check %include files for global exports
-    for line in doc.text.lines() {
-        let code_line = line.split(';').next().unwrap_or("").trim();
-        if let Some((rel_path, is_system)) = extract_include_info(code_line) {
-            if let Some(target_path) = super::document::resolve_include_target(&doc.uri, &rel_path, is_system) {
-                let content_opt = std::fs::read_to_string(&target_path).ok().or_else(|| {
-                    if is_system {
-                        let mod_name = if rel_path.ends_with(".e8085") {
-                            rel_path.clone()
-                        } else {
-                            format!("{rel_path}.e8085")
-                        };
-                        crate::asm::include::EMBEDDED_STDLIB
-                            .iter()
-                            .find(|(p, _)| *p == mod_name || *p == rel_path)
-                            .map(|(_, s)| s.to_string())
-                    } else {
-                        None
-                    }
-                });
-
-                if let Some(content) = content_opt {
-                    let origin = if is_system {
-                        format!("<{rel_path}>")
-                    } else {
-                        format!("\"{rel_path}\"")
-                    };
-                    extract_exported_globals_from_str(
-                        &content,
-                        &format!("Imported from {origin}"),
-                        &local_symbols,
-                        &mut seen,
-                        &mut items,
-                    );
-                }
-            }
-        }
+    // 2. Check %include files for global exports (transitive)
+    let included_docs = super::document::collect_all_included_documents(doc);
+    for inc_doc in &included_docs {
+        let origin = if inc_doc.is_system {
+            format!("<{}>", inc_doc.spec)
+        } else {
+            format!("\"{}\"", inc_doc.spec)
+        };
+        extract_exported_globals_from_str(
+            &inc_doc.content,
+            &format!("Imported from {origin}"),
+            &local_symbols,
+            &mut seen,
+            &mut items,
+        );
     }
 
     // 3. Scan workspace / library directories (stdlib, stdlib/device)
@@ -2833,5 +2704,103 @@ main:
         } else {
             panic!("expected list for raw include path");
         }
+    }
+
+    #[test]
+    fn test_system_include_macro_and_operand_completions() {
+        let uri = Url::parse("file:///workspace/game.e8085").unwrap();
+        let text = "%include <device/canvas>\nsegment .text\nmain:\n    \n".to_string();
+        let doc = Document::new(uri.clone(), 1, text);
+
+        // 1. In text segment at indentation, macros from <device/canvas> must be suggested
+        let res = get_completions(
+            &doc,
+            &Position {
+                line: 3,
+                character: 4,
+            },
+        )
+        .unwrap();
+        let items = match res {
+            CompletionResponse::List(l) => l.items,
+            CompletionResponse::Array(a) => a,
+        };
+        assert!(
+            items.iter().any(|i| i.label == "InitCanvas"),
+            "InitCanvas macro from <device/canvas> should be suggested in completions"
+        );
+        assert!(
+            items.iter().any(|i| i.label == "FillRectangle"),
+            "FillRectangle macro from <device/canvas> should be suggested in completions"
+        );
+
+        // 2. Typing macro operands: InitCanvas <cursor> should suggest canvas constants
+        let text_op = "%include <device/canvas>\nsegment .text\nmain:\n    InitCanvas \n".to_string();
+        let doc_op = Document::new(uri, 2, text_op);
+        let res_op = get_completions(
+            &doc_op,
+            &Position {
+                line: 3,
+                character: 15,
+            },
+        )
+        .unwrap();
+        let items_op = match res_op {
+            CompletionResponse::List(l) => l.items,
+            CompletionResponse::Array(a) => a,
+        };
+        assert!(
+            items_op.iter().any(|i| i.label == "CANVAS_CMD_PORT"),
+            "CANVAS_CMD_PORT constant should be suggested as InitCanvas operand"
+        );
+        assert!(
+            items_op.iter().any(|i| i.label == "CMD_INIT_CANVAS"),
+            "CMD_INIT_CANVAS constant should be suggested as InitCanvas operand"
+        );
+    }
+
+    #[test]
+    fn test_transitive_include_constants_and_variables() {
+        let temp_dir = std::env::temp_dir().join("emu8085_test_transitive_comp");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        let _ = std::fs::create_dir_all(&temp_dir);
+
+        let sub2 = temp_dir.join("sub2.e8085");
+        let sub1 = temp_dir.join("sub1.e8085");
+        let main = temp_dir.join("main.e8085");
+
+        std::fs::write(&sub2, "%define SUB2_VAL 0x77\nsegment .data\nsub2_var BYTE 1\n").unwrap();
+        std::fs::write(&sub1, "%include \"sub2.e8085\"\n%define SUB1_VAL 0x88\n").unwrap();
+        std::fs::write(&main, "%include \"sub1.e8085\"\nsegment .text\nmain:\n    mvi A, \n").unwrap();
+
+        let doc = Document::new(
+            Url::from_file_path(&main).unwrap(),
+            1,
+            std::fs::read_to_string(&main).unwrap(),
+        );
+
+        let res = get_completions(
+            &doc,
+            &Position {
+                line: 3,
+                character: 11,
+            },
+        )
+        .unwrap();
+        let items = match res {
+            CompletionResponse::List(l) => l.items,
+            CompletionResponse::Array(a) => a,
+        };
+
+        assert!(
+            items.iter().any(|i| i.label == "SUB1_VAL"),
+            "Immediate constant SUB1_VAL should be suggested"
+        );
+        assert!(
+            items.iter().any(|i| i.label == "SUB2_VAL"),
+            "Transitive constant SUB2_VAL should be suggested"
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
