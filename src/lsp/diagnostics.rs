@@ -80,40 +80,118 @@ pub fn compute_diagnostics_with_externs(
         Some(&project_root),
         &extern_symbols,
     ) {
-        let line = err.span.line.saturating_sub(1);
-        let col = err.span.col.saturating_sub(1);
+        let (primary_span, related_information) = if !err.traceback.is_empty() {
+            let primary = err.primary_span();
+            let mut related = Vec::new();
+            for frame in &err.traceback {
+                let def_uri = frame
+                    .def_file
+                    .as_ref()
+                    .and_then(|p| tower_lsp::lsp_types::Url::from_file_path(p).ok())
+                    .unwrap_or_else(|| doc.uri.clone());
+                let def_site = frame.def_site.unwrap_or(err.span);
+                let def_line = def_site.line.saturating_sub(1);
+                let def_col = def_site.col.saturating_sub(1);
+                let def_src = frame
+                    .def_source
+                    .as_deref()
+                    .map(|s| format!(" (`{s}`) "))
+                    .unwrap_or_else(|| " ".to_string());
+                related.push(tower_lsp::lsp_types::DiagnosticRelatedInformation {
+                    location: tower_lsp::lsp_types::Location {
+                        uri: def_uri,
+                        range: Range {
+                            start: Position {
+                                line: def_line,
+                                character: def_col,
+                            },
+                            end: Position {
+                                line: def_line,
+                                character: def_col + 1,
+                            },
+                        },
+                    },
+                    message: format!(
+                        "in expansion of macro '{}'{def_src}defined here",
+                        frame.macro_name
+                    ),
+                });
+            }
+            (primary, Some(related))
+        } else if err.span.file_id != 0 {
+            let inc_line = doc
+                .text
+                .lines()
+                .enumerate()
+                .find(|(_, l)| {
+                    let trimmed = l.trim();
+                    trimmed.starts_with("%include")
+                })
+                .map(|(idx, _)| idx as u32)
+                .unwrap_or(0);
+
+            let def_uri = err
+                .file_path
+                .as_ref()
+                .and_then(|p| tower_lsp::lsp_types::Url::from_file_path(p).ok())
+                .unwrap_or_else(|| doc.uri.clone());
+            let def_line = err.span.line.saturating_sub(1);
+            let def_col = err.span.col.saturating_sub(1);
+
+            let related = vec![tower_lsp::lsp_types::DiagnosticRelatedInformation {
+                location: tower_lsp::lsp_types::Location {
+                    uri: def_uri,
+                    range: Range {
+                        start: Position {
+                            line: def_line,
+                            character: def_col,
+                        },
+                        end: Position {
+                            line: def_line,
+                            character: def_col + 1,
+                        },
+                    },
+                },
+                message: format!("error originates in included file at line {}", err.span.line),
+            }];
+            (crate::asm::error::Span::new(inc_line + 1, 1), Some(related))
+        } else {
+            let related = if let crate::asm::AsmErrorKind::DuplicateDefinition {
+                ref name,
+                first_defined,
+            } = err.kind
+            {
+                let f_line = first_defined.line.saturating_sub(1);
+                let f_col = first_defined.col.saturating_sub(1);
+                Some(vec![tower_lsp::lsp_types::DiagnosticRelatedInformation {
+                    location: tower_lsp::lsp_types::Location {
+                        uri: doc.uri.clone(),
+                        range: Range {
+                            start: Position {
+                                line: f_line,
+                                character: f_col,
+                            },
+                            end: Position {
+                                line: f_line,
+                                character: f_col + name.len() as u32,
+                            },
+                        },
+                    },
+                    message: format!("symbol '{name}' was first defined here"),
+                }])
+            } else {
+                None
+            };
+            (err.span, related)
+        };
+
+        let line = primary_span.line.saturating_sub(1);
+        let col = primary_span.col.saturating_sub(1);
 
         let end_col = if let Some(doc_line) = doc.text.lines().nth(line as usize) {
             (col + 1).max(doc_line.len() as u32)
         } else {
             col + 1
-        };
-
-        let related_information = if let crate::asm::AsmErrorKind::DuplicateDefinition {
-            ref name,
-            first_defined,
-        } = err.kind
-        {
-            let f_line = first_defined.line.saturating_sub(1);
-            let f_col = first_defined.col.saturating_sub(1);
-            Some(vec![tower_lsp::lsp_types::DiagnosticRelatedInformation {
-                location: tower_lsp::lsp_types::Location {
-                    uri: doc.uri.clone(),
-                    range: Range {
-                        start: Position {
-                            line: f_line,
-                            character: f_col,
-                        },
-                        end: Position {
-                            line: f_line,
-                            character: f_col + name.len() as u32,
-                        },
-                    },
-                },
-                message: format!("symbol '{name}' was first defined here"),
-            }])
-        } else {
-            None
         };
 
         diagnostics.push(Diagnostic {

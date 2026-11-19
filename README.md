@@ -275,7 +275,9 @@ emu8085/
 ## Detailed Documentation
 
 For comprehensive technical documentation, refer to:
+- [**doc/LANGUAGE.md**](doc/LANGUAGE.md) — Complete language manual: syntax, 4 number bases, segment structure rules, preprocessor expressions, macros, instruction catalog, and agent checklist.
+- [**doc/device/CANVAS.md**](doc/device/CANVAS.md) — 2D graphics, text rendering, keyboard & mouse input, and subroutine-backed macro API.
 - [**doc/DEBUGGER.md**](doc/DEBUGGER.md) — Complete guide to the Debug Adapter Protocol (`e8085-dap`), VS Code debugger setup, interactive terminal bridge, memory/register inspection, and walkthrough.
 - [**doc/LSP.md**](doc/LSP.md) — Comprehensive guide to the Language Server Protocol (`e8085-lsp`), feature capabilities, and editor integrations (VS Code, Neovim, Helix).
 - [**doc/ASSEMBLER.md**](doc/ASSEMBLER.md) — Detailed guide to the assembler pipeline, container layout, static linking, and symbol resolution.
-- [**doc/GRAMMAR.md**](doc/GRAMMAR.md) — Full language reference for `.e8085` assembly programs, syntax rules, directives, registers, and instructions.
+- [**doc/GRAMMAR.md**](doc/GRAMMAR.md) — Formal grammar specification for `.e8085` assembly programs.

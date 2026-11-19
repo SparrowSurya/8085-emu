@@ -1,6 +1,7 @@
 //! Errors and source positions produced by the assembler pipeline.
 
 use std::fmt;
+use std::path::{Path, PathBuf};
 
 /// A 1-based position in the source text, used to point at the offending token.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -31,6 +32,27 @@ impl fmt::Display for Span {
     }
 }
 
+/// A single frame in a macro expansion traceback.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MacroTraceFrame {
+    /// Name of the macro being expanded.
+    pub macro_name: String,
+    /// Arguments passed to the macro at the call site.
+    pub args: Vec<String>,
+    /// Span of the macro invocation / call site.
+    pub call_site: Span,
+    /// Path of the file where the macro was called.
+    pub call_file: Option<PathBuf>,
+    /// Source text of the call site line.
+    pub call_source: Option<String>,
+    /// Span of the definition / instruction inside the macro body.
+    pub def_site: Option<Span>,
+    /// Path of the file where the macro is defined.
+    pub def_file: Option<PathBuf>,
+    /// Source text of the definition line.
+    pub def_source: Option<String>,
+}
+
 /// Everything that can go wrong while lexing or encoding, tagged with a source position.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AsmError {
@@ -38,12 +60,52 @@ pub struct AsmError {
     pub span: Span,
     /// The category of error.
     pub kind: AsmErrorKind,
+    /// Source file path where `span` is located.
+    pub file_path: Option<PathBuf>,
+    /// Macro expansion traceback stack, from outermost caller to innermost macro.
+    pub traceback: Vec<MacroTraceFrame>,
 }
 
 impl AsmError {
     /// Build an error at `span`.
     pub fn new(span: Span, kind: AsmErrorKind) -> Self {
-        AsmError { span, kind }
+        AsmError {
+            span,
+            kind,
+            file_path: None,
+            traceback: Vec::new(),
+        }
+    }
+
+    /// Attach a source file path to the error.
+    pub fn with_file_path(mut self, path: PathBuf) -> Self {
+        self.file_path = Some(path);
+        self
+    }
+
+    /// Attach a macro expansion traceback.
+    pub fn with_traceback(mut self, traceback: Vec<MacroTraceFrame>) -> Self {
+        self.traceback = traceback;
+        self
+    }
+
+    /// Primary span to report to the user: outermost call site if in a traceback, else `self.span`.
+    pub fn primary_span(&self) -> Span {
+        if let Some(first) = self.traceback.first() {
+            first.call_site
+        } else {
+            self.span
+        }
+    }
+
+    /// Primary file path to report to the user: outermost call file if in a traceback, else `self.file_path`.
+    pub fn primary_file(&self) -> Option<&Path> {
+        if let Some(first) = self.traceback.first() {
+            if let Some(ref cf) = first.call_file {
+                return Some(cf.as_path());
+            }
+        }
+        self.file_path.as_deref()
     }
 }
 

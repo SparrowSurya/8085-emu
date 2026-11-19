@@ -943,3 +943,111 @@ main:
     let _ = fs::remove_dir_all(&tmp_dir);
 }
 
+#[test]
+fn test_macro_error_traceback_and_call_site_attribution() {
+    let temp_dir = std::env::temp_dir().join("emu8085_test_macro_tb");
+    let _ = std::fs::create_dir_all(&temp_dir);
+
+    let lib_path = temp_dir.join("lib.e8085");
+    std::fs::write(
+        &lib_path,
+        r#"%macro mAssignByte 1
+    mvi B, %1
+%end
+"#,
+    )
+    .unwrap();
+
+    let main_path = temp_dir.join("main.e8085");
+    let main_src = r#"%include "lib.e8085"
+segment .data
+    my_var byte 42
+
+segment .text
+main:
+    mAssignByte my_var
+    hlt
+"#;
+    std::fs::write(&main_path, main_src).unwrap();
+
+    let err = emu8085::asm::assemble_with_full_context(
+        main_src,
+        Some(&main_path),
+        Some(&temp_dir),
+        Some(&temp_dir),
+        &std::collections::HashMap::new(),
+    )
+    .unwrap_err();
+
+    // Call site is at Line 7: mAssignByte my_var
+    assert_eq!(err.primary_span().line, 7, "Primary error span should be call site line 7");
+    assert!(!err.traceback.is_empty(), "Traceback should not be empty");
+    let frame = &err.traceback[0];
+    assert_eq!(frame.macro_name, "mAssignByte");
+    assert_eq!(frame.call_site.line, 7);
+    assert_eq!(frame.def_site.unwrap().line, 2); // mvi B, %1 in lib.e8085
+
+    // Verify LSP diagnostics
+    let uri = tower_lsp::lsp_types::Url::from_file_path(&main_path).unwrap();
+    let doc = Document::new(uri, 1, main_src.to_string());
+    let diagnostics = compute_diagnostics(&doc);
+    assert!(!diagnostics.is_empty());
+    assert_eq!(diagnostics[0].range.start.line, 6); // 0-based index for line 7
+    assert!(diagnostics[0].related_information.is_some());
+    let related = diagnostics[0].related_information.as_ref().unwrap();
+    assert!(!related.is_empty());
+    assert!(related[0].message.contains("mAssignByte"));
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_included_file_direct_error_file_attribution() {
+    let temp_dir = std::env::temp_dir().join("emu8085_test_inc_err");
+    let _ = std::fs::create_dir_all(&temp_dir);
+
+    let lib_path = temp_dir.join("broken_lib.e8085");
+    std::fs::write(
+        &lib_path,
+        r#"segment .data
+    var1 byte 10
+segment .text
+broken_func:
+    mvi B, var1
+    ret
+"#,
+    )
+    .unwrap();
+
+    let main_path = temp_dir.join("main.e8085");
+    let main_src = r#"%include "broken_lib.e8085"
+segment .text
+main:
+    call broken_func
+    hlt
+"#;
+    std::fs::write(&main_path, main_src).unwrap();
+
+    let err = emu8085::asm::assemble_with_full_context(
+        main_src,
+        Some(&main_path),
+        Some(&temp_dir),
+        Some(&temp_dir),
+        &std::collections::HashMap::new(),
+    )
+    .unwrap_err();
+
+    // The error is in broken_lib.e8085 at line 5 (mvi B, var1)
+    assert_eq!(err.span.line, 5);
+    assert!(
+        err.file_path
+            .as_ref()
+            .map(|p| p.ends_with("broken_lib.e8085"))
+            .unwrap_or(false),
+        "Error file path should point to broken_lib.e8085, got: {:?}",
+        err.file_path
+    );
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+

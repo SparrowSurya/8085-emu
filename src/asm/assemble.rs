@@ -15,7 +15,7 @@ use super::container::{
     FLAG_HAS_VEC_TABLE,
 };
 use super::encode::{AReg8, AReg16, Operand, encode};
-use super::error::{AsmError, AsmErrorKind, Span};
+use super::error::{AsmError, AsmErrorKind, MacroTraceFrame, Span};
 use super::lex;
 
 /// Load an assembled image into a machine: write the bytes at `0x0000`, point the PC at
@@ -277,16 +277,23 @@ pub fn assemble_with_full_context(
     let cur_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let b_dir = base_dir.unwrap_or(&cur_dir);
     let raw_program = super::parser::parse_with_base_dir(lex(src)?, Some(b_dir))?;
-    let mut program = super::include::resolve_includes_with_main_and_root(
+    let mut resolved = super::include::resolve_includes_full(
         main_file,
+        Some(src),
         b_dir,
         project_root,
         &raw_program,
     )?;
-    super::macro_expander::expand_macros(&mut program)?;
+    super::macro_expander::expand_macros(&mut resolved.program)?;
+
+    let file_table = resolved
+        .file_table
+        .into_iter()
+        .map(|(p, s)| (p, s.lines().map(|l| l.to_string()).collect::<Vec<_>>()))
+        .collect();
 
     let (image, _symbols, _listing) =
-        Assembler::new(&program, src, external_symbols.clone(), Vec::new()).run()?;
+        Assembler::new_with_files(&resolved.program, src, file_table, external_symbols.clone(), Vec::new()).run()?;
     Ok(image)
 }
 
@@ -310,16 +317,23 @@ pub fn assemble_and_link_with_file(
     let cur_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let b_dir = base_dir.unwrap_or(&cur_dir);
     let raw_program = super::parser::parse_with_base_dir(lex(src)?, Some(b_dir))?;
-    let mut program = super::include::resolve_includes_with_main_and_root(
+    let mut resolved = super::include::resolve_includes_full(
         main_file,
+        Some(src),
         b_dir,
         project_root,
         &raw_program,
     )?;
-    super::macro_expander::expand_macros(&mut program)?;
+    super::macro_expander::expand_macros(&mut resolved.program)?;
+
+    let file_table = resolved
+        .file_table
+        .into_iter()
+        .map(|(p, s)| (p, s.lines().map(|l| l.to_string()).collect::<Vec<_>>()))
+        .collect();
 
     let (image, _symbols, _listing) =
-        Assembler::new(&program, src, HashMap::new(), linked_containers.to_vec()).run()?;
+        Assembler::new_with_files(&resolved.program, src, file_table, HashMap::new(), linked_containers.to_vec()).run()?;
     Ok(image)
 }
 
@@ -364,11 +378,23 @@ pub fn assemble_full_with_file(
 pub fn assemble_with_symbols(src: &str) -> Result<(LoadImage, BTreeMap<String, u16>), AsmError> {
     let cur_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let raw_program = super::parser::parse_with_base_dir(lex(src)?, Some(&cur_dir))?;
-    let mut program = super::include::resolve_includes(&cur_dir, &raw_program)?;
-    super::macro_expander::expand_macros(&mut program)?;
+    let mut resolved = super::include::resolve_includes_full(
+        None,
+        Some(src),
+        &cur_dir,
+        None,
+        &raw_program,
+    )?;
+    super::macro_expander::expand_macros(&mut resolved.program)?;
+
+    let file_table = resolved
+        .file_table
+        .into_iter()
+        .map(|(p, s)| (p, s.lines().map(|l| l.to_string()).collect::<Vec<_>>()))
+        .collect();
 
     let (image, symbols, _listing) =
-        Assembler::new(&program, src, HashMap::new(), Vec::new()).run()?;
+        Assembler::new_with_files(&resolved.program, src, file_table, HashMap::new(), Vec::new()).run()?;
     Ok((image, symbols.into_iter().collect()))
 }
 
@@ -376,11 +402,23 @@ pub fn assemble_with_symbols(src: &str) -> Result<(LoadImage, BTreeMap<String, u
 pub fn assemble_listing(src: &str) -> Result<(LoadImage, Vec<ListingRow>), AsmError> {
     let cur_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let raw_program = super::parser::parse_with_base_dir(lex(src)?, Some(&cur_dir))?;
-    let mut program = super::include::resolve_includes(&cur_dir, &raw_program)?;
-    super::macro_expander::expand_macros(&mut program)?;
+    let mut resolved = super::include::resolve_includes_full(
+        None,
+        Some(src),
+        &cur_dir,
+        None,
+        &raw_program,
+    )?;
+    super::macro_expander::expand_macros(&mut resolved.program)?;
+
+    let file_table = resolved
+        .file_table
+        .into_iter()
+        .map(|(p, s)| (p, s.lines().map(|l| l.to_string()).collect::<Vec<_>>()))
+        .collect();
 
     let (image, _symbols, listing) =
-        Assembler::new(&program, src, HashMap::new(), Vec::new()).run()?;
+        Assembler::new_with_files(&resolved.program, src, file_table, HashMap::new(), Vec::new()).run()?;
     Ok((image, listing))
 }
 
@@ -426,9 +464,11 @@ struct Assembler<'a> {
     bss_vars: Vec<Var>,
     external_symbols: HashMap<String, u16>,
     linked_containers: Vec<BinaryContainer>,
+    macro_call_stack: Vec<(String, Vec<String>, Span)>,
 }
 
 impl<'a> Assembler<'a> {
+    #[allow(dead_code)]
     fn new(
         program: &'a Program,
         src: &str,
@@ -460,7 +500,33 @@ impl<'a> Assembler<'a> {
             bss_vars: Vec::new(),
             external_symbols,
             linked_containers,
+            macro_call_stack: Vec::new(),
         }
+    }
+
+    fn enrich_error(&self, mut e: AsmError) -> AsmError {
+        let (def_source, def_file) = self.src_line(e.span);
+        if e.file_path.is_none() {
+            e.file_path = def_file.clone();
+        }
+        if e.traceback.is_empty() && !self.macro_call_stack.is_empty() {
+            let mut frames = Vec::new();
+            for (macro_name, args, call_site) in &self.macro_call_stack {
+                let (call_source, call_file) = self.src_line(*call_site);
+                frames.push(MacroTraceFrame {
+                    macro_name: macro_name.clone(),
+                    args: args.clone(),
+                    call_site: *call_site,
+                    call_file,
+                    call_source: if call_source.is_empty() { None } else { Some(call_source) },
+                    def_site: Some(e.span),
+                    def_file: def_file.clone(),
+                    def_source: if def_source.is_empty() { None } else { Some(def_source.clone()) },
+                });
+            }
+            e.traceback = frames;
+        }
+        e
     }
 
     /// The trimmed source text of a 1-based line (empty if out of range) along with its file path.
@@ -483,8 +549,8 @@ impl<'a> Assembler<'a> {
     }
 
     fn run(mut self) -> Result<(LoadImage, HashMap<String, u16>, Vec<ListingRow>), AsmError> {
-        self.resolve_defines()?;
-        self.size_variables()?;
+        self.resolve_defines().map_err(|e| self.enrich_error(e))?;
+        self.size_variables().map_err(|e| self.enrich_error(e))?;
 
         let (
             linked_text_bytes,
@@ -527,34 +593,12 @@ impl<'a> Assembler<'a> {
             entry,
         ) = if !self.linked_containers.is_empty() {
             let main_text_base = linked_text_end;
-            let raw_entry = self.layout_text(
+            let (raw_entry, main_text_size) = self.layout_text(
                 main_text_base,
                 &mut symtab,
                 &mut sym_spans,
                 &mut export_names,
             )?;
-
-            let mut taddr = main_text_base;
-            let mut current_parent_label: Option<String> = None;
-            for seg in &self.program.segments {
-                if let Segment::Text(items) = seg {
-                    for item in items {
-                        match item {
-                            TextItem::Label(name, _) | TextItem::GlobalLabel(name, _) => {
-                                current_parent_label = Some(name.clone());
-                            }
-                            TextItem::Instr(ins) => {
-                                let zero_ops =
-                                    self.length_operands(ins, current_parent_label.as_deref())?;
-                                let len = encode(&ins.mnemonic, ins.span, &zero_ops)?.len() as u16;
-                                taddr = taddr.wrapping_add(len);
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
-            let main_text_size = taddr.saturating_sub(main_text_base);
             let total_text_size = linked_text_bytes.len() as u16 + main_text_size;
 
             let data_base = main_text_base.wrapping_add(main_text_size);
@@ -610,34 +654,12 @@ impl<'a> Assembler<'a> {
                 addr += v.size;
             }
 
-            let raw_entry = self.layout_text(
+            let (raw_entry, text_size) = self.layout_text(
                 text_base as u16,
                 &mut symtab,
                 &mut sym_spans,
                 &mut export_names,
             )?;
-
-            let mut taddr = text_base as u16;
-            let mut current_parent_label: Option<String> = None;
-            for seg in &self.program.segments {
-                if let Segment::Text(items) = seg {
-                    for item in items {
-                        match item {
-                            TextItem::Label(name, _) | TextItem::GlobalLabel(name, _) => {
-                                current_parent_label = Some(name.clone());
-                            }
-                            TextItem::Instr(ins) => {
-                                let zero_ops =
-                                    self.length_operands(ins, current_parent_label.as_deref())?;
-                                let len = encode(&ins.mnemonic, ins.span, &zero_ops)?.len() as u16;
-                                taddr = taddr.wrapping_add(len);
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
-            let text_size = taddr.saturating_sub(text_base as u16);
 
             let has_main = symtab.keys().any(|k| k.eq_ignore_ascii_case("main"));
             let entry = if has_main { raw_entry } else { 0 };
@@ -805,6 +827,7 @@ impl<'a> Assembler<'a> {
                         }
                         TextItem::MacroDef(_) => {}
                         TextItem::MacroCall(name, args, span) => {
+                            self.macro_call_stack.push((name.clone(), args.clone(), *span));
                             let (source, file_path) = self.src_line(*span);
                             let args_json = serde_json::to_string(args).unwrap_or_default();
                             listing.push(ListingRow {
@@ -817,6 +840,7 @@ impl<'a> Assembler<'a> {
                             });
                         }
                         TextItem::MacroEnd => {
+                            self.macro_call_stack.pop();
                             listing.push(ListingRow {
                                 addr: taddr,
                                 bytes: Vec::new(),
@@ -827,9 +851,11 @@ impl<'a> Assembler<'a> {
                             });
                         }
                         TextItem::Instr(ins) => {
-                            let ops =
-                                self.final_operands(ins, &symtab, current_parent_label.as_deref())?;
-                            let b = encode(&ins.mnemonic, ins.span, &ops)?;
+                            let ops = self
+                                .final_operands(ins, &symtab, current_parent_label.as_deref())
+                                .map_err(|e| self.enrich_error(e))?;
+                            let b = encode(&ins.mnemonic, ins.span, &ops)
+                                .map_err(|e| self.enrich_error(e))?;
                             let (source, file_path) = self.src_line(ins.span);
                             listing.push(ListingRow {
                                 addr: taddr,
@@ -848,6 +874,7 @@ impl<'a> Assembler<'a> {
                 }
             }
         }
+        self.macro_call_stack.clear();
 
         let _ = main_text_size;
 
@@ -1068,12 +1095,13 @@ impl<'a> Assembler<'a> {
     // ── .text layout & operand resolution ───────────────────────────────────
 
     fn layout_text(
-        &self,
+        &mut self,
         text_base: u16,
         symtab: &mut HashMap<String, u16>,
         sym_spans: &mut HashMap<String, Span>,
         export_syms: &mut Vec<String>,
-    ) -> Result<u16, AsmError> {
+    ) -> Result<(u16, u16), AsmError> {
+        self.macro_call_stack.clear();
         let mut count = 0usize;
         let mut addr = text_base;
         let mut current_parent_label: Option<String> = None;
@@ -1097,10 +1125,10 @@ impl<'a> Assembler<'a> {
                         }
                         TextItem::LocalLabel(name, span) => {
                             let parent = current_parent_label.as_ref().ok_or_else(|| {
-                                AsmError::new(
+                                self.enrich_error(AsmError::new(
                                     *span,
                                     AsmErrorKind::LocalLabelWithoutParent(name.clone()),
-                                )
+                                ))
                             })?;
                             let scoped_name = format!("{parent}.{name}");
                             insert_symbol(symtab, sym_spans, &scoped_name, addr, *span)?;
@@ -1111,12 +1139,21 @@ impl<'a> Assembler<'a> {
                             }
                         }
                         TextItem::ExternDecl(_name, _span) => {}
-                        TextItem::MacroDef(_) | TextItem::MacroCall(_, _, _) | TextItem::MacroEnd => {}
+                        TextItem::MacroCall(name, args, span) => {
+                            self.macro_call_stack.push((name.clone(), args.clone(), *span));
+                        }
+                        TextItem::MacroEnd => {
+                            self.macro_call_stack.pop();
+                        }
+                        TextItem::MacroDef(_) => {}
                         TextItem::Instr(ins) => {
                             // Length is value-independent, so encode with zero placeholders.
-                            let zero_ops =
-                                self.length_operands(ins, current_parent_label.as_deref())?;
-                            let len = encode(&ins.mnemonic, ins.span, &zero_ops)?.len() as u16;
+                            let zero_ops = self
+                                .length_operands(ins, current_parent_label.as_deref())
+                                .map_err(|e| self.enrich_error(e))?;
+                            let len = encode(&ins.mnemonic, ins.span, &zero_ops)
+                                .map_err(|e| self.enrich_error(e))?
+                                .len() as u16;
                             addr += len;
                             count += 1;
                         }
@@ -1124,6 +1161,8 @@ impl<'a> Assembler<'a> {
                 }
             }
         }
+
+        self.macro_call_stack.clear();
 
         for g in &self.program.globals {
             if !export_syms.contains(g) {
@@ -1141,7 +1180,8 @@ impl<'a> Assembler<'a> {
             return Err(AsmError::new(Span::default(), AsmErrorKind::EmptyText));
         }
         let entry = symtab.get("main").copied().unwrap_or(text_base);
-        Ok(entry)
+        let text_size = addr.saturating_sub(text_base);
+        Ok((entry, text_size))
     }
 
     /// Operands for the length pass: registers as-is, everything numeric as `Imm(0)`.

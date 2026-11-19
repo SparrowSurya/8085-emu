@@ -461,7 +461,45 @@ fn compile_file(input_path: &str, link: &[String], output_path: Option<&str>) {
     let image = match assemble_and_link_with_file(Some(main_file), &src, base_dir, Some(&project_root), &link_containers) {
         Ok(img) => img,
         Err(e) => {
-            eprintln!("{input_path}:{}: error: {}", e.span, e.kind);
+            if !e.traceback.is_empty() {
+                let primary_file = e
+                    .primary_file()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| input_path.to_string());
+                let primary_span = e.primary_span();
+                eprintln!("{primary_file}:{primary_span}: error: {}", e.kind);
+                eprintln!("  Traceback (macro expansion backtrace):");
+                for frame in &e.traceback {
+                    let def_file = frame
+                        .def_file
+                        .as_ref()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|| "macro definition".to_string());
+                    let def_site = frame.def_site.unwrap_or(e.span);
+                    let def_src = frame.def_source.as_deref().unwrap_or("");
+                    let call_file = frame
+                        .call_file
+                        .as_ref()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|| input_path.to_string());
+                    let args_str = frame.args.join(", ");
+                    eprintln!(
+                        "    --> {def_file}:{def_site}: in macro '{}' (`{def_src}`)",
+                        frame.macro_name
+                    );
+                    eprintln!(
+                        "    --> {call_file}:{}: invoked here: `{} {args_str}`",
+                        frame.call_site, frame.macro_name
+                    );
+                }
+            } else {
+                let file = e
+                    .file_path
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| input_path.to_string());
+                eprintln!("{file}:{}: error: {}", e.span, e.kind);
+            }
             std::process::exit(1);
         }
     };
@@ -590,7 +628,14 @@ fn check_file(input_path: &str, link: &[String]) {
         // Related information / notes
         if let Some(ref related) = diag.related_information {
             for rel in related {
-                eprintln!("   \x1b[1;36m= note:\x1b[0m {}", rel.message);
+                let loc_str = if let Ok(path) = rel.location.uri.to_file_path() {
+                    let r_line = rel.location.range.start.line + 1;
+                    let r_col = rel.location.range.start.character + 1;
+                    format!("{}:{}:{}", path.display(), r_line, r_col)
+                } else {
+                    rel.location.uri.to_string()
+                };
+                eprintln!("   \x1b[1;36m= note:\x1b[0m {} (at {loc_str})", rel.message);
             }
         }
         eprintln!();
