@@ -581,3 +581,99 @@ main:
     // Instruction after 10 calls should be HLT (0x76)
     assert_eq!(image.bytes[main_addr + 140], 0x76);
 }
+
+#[test]
+fn test_canvas_font_size_variations() {
+    let src = r#"
+%include <device/canvas>
+
+segment .data
+title byte "Font Variations Test\0"
+msg byte "HI\0"
+
+segment .text
+main:
+    InitCanvas 200, 150, title
+
+    ; 1. Render with DrawTextSM, DrawTextMD, DrawTextLG
+    DrawTextSM msg, 10, 10, COLOR_WHITE
+    DrawTextMD msg, 10, 30, COLOR_GREEN
+    DrawTextLG msg, 10, 60, COLOR_RED
+
+    ; 2. Render with 5-arg DrawText (explicit FONT_SM)
+    DrawText msg, 10, 100, FONT_SM, COLOR_BLUE
+
+    ; 3. Test TextWidth for FONT_SM, FONT_MD, FONT_LG right before hlt
+    TextWidth msg, FONT_SM
+    mov B, A
+
+    TextWidth msg, FONT_MD
+    mov C, A
+
+    TextWidth msg, FONT_LG
+    mov D, A
+
+    hlt
+"#;
+
+    let (mut machine, canvas) = setup_test_machine(src);
+    machine.attach_device(Box::new(canvas), &[0x10, 0x11, 0x12]);
+
+    machine.run();
+    assert!(machine.cpu.is_halt);
+
+    // Verify widths:
+    // "HI" is 2 characters:
+    // FONT_SM (sz = 0): 2 * 6 = 12 px
+    // FONT_MD (sz = 1): 2 * 8 = 16 px
+    // FONT_LG (sz = 2): 2 * 16 = 32 px
+    assert_eq!(machine.cpu.regs.b, 12, "Small font width should be 12px");
+    assert_eq!(machine.cpu.regs.c, 16, "Medium font width should be 16px");
+    assert_eq!(machine.cpu.regs.d, 32, "Large font width should be 32px");
+
+    let dev = machine.devices.find_device::<CanvasDevice>().unwrap();
+
+    // Verify DrawTextSM at (10, 10) rendered COLOR_WHITE within (10..22, 10..18)
+    let mut white_sm_count = 0;
+    for y in 10..18 {
+        for x in 10..22 {
+            if dev.get_pixel_value(x, y) == COLOR_WHITE {
+                white_sm_count += 1;
+            }
+        }
+    }
+    assert!(white_sm_count > 0, "DrawTextSM should render white pixels");
+
+    // Verify DrawTextMD at (10, 30) rendered COLOR_GREEN within (10..26, 30..38)
+    let mut green_md_count = 0;
+    for y in 30..38 {
+        for x in 10..26 {
+            if dev.get_pixel_value(x, y) == COLOR_GREEN {
+                green_md_count += 1;
+            }
+        }
+    }
+    assert!(green_md_count > 0, "DrawTextMD should render green pixels");
+
+    // Verify DrawTextLG at (10, 60) rendered COLOR_RED within (10..42, 60..76)
+    let mut red_lg_count = 0;
+    for y in 60..76 {
+        for x in 10..42 {
+            if dev.get_pixel_value(x, y) == COLOR_RED {
+                red_lg_count += 1;
+            }
+        }
+    }
+    assert!(red_lg_count > 0, "DrawTextLG should render red pixels");
+
+    // Verify 5-arg DrawText with FONT_SM at (10, 100) rendered COLOR_BLUE within (10..22, 100..108)
+    let mut blue_sm_count = 0;
+    for y in 100..108 {
+        for x in 10..22 {
+            if dev.get_pixel_value(x, y) == COLOR_BLUE {
+                blue_sm_count += 1;
+            }
+        }
+    }
+    assert!(blue_sm_count > 0, "DrawText with FONT_SM should render blue pixels");
+}

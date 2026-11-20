@@ -221,11 +221,31 @@ All coordinates are 8-bit (`0` to `255`). Colors are 16-bit RGBA4444 values load
   - Setup: `B = x`, `C = y`, `D = w`, `E = h`, `HL = mask`, color in static storage. Calls `canvas_draw_sprite`.
 
 ### 4.4 Text Rendering
+The Canvas device supports three built-in font size variations:
+
+| Font Constant | Value | Glyph / Cell Size | Character Step | 256x256 Capacity | Description |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `FONT_SM` | `0` | 5x7 glyph in 6x8 cell | 6 px | 42 chars / row, 32 rows | Compact font for dense HUDs, status bars, and menus |
+| `FONT_MD` | `1` | 8x8 glyph in 8x8 cell | 8 px | 32 chars / row, 32 rows | Standard font (**default**) |
+| `FONT_LG` | `2` | 16x16 rendered cell | 16 px | 16 chars / row, 16 rows | Large headings, titles, and score displays |
+
 - **`DrawText(str: addr, x: imm8, y: imm8, color: Color)`**:
-  - Renders solid text string at $(x, y)$ with scale 1.
-  - Setup: `HL = str`, `B = x`, `C = y`, `DE = color`. Calls `canvas_draw_text_1`.
+  - Renders solid text string at $(x, y)$ using the default medium font (`FONT_MD`).
+  - Setup: `HL = str`, `B = x`, `C = y`, `DE = color`. Calls `canvas_draw_text_md`.
+- **`DrawText(str: addr, x: imm8, y: imm8, size: imm8, color: Color)`**:
+  - Renders solid text string at $(x, y)$ using specified font size (`FONT_SM`, `FONT_MD`, or `FONT_LG`).
+  - Setup: `HL = str`, `B = x`, `C = y`, `A = size`, `DE = color`. Calls `canvas_draw_text`.
+- **`DrawTextSM(str: addr, x: imm8, y: imm8, color: Color)`**:
+  - Renders solid text string at $(x, y)$ using the compact small font (`FONT_SM`, 6x8 cell).
+  - Setup: `HL = str`, `B = x`, `C = y`, `DE = color`. Calls `canvas_draw_text_sm`.
+- **`DrawTextMD(str: addr, x: imm8, y: imm8, color: Color)`**:
+  - Renders solid text string at $(x, y)$ using medium font (`FONT_MD`, 8x8 cell).
+  - Setup: `HL = str`, `B = x`, `C = y`, `DE = color`. Calls `canvas_draw_text_md`.
+- **`DrawTextLG(str: addr, x: imm8, y: imm8, color: Color)`**:
+  - Renders solid text string at $(x, y)$ using large font (`FONT_LG`, 16x16 cell).
+  - Setup: `HL = str`, `B = x`, `C = y`, `DE = color`. Calls `canvas_draw_text_lg`.
 - **`TextWidth(str: addr, scale: imm8)`**:
-  - Computes rendered pixel width of string; returns width in register `A`.
+  - Computes rendered pixel width of string for the specified font size (`FONT_SM` = length * 6, `FONT_MD` = length * 8, `FONT_LG` = length * 16); returns width in register `A`.
   - Setup: `HL = str`, `A = scale`. Calls `canvas_text_width`.
 
 ### 4.5 Keyboard Input

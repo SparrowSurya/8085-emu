@@ -94,6 +94,10 @@ pub const CMD_FILL_TEXT: u8 = 0x20;
 pub const CMD_TEXT_WIDTH: u8 = 0x21;
 pub const CMD_STROKE_TEXT: u8 = 0x22;
 
+pub const FONT_SM: u8 = 0;
+pub const FONT_MD: u8 = 1;
+pub const FONT_LG: u8 = 2;
+
 pub const CMD_KEY_PRESS: u8 = 0x30;
 pub const CMD_KEY_DOWN: u8 = 0x31;
 pub const CMD_KEY_RELEASE: u8 = 0x32;
@@ -656,47 +660,84 @@ impl CanvasDevice {
     }
 
     pub fn render_text(&mut self, text: &[u8], x: u8, y: u8, size: u8, color: u16, stroke: bool, thickness: u8) {
-        let scale = size.max(1) as usize;
         let mut cur_x = x as usize;
         let cur_y = y as usize;
 
-        for &b in text {
-            if b < 32 || b > 126 {
-                cur_x += 8 * scale;
-                continue;
-            }
-            let glyph = &FONT_8X8[(b - 32) as usize];
-
-            for (row_idx, &row_byte) in glyph.iter().enumerate() {
-                for col_idx in 0..8 {
-                    let bit = (row_byte >> (7 - col_idx)) & 1;
-                    if bit == 1 {
-                        let px = cur_x + col_idx * scale;
-                        let py = cur_y + row_idx * scale;
-
-                        if !stroke {
-                            for dy in 0..scale {
-                                for dx in 0..scale {
-                                    let fx = px + dx;
-                                    let fy = py + dy;
-                                    if fx < 256 && fy < 256 {
-                                        self.set_pixel_value(fx as u8, fy as u8, color);
+        if size == FONT_SM {
+            for &b in text {
+                if b < 32 || b > 126 {
+                    cur_x += 6;
+                    continue;
+                }
+                let glyph = &FONT_5X7[(b - 32) as usize];
+                for col_idx in 0..5 {
+                    let col_byte = glyph[col_idx];
+                    for row_idx in 0..7 {
+                        let bit = (col_byte >> row_idx) & 1;
+                        if bit == 1 {
+                            let px = cur_x + col_idx;
+                            let py = cur_y + row_idx;
+                            if !stroke {
+                                if px < 256 && py < 256 {
+                                    self.set_pixel_value(px as u8, py as u8, color);
+                                }
+                            } else {
+                                let th = thickness.max(1) as usize;
+                                for sy in 0..th {
+                                    for sx in 0..th {
+                                        let ox = px + sx;
+                                        let oy = py + sy;
+                                        if ox < 256 && oy < 256 {
+                                            self.set_pixel_value(ox as u8, oy as u8, color);
+                                        }
                                     }
                                 }
                             }
-                        } else {
-                            let th = thickness.max(1) as usize;
-                            for dy in 0..scale {
-                                for dx in 0..scale {
-                                    let fx = px + dx;
-                                    let fy = py + dy;
-                                    // Stroke outline
-                                    for sy in 0..th {
-                                        for sx in 0..th {
-                                            let ox = fx + sx;
-                                            let oy = fy + sy;
-                                            if ox < 256 && oy < 256 {
-                                                self.set_pixel_value(ox as u8, oy as u8, color);
+                        }
+                    }
+                }
+                cur_x += 6;
+            }
+        } else {
+            let scale = size.max(1) as usize;
+            for &b in text {
+                if b < 32 || b > 126 {
+                    cur_x += 8 * scale;
+                    continue;
+                }
+                let glyph = &FONT_8X8[(b - 32) as usize];
+
+                for (row_idx, &row_byte) in glyph.iter().enumerate() {
+                    for col_idx in 0..8 {
+                        let bit = (row_byte >> (7 - col_idx)) & 1;
+                        if bit == 1 {
+                            let px = cur_x + col_idx * scale;
+                            let py = cur_y + row_idx * scale;
+
+                            if !stroke {
+                                for dy in 0..scale {
+                                    for dx in 0..scale {
+                                        let fx = px + dx;
+                                        let fy = py + dy;
+                                        if fx < 256 && fy < 256 {
+                                            self.set_pixel_value(fx as u8, fy as u8, color);
+                                        }
+                                    }
+                                }
+                            } else {
+                                let th = thickness.max(1) as usize;
+                                for dy in 0..scale {
+                                    for dx in 0..scale {
+                                        let fx = px + dx;
+                                        let fy = py + dy;
+                                        // Stroke outline
+                                        for sy in 0..th {
+                                            for sx in 0..th {
+                                                let ox = fx + sx;
+                                                let oy = fy + sy;
+                                                if ox < 256 && oy < 256 {
+                                                    self.set_pixel_value(ox as u8, oy as u8, color);
+                                                }
                                             }
                                         }
                                     }
@@ -705,9 +746,9 @@ impl CanvasDevice {
                         }
                     }
                 }
-            }
 
-            cur_x += 8 * scale;
+                cur_x += 8 * scale;
+            }
         }
     }
 
@@ -958,10 +999,16 @@ impl CanvasDevice {
             }
             CMD_TEXT_WIDTH => {
                 if self.param_bytes.len() >= 2 {
-                    let sz = self.param_bytes[0] as usize;
+                    let sz = self.param_bytes[0];
                     let len = self.param_bytes[1] as usize;
                     if self.param_bytes.len() >= 2 + len {
-                        let width = (len * 8 * sz.max(1)).min(255) as u8;
+                        let char_w = match sz {
+                            FONT_SM => 6,
+                            FONT_MD => 8,
+                            FONT_LG => 16,
+                            other => (other as usize) * 8,
+                        };
+                        let width = (len * char_w).min(255) as u8;
                         self.return_queue.push_back(width);
                         self.current_cmd = None;
                         self.param_bytes.clear();
@@ -1216,6 +1263,106 @@ static FONT_8X8: [[u8; 8]; 95] = [
     [0x18, 0x18, 0x18, 0x00, 0x18, 0x18, 0x18, 0x00], // '|'
     [0x70, 0x18, 0x18, 0x0E, 0x18, 0x18, 0x70, 0x00], // '}'
     [0x76, 0xDC, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00], // '~' (126)
+];
+
+// Embedded 5x7 ASCII Font Table (ASCII 32 ' ' to 126 '~')
+#[rustfmt::skip]
+static FONT_5X7: [[u8; 5]; 95] = [
+    [0x00, 0x00, 0x00, 0x00, 0x00], // 32: ' '
+    [0x00, 0x00, 0x5F, 0x00, 0x00], // 33: '!'
+    [0x00, 0x07, 0x00, 0x07, 0x00], // 34: '"'
+    [0x14, 0x7F, 0x14, 0x7F, 0x14], // 35: '#'
+    [0x24, 0x2A, 0x7F, 0x2A, 0x12], // 36: '$'
+    [0x23, 0x13, 0x08, 0x64, 0x62], // 37: '%'
+    [0x36, 0x49, 0x55, 0x22, 0x50], // 38: '&'
+    [0x00, 0x05, 0x03, 0x00, 0x00], // 39: "'"
+    [0x00, 0x1C, 0x22, 0x41, 0x00], // 40: '('
+    [0x00, 0x41, 0x22, 0x1C, 0x00], // 41: ')'
+    [0x14, 0x08, 0x3E, 0x08, 0x14], // 42: '*'
+    [0x08, 0x08, 0x3E, 0x08, 0x08], // 43: '+'
+    [0x00, 0x50, 0x30, 0x00, 0x00], // 44: ','
+    [0x08, 0x08, 0x08, 0x08, 0x08], // 45: '-'
+    [0x00, 0x60, 0x60, 0x00, 0x00], // 46: '.'
+    [0x20, 0x10, 0x08, 0x04, 0x02], // 47: '/'
+    [0x3E, 0x51, 0x49, 0x45, 0x3E], // 48: '0'
+    [0x00, 0x42, 0x7F, 0x40, 0x00], // 49: '1'
+    [0x42, 0x61, 0x51, 0x49, 0x46], // 50: '2'
+    [0x21, 0x41, 0x45, 0x4B, 0x31], // 51: '3'
+    [0x18, 0x14, 0x12, 0x7F, 0x10], // 52: '4'
+    [0x27, 0x45, 0x45, 0x45, 0x39], // 53: '5'
+    [0x3C, 0x4A, 0x49, 0x49, 0x30], // 54: '6'
+    [0x01, 0x71, 0x09, 0x05, 0x03], // 55: '7'
+    [0x36, 0x49, 0x49, 0x49, 0x36], // 56: '8'
+    [0x06, 0x49, 0x49, 0x29, 0x1E], // 57: '9'
+    [0x00, 0x36, 0x36, 0x00, 0x00], // 58: ':'
+    [0x00, 0x56, 0x36, 0x00, 0x00], // 59: ';'
+    [0x08, 0x14, 0x22, 0x41, 0x00], // 60: '<'
+    [0x14, 0x14, 0x14, 0x14, 0x14], // 61: '='
+    [0x00, 0x41, 0x22, 0x14, 0x08], // 62: '>'
+    [0x02, 0x01, 0x51, 0x09, 0x06], // 63: '?'
+    [0x32, 0x49, 0x79, 0x41, 0x3E], // 64: '@'
+    [0x7E, 0x11, 0x11, 0x11, 0x7E], // 65: 'A'
+    [0x7F, 0x49, 0x49, 0x49, 0x36], // 66: 'B'
+    [0x3E, 0x41, 0x41, 0x41, 0x22], // 67: 'C'
+    [0x7F, 0x41, 0x41, 0x22, 0x1C], // 68: 'D'
+    [0x7F, 0x49, 0x49, 0x49, 0x41], // 69: 'E'
+    [0x7F, 0x09, 0x09, 0x09, 0x01], // 70: 'F'
+    [0x3E, 0x41, 0x49, 0x49, 0x7A], // 71: 'G'
+    [0x7F, 0x08, 0x08, 0x08, 0x7F], // 72: 'H'
+    [0x00, 0x41, 0x7F, 0x41, 0x00], // 73: 'I'
+    [0x20, 0x40, 0x41, 0x3F, 0x01], // 74: 'J'
+    [0x7F, 0x08, 0x14, 0x22, 0x41], // 75: 'K'
+    [0x7F, 0x40, 0x40, 0x40, 0x40], // 76: 'L'
+    [0x7F, 0x02, 0x0C, 0x02, 0x7F], // 77: 'M'
+    [0x7F, 0x04, 0x08, 0x10, 0x7F], // 78: 'N'
+    [0x3E, 0x41, 0x41, 0x41, 0x3E], // 79: 'O'
+    [0x7F, 0x09, 0x09, 0x09, 0x06], // 80: 'P'
+    [0x3E, 0x41, 0x51, 0x21, 0x5E], // 81: 'Q'
+    [0x7F, 0x09, 0x19, 0x29, 0x46], // 82: 'R'
+    [0x46, 0x49, 0x49, 0x49, 0x31], // 83: 'S'
+    [0x01, 0x01, 0x7F, 0x01, 0x01], // 84: 'T'
+    [0x3F, 0x40, 0x40, 0x40, 0x3F], // 85: 'U'
+    [0x1F, 0x20, 0x40, 0x20, 0x1F], // 86: 'V'
+    [0x3F, 0x40, 0x38, 0x40, 0x3F], // 87: 'W'
+    [0x63, 0x14, 0x08, 0x14, 0x63], // 88: 'X'
+    [0x07, 0x08, 0x70, 0x08, 0x07], // 89: 'Y'
+    [0x61, 0x51, 0x49, 0x45, 0x43], // 90: 'Z'
+    [0x00, 0x7F, 0x41, 0x41, 0x00], // 91: '['
+    [0x02, 0x04, 0x08, 0x10, 0x20], // 92: '\\'
+    [0x00, 0x41, 0x41, 0x7F, 0x00], // 93: ']'
+    [0x04, 0x02, 0x01, 0x02, 0x04], // 94: '^'
+    [0x40, 0x40, 0x40, 0x40, 0x40], // 95: '_'
+    [0x00, 0x01, 0x02, 0x04, 0x00], // 96: '`'
+    [0x20, 0x54, 0x54, 0x54, 0x78], // 97: 'a'
+    [0x7F, 0x48, 0x44, 0x44, 0x38], // 98: 'b'
+    [0x38, 0x44, 0x44, 0x44, 0x20], // 99: 'c'
+    [0x38, 0x44, 0x44, 0x48, 0x7F], // 100: 'd'
+    [0x38, 0x54, 0x54, 0x54, 0x18], // 101: 'e'
+    [0x08, 0x7E, 0x09, 0x01, 0x02], // 102: 'f'
+    [0x0C, 0x52, 0x52, 0x52, 0x3E], // 103: 'g'
+    [0x7F, 0x08, 0x04, 0x04, 0x78], // 104: 'h'
+    [0x00, 0x44, 0x7D, 0x40, 0x00], // 105: 'i'
+    [0x20, 0x40, 0x44, 0x3D, 0x00], // 106: 'j'
+    [0x7F, 0x10, 0x28, 0x44, 0x00], // 107: 'k'
+    [0x00, 0x41, 0x7F, 0x40, 0x00], // 108: 'l'
+    [0x7C, 0x04, 0x18, 0x04, 0x78], // 109: 'm'
+    [0x7C, 0x08, 0x04, 0x04, 0x78], // 110: 'n'
+    [0x38, 0x44, 0x44, 0x44, 0x38], // 111: 'o'
+    [0x7C, 0x14, 0x14, 0x14, 0x08], // 112: 'p'
+    [0x08, 0x14, 0x14, 0x18, 0x7C], // 113: 'q'
+    [0x7C, 0x08, 0x04, 0x04, 0x08], // 114: 'r'
+    [0x48, 0x54, 0x54, 0x54, 0x20], // 115: 's'
+    [0x04, 0x3F, 0x44, 0x40, 0x20], // 116: 't'
+    [0x3C, 0x40, 0x40, 0x20, 0x7C], // 117: 'u'
+    [0x1C, 0x20, 0x40, 0x20, 0x1C], // 118: 'v'
+    [0x3C, 0x40, 0x30, 0x40, 0x3C], // 119: 'w'
+    [0x44, 0x28, 0x10, 0x28, 0x44], // 120: 'x'
+    [0x0C, 0x50, 0x50, 0x50, 0x3C], // 121: 'y'
+    [0x44, 0x64, 0x54, 0x4C, 0x44], // 122: 'z'
+    [0x00, 0x08, 0x36, 0x41, 0x00], // 123: '{'
+    [0x00, 0x00, 0x7F, 0x00, 0x00], // 124: '|'
+    [0x00, 0x41, 0x36, 0x08, 0x00], // 125: '}'
+    [0x10, 0x08, 0x08, 0x10, 0x08], // 126: '~'
 ];
 
 #[cfg(test)]

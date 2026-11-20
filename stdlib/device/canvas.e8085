@@ -52,6 +52,11 @@
 %define CMD_TEXT_WIDTH        0x21
 %define CMD_STROKE_TEXT       0x22
 
+; Font Sizes
+%define FONT_SM               0
+%define FONT_MD               1
+%define FONT_LG               2
+
 ; Keyboard Input
 %define CMD_KEY_PRESS         0x30
 %define CMD_KEY_DOWN          0x31
@@ -543,16 +548,65 @@
     call canvas_draw_vline
 %end
 
-; Renders solid text string at (x, y) with scale 1 and color
+; Renders solid text string at (x, y) with medium font (default) and color
 ; Signature: DrawText(str: addr, x: imm8, y: imm8, color: Color)
 ; Register Setup: HL = str, B = x, C = y, DE = color
-; Calls: canvas_draw_text_1
+; Calls: canvas_draw_text_md
 %macro DrawText 4
     lxi HL, %1
     mvi B, %2
     mvi C, %3
     lxi DE, %4
-    call canvas_draw_text_1
+    call canvas_draw_text_md
+%end
+
+; Renders solid text string at (x, y) with specified font size (FONT_SM, FONT_MD, FONT_LG) and color
+; Signature: DrawText(str: addr, x: imm8, y: imm8, size: imm8, color: Color)
+; Register Setup: HL = str, B = x, C = y, A = size, DE = color
+; Calls: canvas_draw_text
+%macro DrawText 5
+    lxi HL, %1
+    mvi B, %2
+    mvi C, %3
+    mvi A, %4
+    lxi DE, %5
+    call canvas_draw_text
+%end
+
+; Renders solid text string at (x, y) with small font (5x7 glyph in 6x8 cell)
+; Signature: DrawTextSM(str: addr, x: imm8, y: imm8, color: Color)
+; Register Setup: HL = str, B = x, C = y, DE = color
+; Calls: canvas_draw_text_sm
+%macro DrawTextSM 4
+    lxi HL, %1
+    mvi B, %2
+    mvi C, %3
+    lxi DE, %4
+    call canvas_draw_text_sm
+%end
+
+; Renders solid text string at (x, y) with medium font (8x8 glyph in 8x8 cell)
+; Signature: DrawTextMD(str: addr, x: imm8, y: imm8, color: Color)
+; Register Setup: HL = str, B = x, C = y, DE = color
+; Calls: canvas_draw_text_md
+%macro DrawTextMD 4
+    lxi HL, %1
+    mvi B, %2
+    mvi C, %3
+    lxi DE, %4
+    call canvas_draw_text_md
+%end
+
+; Renders solid text string at (x, y) with large font (16x16 rendered cell)
+; Signature: DrawTextLG(str: addr, x: imm8, y: imm8, color: Color)
+; Register Setup: HL = str, B = x, C = y, DE = color
+; Calls: canvas_draw_text_lg
+%macro DrawTextLG 4
+    lxi HL, %1
+    mvi B, %2
+    mvi C, %3
+    lxi DE, %4
+    call canvas_draw_text_lg
 %end
 
 ; Legacy 6-argument FillText macro
@@ -995,10 +1049,27 @@ global canvas_draw_vline:
     mov E, A
     jmp canvas_draw_line_1
 
-; Draws text with scale = 1
+; Draws text with small font (FONT_SM, 5x7 glyph in 6x8 cell)
 ; Inputs: HL = string pointer, B = x, C = y, D = color_hi, E = color_lo
 ; Alters: A, flags
 ; Preserves: B, C, D, E, H, L
+global canvas_draw_text_sm:
+    xra A
+    jmp canvas_draw_text
+
+; Draws text with large font (FONT_LG, 16x16 rendered cell)
+; Inputs: HL = string pointer, B = x, C = y, D = color_hi, E = color_lo
+; Alters: A, flags
+; Preserves: B, C, D, E, H, L
+global canvas_draw_text_lg:
+    mvi A, 2
+    jmp canvas_draw_text
+
+; Draws text with medium font (FONT_MD, 8x8 glyph in 8x8 cell, default)
+; Inputs: HL = string pointer, B = x, C = y, D = color_hi, E = color_lo
+; Alters: A, flags
+; Preserves: B, C, D, E, H, L
+global canvas_draw_text_md:
 global canvas_draw_text_1:
     mvi A, 1
 
